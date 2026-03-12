@@ -6,7 +6,7 @@
         <v-btn color="primary" @click="startScanning">开始扫描基质</v-btn>
         <v-spacer />
         <v-btn color="error" @click="clearLogs">清空日志</v-btn>
-        <v-btn :color="autoScroll ? 'success' : 'warning'" @click="toggleAutoScroll">
+        <v-btn v-if="false" :color="autoScroll ? 'success' : 'warning'" @click="toggleAutoScroll">
           {{ autoScroll ? '自动滚动：开' : '自动滚动：关' }}
         </v-btn>
         <v-tooltip location="bottom" text="日志文件中的日志更全">
