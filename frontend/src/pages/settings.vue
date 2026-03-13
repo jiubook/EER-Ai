@@ -525,8 +525,8 @@ async function postConfig() {
 async function fetchWeaponEssenceCounts() {
   try {
     const response = await fetch(`/api/weapon_essence_counts`)
-    const counts = await response.json()
-    weaponEssenceCounts.value = counts
+    const result = await response.json()
+    weaponEssenceCounts.value = result.counts
   } catch (error) {
     console.error('Failed to fetch weapon essence counts:', error)
   }

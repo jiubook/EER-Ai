@@ -22,6 +22,7 @@ from endfield_essence_recognizer.core.scanner.models import (
     EssenceQuality,
 )
 from endfield_essence_recognizer.core.window.adapter import InMemoryImageSource
+from endfield_essence_recognizer.game_data.models.v2 import WeaponId
 from endfield_essence_recognizer.schemas.user_setting import UserSetting
 from endfield_essence_recognizer.services.user_setting_manager import UserSettingManager
 from endfield_essence_recognizer.utils.log import logger
@@ -239,7 +240,9 @@ class ScannerEngine:
         self._window_actions = window_actions
         self._user_setting_manager: UserSettingManager = user_setting_manager
         self._profile: ResolutionProfile = profile
-        self._weapon_essence_counts: dict[str, int] = {}
+
+        # 以下两个字段是 ScannerEngine 维护的运行时状态
+        self._weapon_essence_counts: dict[WeaponId, int] = {}
         self._total_essence_count: int = 0
 
         from endfield_essence_recognizer.utils.log import str_properties_and_attrs
@@ -257,7 +260,7 @@ class ScannerEngine:
         self._execute_grid_scan(stop_event)
         logger.debug("ScannerEngine finished execution.")
 
-    def get_weapon_essence_counts(self) -> dict[str, int]:
+    def get_weapon_essence_counts(self) -> dict[WeaponId, int]:
         """
         Get the weapon essence counts from the last scan.
 
@@ -340,8 +343,11 @@ class ScannerEngine:
                 self._total_essence_count += 1
 
             # 为匹配的非垃圾武器的基质数量自增
-            if evaluation.matched_non_trash_weapons:
-                for weapon_id in evaluation.matched_non_trash_weapons:
+            if (
+                evaluation.matched_weapons
+                and not evaluation.matched_weapons_all_blocked
+            ):
+                for weapon_id in evaluation.matched_weapons:
                     self._weapon_essence_counts[weapon_id] = (
                         self._weapon_essence_counts.get(weapon_id, 0) + 1
                     )
@@ -378,7 +384,7 @@ class ScannerEngine:
         logger.info(f"共扫描了 {self._total_essence_count} 个基质。")
         if self._weapon_essence_counts:
             # 按 稀有度降序 武器ID 排序
-            def sort_key(item: tuple[str, int]) -> tuple[int, str]:
+            def sort_key(item: tuple[WeaponId, int]) -> tuple[int, WeaponId]:
                 weapon_id, _ = item
                 weapon = self.ctx.static_game_data.get_weapon(weapon_id)
                 # 负数使稀有度按降序排序
