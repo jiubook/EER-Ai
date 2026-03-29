@@ -19,9 +19,6 @@ export default defineConfig({
       },
     }),
   ],
-  optimizeDeps: {
-    exclude: ['vuetify', 'vue-router'],
-  },
   define: { 'process.env': {} },
   resolve: {
     alias: {
