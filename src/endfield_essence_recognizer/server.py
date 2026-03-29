@@ -95,6 +95,13 @@ app.mount(
     ),
     name="data",
 )
+app.mount(
+    "/api/assets",
+    StaticFiles(
+        directory=get_root_dir() / "resources" / "assets",
+    ),
+    name="assets",
+)
 
 
 def get_server() -> uvicorn.Server:
