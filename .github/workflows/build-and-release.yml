@@ -46,7 +46,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          uv run pyinstaller main.spec
+          uv run --no-dev --group build pyinstaller main.spec
 
       - name: Zip the built files
         shell: pwsh
