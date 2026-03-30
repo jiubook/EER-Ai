@@ -37,7 +37,7 @@ class EssenceStats(BaseModel):
 
 
 class UserSetting(BaseModel):
-    _VERSION: ClassVar[int] = 2
+    _VERSION: ClassVar[int] = 3
 
     version: int = _VERSION
 

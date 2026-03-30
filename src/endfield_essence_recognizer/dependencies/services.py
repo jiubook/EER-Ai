@@ -1,8 +1,8 @@
-import importlib.resources
 from functools import lru_cache
 
 from fastapi import Depends
 
+from endfield_essence_recognizer.core.path import get_root_dir
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
 from endfield_essence_recognizer.services.audio_service import (
     AudioService,
@@ -53,7 +53,7 @@ def get_static_game_data() -> StaticGameData:
     """
     Get the StaticGameData singleton.
     """
-    data_root = importlib.resources.files("endfield_essence_recognizer") / "data" / "v2"
+    data_root = get_root_dir() / "resources" / "data" / "v2"
     return StaticGameData(data_root)
 
 

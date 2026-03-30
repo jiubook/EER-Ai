@@ -1,5 +1,3 @@
-import importlib.resources
-
 import uvicorn
 from fastapi import (
     FastAPI,
@@ -11,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from endfield_essence_recognizer.api.router import api_router, ws_router
 from endfield_essence_recognizer.core.config import ServerConfig, get_server_config
+from endfield_essence_recognizer.core.path import get_root_dir
 from endfield_essence_recognizer.exceptions import (
     UnsupportedResolutionError,
     WindowNotActiveError,
@@ -92,9 +91,23 @@ app.include_router(ws_router)
 app.mount(
     "/api/data",
     StaticFiles(
-        directory=str(importlib.resources.files("endfield_essence_recognizer") / "data")
+        directory=get_root_dir() / "resources" / "data",
     ),
     name="data",
+)
+app.mount(
+    "/api/assets",
+    StaticFiles(
+        directory=get_root_dir() / "resources" / "assets",
+    ),
+    name="assets",
+)
+app.mount(
+    "/api/images",
+    StaticFiles(
+        directory=get_root_dir() / "resources" / "images",
+    ),
+    name="images",
 )
 
 

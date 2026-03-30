@@ -17,8 +17,8 @@
 - ②群：[1082880855](https://qm.qq.com/cgi-bin/qm/qr?k=qAmvmHCc3HuESiJhZVe6Ytgj7foOxXx9)
 - ③群：[1042417974](https://qm.qq.com/cgi-bin/qm/qr?k=-GykJWhnZEN5F2aZ1nrVd3xs9RGkMBI2)
 
-![终末地基质小助手展示](https://cos.yituliu.cn/endfield/endfield-essence-recognizer/assets/终末地基质小助手展示_0.webp)
-![终末地基质小助手展示](https://cos.yituliu.cn/endfield/endfield-essence-recognizer/assets/终末地基质小助手展示_1.webp)
+![终末地基质小助手展示](https://github.com/Logical-Byte/eer-resource/blob/main/images/终末地基质小助手展示_0.webp?raw=true)
+![终末地基质小助手展示](https://github.com/Logical-Byte/eer-resource/blob/main/images/终末地基质小助手展示_1.webp?raw=true)
 
 ## 使用前准备
 
@@ -44,24 +44,28 @@
 
 ### 1. 双击运行时遇到“Unhandled exception in script”弹窗报错
 
-![遇到报错解决方法](https://cos.yituliu.cn/endfield/endfield-essence-recognizer/assets/遇到报错解决方法.webp)
+![遇到报错解决方法](https://github.com/Logical-Byte/eer-resource/blob/main/images/遇到报错解决方法.webp?raw=true)
 
 这大概率是由于 Windows 自带的解压导致的。
 
 有两种解决办法：
 
 1. 改用 [7zip](https://www.7-zip.org/) 或者 [WinRAR](https://www.win-rar.com/) 解压即可解决（其他解压软件也可以试试）。
-2. 如果电脑上没安装其他解压软件，则请右键点击 zip 压缩包，点击"属性"，然后把"解除锁定"勾上，点击"确定"，再解压即可。
+2. 如果电脑上没安装其他解压软件，则请右键点击 zip 压缩包，点击“属性”，然后把“解除锁定”勾上，点击“确定”，再解压即可。
 
 ### 2. 界面窗口能打开，但是白屏
 
-白屏问题比较复杂，请参考以下临时解决方法。
+白屏问题比较复杂，请参考以下解决方法。
 
-**方法一：** 请参考 [https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851](https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851)
+**方法一：** 如果白屏界面右侧能看到一条矩形的滚动条，说明您未安装 WebView2 运行时，请前往 [https://developer.microsoft.com/zh-CN/microsoft-edge/webview2](https://developer.microsoft.com/zh-CN/microsoft-edge/webview2) 下载并安装 WebView2 运行时。
 
-**方法二：** 请保持工具打开状态，用浏览器访问 [http://127.0.0.1:325/](http://127.0.0.1:325/)
+选择“常青引导程序”或者“常青独立安装程序”均可。如果遇到网络问题无法下载，可以加群，在群文件里获取安装包。
 
-**方法三：** 如果以上方法仍然解决不了，那就先凑合用。界面看不见没关系的，只要终末地在前台，按 `]` 键是可以正常使用的。
+**方法二：** 请参考 [https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851](https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851)
+
+**方法三：** 请保持工具打开状态，用浏览器访问 [http://127.0.0.1:325/](http://127.0.0.1:325/)
+
+**方法四：** 如果以上方法仍然解决不了，那就先凑合用。界面看不见没关系的，只要终末地在前台，按 `]` 键是可以正常使用的。
 
 ### 3. 明明是 1920×1080 窗口，依然提示分辨率错误
 

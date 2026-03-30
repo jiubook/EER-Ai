@@ -1,7 +1,6 @@
-import importlib.resources
-
 import pytest
 
+from endfield_essence_recognizer.core.path import get_root_dir
 from endfield_essence_recognizer.game_data.models.v2 import (
     StatType,
 )
@@ -12,7 +11,7 @@ from endfield_essence_recognizer.services.static_data_service import StaticDataS
 @pytest.fixture
 def static_game_data():
     # We can use a real one or mock it. Using real one for integration-like unit test.
-    data_root = importlib.resources.files("endfield_essence_recognizer") / "data" / "v2"
+    data_root = get_root_dir() / "resources" / "data" / "v2"
     return StaticGameData(data_root)
 
 
@@ -30,7 +29,7 @@ def test_get_weapon_service(service):
     assert weapon_info is not None
     assert weapon_info.id == w_id
     assert weapon_info.name != ""
-    assert weapon_info.icon_url.startswith("http")
+    assert weapon_info.icon_url.startswith("/")
 
 
 def test_list_weapon_types_service(service):
@@ -39,7 +38,7 @@ def test_list_weapon_types_service(service):
     for wt in response.weapon_types:
         assert wt.id != ""
         assert wt.name != ""
-        assert wt.icon_url.startswith("http")
+        assert wt.icon_url.startswith("/")
         # Check if weapon IDs match
         for w_id in wt.weapon_ids:
             assert service.get_weapon(w_id) is not None

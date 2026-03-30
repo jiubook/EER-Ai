@@ -458,6 +458,10 @@ class DraggableScannerEngine(ScannerEngine):
         # 获取当前用户设置的快照
         user_setting = self._user_setting_manager.get_user_setting()
 
+        # 重置武器基质数量统计
+        self._weapon_essence_counts = {}
+        self._total_essence_count = 0
+
         # 检查是否启用自动翻页
         auto_page_flip = user_setting.auto_page_flip
         if not auto_page_flip:
@@ -544,6 +548,41 @@ class DraggableScannerEngine(ScannerEngine):
             logger.info(f"已达到最大页数限制 ({max_pages})，扫描停止。")
         logger.info("基质扫描完成。")
 
+        # 输出武器基质数量统计
+        logger.info(f"共扫描了 {self._total_essence_count} 个基质。")
+        if self._weapon_essence_counts:
+            # 按 稀有度降序 武器ID 排序
+            def sort_key(item: tuple[WeaponId, int]) -> tuple[int, WeaponId]:
+                weapon_id, _ = item
+                weapon = self.ctx.static_game_data.get_weapon(weapon_id)
+                # 负数使稀有度按降序排序
+                rarity = -weapon.rarity if weapon else 0
+                return (rarity, weapon_id)
+
+            sorted_counts = sorted(self._weapon_essence_counts.items(), key=sort_key)
+
+            logger.info("武器基质数量统计：")
+            for weapon_id, count in sorted_counts:
+                weapon = self.ctx.static_game_data.get_weapon(weapon_id)
+                if weapon:
+                    weapon_type = self.ctx.static_game_data.get_weapon_type(
+                        weapon.weapon_type
+                    )
+                    type_name = weapon_type.name if weapon_type else "未知类型"
+                    rarity_color = self.ctx.static_game_data.get_rarity_color(
+                        weapon.rarity
+                    )
+                    logger.opt(colors=True).info(
+                        f"  <fg {rarity_color}><bold>{weapon.name}（{weapon.rarity}★ {type_name}）</></>: {count} 个基质"
+                    )
+                else:
+                    logger.opt(colors=True).info(
+                        f"  <bold>{weapon_id}</>: {count} 个基质"
+                    )
+        elif self._total_essence_count > 0:
+            # 扫描了基质但没有匹配到任何武器
+            logger.info("没有匹配到任何非垃圾武器。")
+
     def _scan_current_page(
         self,
         stop_event: threading.Event,
@@ -593,6 +632,20 @@ class DraggableScannerEngine(ScannerEngine):
                 evaluation = evaluate_essence(
                     data, user_setting, self.ctx.static_game_data
                 )
+
+                # 统计基质总数（跳过 SKIP 的基质）
+                if evaluation.quality != EssenceQuality.SKIP:
+                    self._total_essence_count += 1
+
+                # 为匹配的非垃圾武器的基质数量自增
+                if (
+                    evaluation.matched_weapons
+                    and not evaluation.matched_weapons_all_blocked
+                ):
+                    for weapon_id in evaluation.matched_weapons:
+                        self._weapon_essence_counts[weapon_id] = (
+                            self._weapon_essence_counts.get(weapon_id, 0) + 1
+                        )
 
                 if (
                     evaluation.quality == EssenceQuality.TRASH

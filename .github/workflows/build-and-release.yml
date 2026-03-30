@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          submodules: true
 
       - name: Set up node
         uses: actions/setup-node@v4
@@ -44,11 +46,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          uv run pyinstaller main.spec
-
-      - name: Add alert file
-        run: |
-          New-Item -Path dist/endfield-essence-recognizer/ -Name "使用前请先解压全部文件！.txt" -ItemType "file"
+          uv run --no-dev --group build pyinstaller main.spec
 
       - name: Zip the built files
         shell: pwsh
