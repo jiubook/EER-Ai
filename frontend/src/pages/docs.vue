@@ -49,14 +49,10 @@
 
     <v-row class="my-4">
       <v-col cols="12" md="6">
-        <v-img
-          src="https://cos.yituliu.cn/endfield/endfield-essence-recognizer/assets/终末地基质小助手展示_0.webp"
-        />
+        <v-img :src="'/api/images/终末地基质小助手展示_0.webp'" />
       </v-col>
       <v-col cols="12" md="6">
-        <v-img
-          src="https://cos.yituliu.cn/endfield/endfield-essence-recognizer/assets/终末地基质小助手展示_1.webp"
-        />
+        <v-img :src="'/api/images/终末地基质小助手展示_1.webp'" />
       </v-col>
     </v-row>
 
@@ -128,10 +124,7 @@
 
     <h2>常见问题</h2>
     <h3>双击运行时遇到“Unhandled exception in script”弹窗报错</h3>
-    <v-img
-      alt="遇到报错解决方法"
-      src="https://cos.yituliu.cn/endfield/endfield-essence-recognizer/assets/遇到报错解决方法.webp"
-    />
+    <v-img alt="遇到报错解决方法" :src="'/api/images/遇到报错解决方法.webp'" />
     <p>这大概率是由于 Windows 自带的解压导致的。</p>
     <p>有两种解决办法：</p>
     <ol>
