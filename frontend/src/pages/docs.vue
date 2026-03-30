@@ -154,9 +154,22 @@
     </ol>
 
     <h3>界面窗口能打开，但是白屏</h3>
-    <p>白屏问题比较复杂，请参考以下临时解决方法。</p>
+    <p>白屏问题比较复杂，请参考以下解决方法。</p>
     <p>
-      <strong class="text-primary">方法一：</strong>请参考
+      <strong class="text-primary">方法一：</strong>
+      如果白屏界面右侧能看到一条矩形的滚动条，说明您未安装 WebView2 运行时，请前往
+      <a
+        class="text-primary text-decoration-none"
+        href="https://developer.microsoft.com/zh-CN/microsoft-edge/webview2"
+        rel="noopener noreferrer"
+        target="_blank"
+        >https://developer.microsoft.com/zh-CN/microsoft-edge/webview2</a
+      >
+      下载并安装 WebView2 运行时。<br />
+      选择“常青引导程序”或者“常青独立安装程序”均可。如果遇到网络问题无法下载，可以加群，在群文件里获取安装包。
+    </p>
+    <p>
+      <strong class="text-primary">方法二：</strong> 请参考
       <a
         class="text-primary text-decoration-none"
         href="https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851"
@@ -166,7 +179,7 @@
       >
     </p>
     <p>
-      <strong class="text-primary">方法二：</strong>请保持工具打开状态，用浏览器访问
+      <strong class="text-primary">方法三：</strong> 请保持工具打开状态，用浏览器访问
       <a
         class="text-primary text-decoration-none"
         href="http://127.0.0.1:325/"
@@ -176,8 +189,8 @@
       >
     </p>
     <p>
-      <strong class="text-primary">方法三：</strong
-      >如果以上方法仍然解决不了，那就先凑合用。界面看不见没关系的，只要终末地在前台，按
+      <strong class="text-primary">方法四：</strong>
+      如果以上方法仍然解决不了，那就先凑合用。界面看不见没关系的，只要终末地在前台，按
       <v-hotkey display-mode="text" inline keys="]" variant="flat" /> 键是可以正常使用的。
     </p>
 

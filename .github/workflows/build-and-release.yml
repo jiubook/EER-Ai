@@ -46,10 +46,6 @@ jobs:
         run: |
           uv run pyinstaller main.spec
 
-      - name: Add alert file
-        run: |
-          New-Item -Path dist/endfield-essence-recognizer/ -Name "使用前请先解压全部文件！.txt" -ItemType "file"
-
       - name: Zip the built files
         shell: pwsh
         run: |
