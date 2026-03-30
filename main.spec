@@ -68,7 +68,8 @@ paths = [
     (Path("README.md"), Path(DISTPATH) / NAME),
     (Path("resources/images/遇到报错解决方法.webp"), Path(DISTPATH) / NAME),
     (Path("resources/texts/界面白屏解决方法.md"), Path(DISTPATH) / NAME),
-    (Path("resources"), Path(DISTPATH) / NAME / "resources"),
+    (Path("resources/data"), Path(DISTPATH) / NAME / "resources/data"),
+    (Path("resources/assets"), Path(DISTPATH) / NAME / "resources/assets"),
 ]
 for src, dst in paths:
     if src.is_file():
