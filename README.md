@@ -17,8 +17,8 @@
 - ②群：[1082880855](https://qm.qq.com/cgi-bin/qm/qr?k=qAmvmHCc3HuESiJhZVe6Ytgj7foOxXx9)
 - ③群：[1042417974](https://qm.qq.com/cgi-bin/qm/qr?k=-GykJWhnZEN5F2aZ1nrVd3xs9RGkMBI2)
 
-![终末地基质小助手展示](./resources/images/终末地基质小助手展示_0.webp)
-![终末地基质小助手展示](./resources/images/终末地基质小助手展示_1.webp)
+![终末地基质小助手展示](https://github.com/Logical-Byte/eer-resource/blob/main/images/终末地基质小助手展示_0.webp?raw=true)
+![终末地基质小助手展示](https://github.com/Logical-Byte/eer-resource/blob/main/images/终末地基质小助手展示_1.webp?raw=true)
 
 ## 使用前准备
 
@@ -44,7 +44,7 @@
 
 ### 1. 双击运行时遇到“Unhandled exception in script”弹窗报错
 
-![遇到报错解决方法](./resources/images/遇到报错解决方法.webp)
+![遇到报错解决方法](https://github.com/Logical-Byte/eer-resource/blob/main/images/遇到报错解决方法.webp?raw=true)
 
 这大概率是由于 Windows 自带的解压导致的。
 
