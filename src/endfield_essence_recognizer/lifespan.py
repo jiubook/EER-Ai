@@ -1,4 +1,5 @@
 import importlib.resources
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -48,6 +49,20 @@ def init_mount_frontend_build(app: FastAPI, server_config: ServerConfig):
     """Mount the frontend build directory to serve static files."""
     if server_config.dev_mode:
         return
+
+    # 确保正确的 MIME 类型映射，避免 Windows 系统上的问题
+    mimetypes.add_type("application/javascript", ".js")
+    mimetypes.add_type("application/javascript", ".mjs")
+    mimetypes.add_type("text/css", ".css")
+    mimetypes.add_type("application/json", ".json")
+    mimetypes.add_type("application/json", ".map")
+    mimetypes.add_type("image/svg+xml", ".svg")
+    mimetypes.add_type("application/xml", ".xml")
+    mimetypes.add_type("application/wasm", ".wasm")
+    mimetypes.add_type("font/woff2", ".woff2")
+    mimetypes.add_type("font/woff", ".woff")
+    mimetypes.add_type("font/ttf", ".ttf")
+
     if not server_config.dist_dir:
         dist_dir = (
             Path(str(importlib.resources.files("endfield_essence_recognizer")))
