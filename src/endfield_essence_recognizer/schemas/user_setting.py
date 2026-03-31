@@ -62,6 +62,11 @@ class UserSetting(BaseModel):
     auto_page_flip: bool = True
     """扫描时是否自动翻页"""
 
+    update_mirror: str = "github"
+    """更新镜像源：github, ghproxy, fastgit"""
+    update_proxy: str = ""
+    """更新代理地址，如 http://127.0.0.1:7890"""
+
     def update_from_model(self, other: UserSetting) -> None:
         for field in self.__class__.model_fields:
             setattr(self, field, getattr(other, field))
