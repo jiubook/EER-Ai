@@ -50,7 +50,7 @@ def install_update(zip_path: Path) -> bool:
         script_content = f"""@echo off
 chcp 65001 >nul
 echo Waiting for program to close...
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
 :wait_loop
 tasklist /FI "IMAGENAME eq endfield-essence-recognizer.exe" 2>NUL | find /I /N "endfield-essence-recognizer.exe">NUL
@@ -60,32 +60,43 @@ if "%ERRORLEVEL%"=="0" (
     goto wait_loop
 )
 
+echo Waiting for file handles to release...
+timeout /t 2 /nobreak >nul
+
 echo Deleting old files...
-for /d %%d in ("{current_dir}\\*") do (
+for /d %%d in ("%~dp0*") do (
     if /i not "%%~nxd"=="_updates" if /i not "%%~nxd"=="_update_temp" if /i not "%%~nxd"=="data" (
         rmdir /S /Q "%%d" 2>nul
     )
 )
-for %%f in ("{current_dir}\\*") do (
+for %%f in ("%~dp0*") do (
     if /i not "%%~nxf"=="_updater.bat" if /i not "%%~nxf"=="{zip_filename}" if /i not "%%~nxf"=="config.json" (
         del /F /Q "%%f" 2>nul
     )
 )
 
 echo Copying new files...
-xcopy /E /Y /I "{source_dir}\\*" "{current_dir}\\"
+set retry=0
+:copy_retry
+xcopy /E /Y /I "%~dp0_update_temp\\*" "%~dp0" 2>nul
 if errorlevel 1 (
-    echo File copy failed
+    set /a retry+=1
+    if !retry! lss 5 (
+        echo Copy failed, retrying... (attempt !retry!/5^)
+        timeout /t 2 /nobreak >nul
+        goto copy_retry
+    )
+    echo File copy failed after 5 attempts
     pause
     exit /b 1
 )
 
 echo Cleaning up...
-rmdir /S /Q "{temp_dir}"
-del "{zip_path}"
+rmdir /S /Q "%~dp0_update_temp"
+del "%~dp0_updates\\{zip_filename}"
 
 echo Starting new version...
-start "" "{current_dir}\\endfield-essence-recognizer.exe"
+start "" "%~dp0endfield-essence-recognizer.exe"
 
 timeout /t 1 /nobreak >nul
 del "%~f0"
@@ -95,7 +106,7 @@ del "%~f0"
         logger.info("启动更新脚本并退出程序")
         subprocess.Popen(
             ["cmd.exe", "/c", str(updater_script)],
-            creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
         )
 
         # 延迟退出，确保响应返回给前端
