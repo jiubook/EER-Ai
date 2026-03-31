@@ -59,7 +59,11 @@ timeout /t 2 /nobreak >nul
 echo Deleting old program files...
 if exist "%~dp0endfield-essence-recognizer.exe" del /F /Q "%~dp0endfield-essence-recognizer.exe" 2>nul
 if exist "%~dp0_internal" rmdir /S /Q "%~dp0_internal" 2>nul
-if exist "%~dp0frontend" rmdir /S /Q "%~dp0frontend" 2>nul
+if exist "%~dp0logs" rmdir /S /Q "%~dp0logs" 2>nul
+if exist "%~dp0resources" rmdir /S /Q "%~dp0resources" 2>nul
+if exist "%~dp0README.md" del /F /Q "%~dp0README.md" 2>nul
+if exist "%~dp0界面白屏解决方法.md" del /F /Q "%~dp0界面白屏解决方法.md" 2>nul
+if exist "%~dp0遇到报错解决方法.webp" del /F /Q "%~dp0遇到报错解决方法.webp" 2>nul
 
 echo Copying new files...
 set retry=0
@@ -79,7 +83,7 @@ if errorlevel 1 (
 
 echo Cleaning up...
 rmdir /S /Q "%~dp0_update_temp"
-del "%~dp0_updates\\{zip_filename}"
+rmdir /S /Q "%~dp0_updates"
 
 echo Starting new version...
 start "" "%~dp0endfield-essence-recognizer.exe"

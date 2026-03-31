@@ -16,10 +16,12 @@
 - 点击"一键更新"按钮直接完成下载和安装
 - 实时显示下载进度、速度、文件大小
 - 支持取消下载
+- 失败时显示错误信息和重试按钮，无需重新检查更新
 
 ### 多镜像源
 - GitHub 官方
-- ghproxy 镜像
+- ghproxy 镜像（多个节点）
+- gitmirror、gh.con.sh、githubproxy.cc 等镜像
 - fastgit 镜像
 - 下载过程中可动态切换
 
@@ -47,7 +49,7 @@
 - 修改 `frontend/src/pages/settings.vue` - 更新设置
 
 ### 配置
-- `pyproject.toml` - 添加 `packaging` 依赖
+- `pyproject.toml` - 添加 `packaging`、`aiofiles` 依赖
 - `src/endfield_essence_recognizer/schemas/user_setting.py` - 新增 `update_mirror` 和 `update_proxy` 字段
 - `src/endfield_essence_recognizer/api/router.py` - 注册更新路由
 
@@ -119,9 +121,27 @@
 5. 解压到临时目录 `_update_temp`
 6. 创建批处理脚本 `_updater.bat`
 7. 启动脚本并退出当前程序
-8. 脚本等待 2 秒后替换文件
-9. 自动启动新版本程序
-10. 清理临时文件
+8. 脚本等待进程完全退出和文件句柄释放
+9. 删除旧版本程序文件
+10. 复制新文件（失败时自动重试最多5次）
+11. 自动启动新版本程序
+12. 清理临时文件和更新包
+
+## 安全特性
+
+更新脚本会删除以下旧版本文件：
+- `endfield-essence-recognizer.exe`
+- `_internal/`
+- `logs/`
+- `resources/`
+- `README.md`
+- `界面白屏解决方法.md`
+- `遇到报错解决方法.webp`
+
+以下文件会被保留：
+- `config.json` - 用户配置
+
+如需修改删除列表，编辑 `src/endfield_essence_recognizer/updater/installer.py` 中的批处理脚本。
 
 ## 注意事项
 
