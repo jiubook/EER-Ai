@@ -1,5 +1,7 @@
 """更新相关 API 路由"""
 
+import re
+
 from fastapi import APIRouter, Depends
 
 from endfield_essence_recognizer.api.websockets.update_progress import update_progress
@@ -22,9 +24,7 @@ update_manager = UpdateManager()
 async def get_mirrors():
     """获取可用的镜像源列表"""
     return {
-        "mirrors": [
-            {"title": name, "value": key} for key, name in MIRROR_NAMES.items()
-        ]
+        "mirrors": [{"title": name, "value": key} for key, name in MIRROR_NAMES.items()]
     }
 
 
@@ -52,24 +52,25 @@ async def install_update_route(
         mirror = settings.update_mirror
 
         # 转换下载 URL 为镜像源 URL
+        download_url = None
         if mirror and mirror != "github" and update_manager.update_info:
             from endfield_essence_recognizer.updater.mirrors import get_mirror_url
 
             original_url = update_manager.update_info["download_url"]
             # 解析 GitHub URL: https://github.com/owner/repo/releases/download/tag/file
-            parts = original_url.split("/")
-            if len(parts) >= 9 and "github.com" in original_url:
-                repo = f"{parts[3]}/{parts[4]}"
-                tag = parts[7]
-                filename = parts[8]
-                update_manager.update_info["download_url"] = get_mirror_url(
-                    mirror, repo, tag, filename
-                )
+            match = re.match(
+                r"https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/(.+)",
+                original_url,
+            )
+            if match:
+                owner, repo, tag, filename = match.groups()
+                download_url = get_mirror_url(mirror, f"{owner}/{repo}", tag, filename)
                 logger.info(f"使用镜像源: {mirror}")
 
         success = await update_manager.download_and_install(
             progress_callback=update_progress,
             proxy=proxy,
+            download_url=download_url,
         )
         return {"success": success}
     except Exception as e:

@@ -38,6 +38,10 @@
     <v-card>
       <v-card-title>更新下载</v-card-title>
       <v-card-text>
+        <v-alert v-if="downloadFailed" class="mb-4" color="error" variant="tonal">
+          <strong>下载失败：</strong>{{ downloadErrorMessage }}
+        </v-alert>
+
         <div class="mb-4">
           <div class="d-flex justify-space-between mb-2">
             <span>{{ currentVersion }} → {{ updateInfo?.latestVersion }}</span>
@@ -111,15 +115,17 @@
 
       <v-card-actions>
         <v-spacer />
-        <v-btn @click="cancelDownload">取消</v-btn>
+        <v-btn v-if="downloadFailed" color="primary" @click="installUpdate">重试</v-btn>
+        <v-btn @click="cancelDownload">{{ downloadFailed ? '关闭' : '取消' }}</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useUpdateChecker } from '@/composables/useUpdateChecker'
+import { useUpdateMirrors } from '@/composables/useUpdateMirrors'
 
 const {
   hasNewVersionDialog,
@@ -138,26 +144,17 @@ const {
   proxyEnabled,
   proxyPort,
   showProxyInput,
+  downloadFailed,
+  downloadErrorMessage,
   installUpdate,
   cancelDownload,
 } = useUpdateChecker()
 
-const mirrorOptions = ref<Array<{ title: string; value: string }>>([])
+const { mirrorOptions } = useUpdateMirrors()
 
 const selectedMirrorName = computed(() => {
   const mirror = mirrorOptions.value.find((m) => m.value === selectedMirror.value)
   return mirror ? mirror.title : 'GitHub 官方'
-})
-
-onMounted(async () => {
-  try {
-    const response = await fetch('/api/update/mirrors')
-    const data = await response.json()
-    mirrorOptions.value = data.mirrors
-  } catch (error) {
-    console.error('获取镜像源列表失败：', error)
-    mirrorOptions.value = [{ title: 'GitHub 官方', value: 'github' }]
-  }
 })
 
 function formatSize(bytes: number): string {

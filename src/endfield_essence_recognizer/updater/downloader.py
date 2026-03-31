@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+import aiofiles
 import httpx
 
 from endfield_essence_recognizer.utils.log import logger
@@ -43,13 +44,13 @@ async def download_update(
                 downloaded = 0
                 start_time = time.time()
 
-                with open(save_path, "wb") as f:  # noqa: ASYNC230
+                async with aiofiles.open(save_path, "wb") as f:
                     async for chunk in response.aiter_bytes(chunk_size=8192):
                         if cancel_event and cancel_event.is_set():
                             logger.info("下载已取消")
                             break
 
-                        f.write(chunk)
+                        await f.write(chunk)
                         downloaded += len(chunk)
                         elapsed = time.time() - start_time
                         speed = downloaded / elapsed if elapsed > 0 else 0
@@ -59,8 +60,8 @@ async def download_update(
 
         # 检查是否被取消
         if cancel_event and cancel_event.is_set():
-            if save_path.exists():  # noqa: ASYNC240
-                save_path.unlink()  # noqa: ASYNC240
+            if await asyncio.to_thread(save_path.exists):
+                await asyncio.to_thread(save_path.unlink)
             return False
 
         logger.info(f"更新下载完成: {save_path}")
@@ -68,6 +69,6 @@ async def download_update(
 
     except Exception as e:
         logger.error(f"下载更新失败: {e}")
-        if save_path.exists():  # noqa: ASYNC240
-            save_path.unlink()  # noqa: ASYNC240
+        if await asyncio.to_thread(save_path.exists):
+            await asyncio.to_thread(save_path.unlink)
         return False

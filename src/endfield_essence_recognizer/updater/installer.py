@@ -39,13 +39,6 @@ def install_update(zip_path: Path) -> bool:
         # 创建更新脚本
         updater_script = current_dir / "_updater.bat"
 
-        # 查找解压后的实际目录（可能在子目录中）
-        extracted_dirs = list(temp_dir.iterdir())
-        if len(extracted_dirs) == 1 and extracted_dirs[0].is_dir():
-            source_dir = extracted_dirs[0]
-        else:
-            source_dir = temp_dir
-
         zip_filename = zip_path.name
         script_content = f"""@echo off
 chcp 65001 >nul
@@ -63,17 +56,10 @@ if "%ERRORLEVEL%"=="0" (
 echo Waiting for file handles to release...
 timeout /t 2 /nobreak >nul
 
-echo Deleting old files...
-for /d %%d in ("%~dp0*") do (
-    if /i not "%%~nxd"=="_updates" if /i not "%%~nxd"=="_update_temp" if /i not "%%~nxd"=="data" (
-        rmdir /S /Q "%%d" 2>nul
-    )
-)
-for %%f in ("%~dp0*") do (
-    if /i not "%%~nxf"=="_updater.bat" if /i not "%%~nxf"=="{zip_filename}" if /i not "%%~nxf"=="config.json" (
-        del /F /Q "%%f" 2>nul
-    )
-)
+echo Deleting old program files...
+if exist "%~dp0endfield-essence-recognizer.exe" del /F /Q "%~dp0endfield-essence-recognizer.exe" 2>nul
+if exist "%~dp0_internal" rmdir /S /Q "%~dp0_internal" 2>nul
+if exist "%~dp0frontend" rmdir /S /Q "%~dp0frontend" 2>nul
 
 echo Copying new files...
 set retry=0
@@ -113,11 +99,10 @@ del "%~f0"
         import threading
 
         def delayed_exit():
+            import os
             import time
 
             time.sleep(1)
-            import os
-
             os._exit(0)
 
         threading.Thread(target=delayed_exit, daemon=True).start()

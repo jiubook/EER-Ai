@@ -410,12 +410,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { setScanningStatusPolling, useScanningStatus } from '@/composables/useScanningStatus'
+import { useUpdateMirrors } from '@/composables/useUpdateMirrors'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
 
 const theme = useTheme()
 const { weaponTypes, weaponsMap, rarityColors, essencesMap } = useStaticData()
 const { isScanning, pollingEnabled } = useScanningStatus()
+const { mirrorOptions } = useUpdateMirrors()
 const statusPollingEnabled = ref(pollingEnabled)
 
 const allAttributeStats = computed(() =>
@@ -453,7 +455,6 @@ const highLevelTreasureSkillThreshold = ref(3)
 const updateMirror = ref('github')
 const updateProxyEnabled = ref(false)
 const updateProxyPort = ref('7890')
-const mirrorOptions = ref<Array<{ title: string; value: string }>>([])
 const weaponEssenceCounts = ref<Record<string, number>>({})
 
 const notSelectedWeaponIds = computed(() => {
@@ -659,16 +660,6 @@ async function startPolling() {
 onMounted(async () => {
   await getConfig()
   await startPolling()
-
-  // 获取镜像源列表
-  try {
-    const response = await fetch('/api/update/mirrors')
-    const data = await response.json()
-    mirrorOptions.value = data.mirrors
-  } catch (error) {
-    console.error('获取镜像源列表失败：', error)
-    mirrorOptions.value = [{ title: 'GitHub 官方', value: 'github' }]
-  }
 
   watch(config, postConfig, { deep: true })
 })

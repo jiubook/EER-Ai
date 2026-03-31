@@ -29,6 +29,7 @@ class UpdateManager:
         self,
         progress_callback: Callable[[int, int, float], None] | None = None,
         proxy: str | None = None,
+        download_url: str | None = None,
     ) -> bool:
         """下载并安装更新"""
         async with self.download_lock:
@@ -36,14 +37,17 @@ class UpdateManager:
                 logger.warning("没有可用的更新信息")
                 return False
 
-            download_path = self.download_dir / f"update_{self.update_info['version']}.zip"
+            download_path = (
+                self.download_dir / f"update_{self.update_info['version']}.zip"
+            )
 
             self.is_downloading = True
             self.cancel_event.clear()
 
             # 下载更新
+            url = download_url or self.update_info["download_url"]
             success = await download_update(
-                self.update_info["download_url"],
+                url,
                 download_path,
                 progress_callback,
                 self.cancel_event,
@@ -63,4 +67,3 @@ class UpdateManager:
         if self.is_downloading:
             self.cancel_event.set()
             logger.info("已发送取消下载信号")
-

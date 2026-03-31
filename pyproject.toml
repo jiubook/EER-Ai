@@ -5,6 +5,7 @@ description = "不知道哪些基质该留哪些该扔？逝逝这个妙妙小�
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiofiles>=24.1.0",
     "fastapi>=0.127.0",
     "httpx>=0.28.1",
     "keyboard>=0.13.5",

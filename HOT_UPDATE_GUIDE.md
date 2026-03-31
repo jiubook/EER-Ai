@@ -137,7 +137,6 @@
 
 ```python
 UPDATE_CHECK_URL = "https://api.github.com/repos/Logical-Byte/endfield-essence-recognizer/releases/latest"
-CURRENT_VERSION = "0.8.0"  # 每次发布新版本时更新
 ```
 
 ### 用户配置

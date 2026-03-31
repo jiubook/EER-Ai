@@ -13,7 +13,6 @@ const isUpdating = ref<boolean>(false)
 const currentVersion = ref<string | null>(null)
 const updateInfo = ref<UpdateInfo | null>(null)
 const updateErrorMessage = ref<string>('')
-const updateProgressMessage = ref<string>('')
 
 // 新增状态
 const downloadProgress = ref<number>(0)
@@ -24,15 +23,18 @@ const selectedMirror = ref<string>('github')
 const proxyEnabled = ref<boolean>(false)
 const proxyPort = ref<string>('7890')
 const showProxyInput = ref<boolean>(false)
+const downloadFailed = ref<boolean>(false)
+const downloadErrorMessage = ref<string>('')
 
 let progressWs: WebSocket | null = null
 
 export function useUpdateChecker() {
   let restartTimer: ReturnType<typeof setTimeout> | null = null
+  let isRestarting = false
 
   // 监听镜像源和代理变化，使用防抖避免多次触发
   watch([selectedMirror, proxyEnabled, proxyPort], async () => {
-    if (!isUpdating.value || !updateProgressDialog.value) return
+    if (!isUpdating.value || !updateProgressDialog.value || isRestarting) return
 
     // 清除之前的定时器
     if (restartTimer) {
@@ -41,9 +43,11 @@ export function useUpdateChecker() {
 
     // 500ms 防抖
     restartTimer = setTimeout(async () => {
+      isRestarting = true
       await cancelDownload()
       await new Promise((resolve) => setTimeout(resolve, 1500))
       await installUpdate()
+      isRestarting = false
       restartTimer = null
     }, 500)
   })
@@ -132,6 +136,8 @@ export function useUpdateChecker() {
   async function installUpdate() {
     try {
       isUpdating.value = true
+      downloadFailed.value = false
+      downloadErrorMessage.value = ''
       hasNewVersionDialog.value = false
       updateProgressDialog.value = true
 
@@ -151,19 +157,15 @@ export function useUpdateChecker() {
       const response = await fetch('/api/update/install', { method: 'POST' })
       const result = await response.json()
 
-      if (result.success) {
-        updateProgressMessage.value = '更新下载完成，程序即将重启...'
-      } else {
+      if (!result.success) {
         disconnectProgressWebSocket()
-        updateProgressDialog.value = false
-        updateErrorMessage.value = result.error || '更新失败'
-        checkUpdateFailedDialog.value = true
+        downloadFailed.value = true
+        downloadErrorMessage.value = result.error || '更新失败'
       }
     } catch (error) {
       disconnectProgressWebSocket()
-      updateProgressDialog.value = false
-      updateErrorMessage.value = error instanceof Error ? error.message : '更新失败'
-      checkUpdateFailedDialog.value = true
+      downloadFailed.value = true
+      downloadErrorMessage.value = error instanceof Error ? error.message : '更新失败'
     } finally {
       isUpdating.value = false
     }
@@ -179,7 +181,6 @@ export function useUpdateChecker() {
     currentVersion,
     updateInfo,
     updateErrorMessage,
-    updateProgressMessage,
     downloadProgress,
     downloadSpeed,
     downloadedSize,
@@ -188,6 +189,8 @@ export function useUpdateChecker() {
     proxyEnabled,
     proxyPort,
     showProxyInput,
+    downloadFailed,
+    downloadErrorMessage,
     // 方法
     checkForUpdates,
     installUpdate,
