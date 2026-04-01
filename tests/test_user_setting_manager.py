@@ -265,3 +265,43 @@ def test_user_setting_schema_stability():
         f"3. 添加对应的迁移测试\n"
         f"4. 更新此测试的 expected_fields"
     )
+
+
+def test_config_migration_chain_v2_to_v4():
+    """测试跨版本链式迁移：v2 → v3 → v4（早期 v2，缺少后期新增字段）"""
+    early_v2_config = {
+        "version": 2,
+        "trash_weapon_ids": ["weapon_v2"],
+        "treasure_essence_stats": [],
+        "treasure_action": "lock",
+        "trash_action": "unlock",
+        "high_level_treasure_enabled": False,
+        "high_level_treasure_attribute_threshold": 3,
+        "high_level_treasure_secondary_threshold": 3,
+        "high_level_treasure_skill_threshold": 3,
+        # 早期 v2 没有 non_five_star_behavior 和 auto_page_flip
+    }
+
+    migrated = UserSetting.migrate_from_old_version(early_v2_config)
+
+    assert migrated.version == 4
+    assert migrated.trash_weapon_ids == ["weapon_v2"]
+    # v2→v3 补充的字段
+    assert migrated.non_five_star_behavior == "process"
+    assert migrated.auto_page_flip is True
+    # v3→v4 补充的字段
+    assert migrated.update_mirror == "github"
+    assert migrated.update_proxy == ""
+
+
+def test_migrations_completeness():
+    """测试 _MIGRATIONS 字典完整性，确保所有中间版本都有迁移函数"""
+    current_version = UserSetting._VERSION
+    migrations = UserSetting._MIGRATIONS
+
+    # 检查从版本 2 到当前版本的所有迁移路径
+    for v in range(2, current_version):
+        assert v in migrations, (
+            f"缺少迁移函数：v{v} → v{v + 1}\n"
+            f"请在 UserSetting 中添加 _migrate_v{v}_to_v{v + 1} 方法"
+        )

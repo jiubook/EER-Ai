@@ -74,6 +74,21 @@ class UserSettingManager:
         self._user_setting_file = user_setting_file
         self._user_setting = UserSetting()  # In-memory UserSetting instance
 
+    def _cleanup_old_backups(self, config_path: Path, keep: int = 3) -> None:
+        """清理旧备份文件，保留最近 N 个"""
+        pattern = f"{config_path.stem}.backup.*.json"
+        backups = sorted(
+            config_path.parent.glob(pattern),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old_backup in backups[keep:]:
+            try:
+                old_backup.unlink()
+                logger.debug("已删除旧备份：{}", old_backup)
+            except Exception as e:
+                logger.warning("删除旧备份失败 {}: {}", old_backup, e)
+
     def get_user_setting(self) -> UserSetting:
         """
         Get a copy of the current UserSetting.
@@ -97,7 +112,7 @@ class UserSettingManager:
         If a fresh default setting is used, it will be saved to disk.
         """
         target_path = path or self._user_setting_file
-        logger.info("正在尝试加载配置文件：", target_path.resolve())
+        logger.info("正在尝试加载配置文件：{}", target_path.resolve())
         result = _load_user_setting_from_file(UserSetting, target_path)
         if result is not None:
             self._user_setting = result
@@ -119,6 +134,8 @@ class UserSettingManager:
                 "将使用默认配置。如需恢复旧配置，请检查备份文件。",
                 backup_path.resolve(),
             )
+            # 清理旧备份，保留最近 3 个
+            self._cleanup_old_backups(target_path, keep=3)
         else:
             logger.info("未找到配置文件，使用默认配置。")
         # Use default settings

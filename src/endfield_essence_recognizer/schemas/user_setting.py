@@ -68,6 +68,12 @@ class UserSetting(BaseModel):
     """更新代理地址，如 http://127.0.0.1:7890"""
 
     @staticmethod
+    def _migrate_v2_to_v3(data: dict) -> None:
+        """v2 → v3: 补充 v2 期间新增但未更新版本号的字段"""
+        data.setdefault("non_five_star_behavior", "process")
+        data.setdefault("auto_page_flip", True)
+
+    @staticmethod
     def _migrate_v3_to_v4(data: dict) -> None:
         """v3 → v4: 添加更新镜像源和代理配置"""
         data.setdefault("update_mirror", "github")
@@ -75,6 +81,7 @@ class UserSetting(BaseModel):
 
     # 迁移函数映射表：版本号 -> 迁移函数
     _MIGRATIONS: ClassVar[dict[int, Any]] = {
+        2: _migrate_v2_to_v3,
         3: _migrate_v3_to_v4,
     }
 
