@@ -24,8 +24,19 @@ def _load_user_setting_from_file(
     try:
         # pydantic model loading
         obj = json.loads(path.read_text(encoding="utf-8"))
-        if "version" in obj and obj["version"] == model_cls._VERSION:
-            return model_cls.model_validate(obj)
+        if "version" in obj:
+            if obj["version"] == model_cls._VERSION:
+                return model_cls.model_validate(obj)
+            else:
+                # 尝试从旧版本迁移
+                try:
+                    logger.info(
+                        f"检测到旧版本配置 (v{obj['version']})，尝试迁移到 v{model_cls._VERSION}"
+                    )
+                    return model_cls.migrate_from_old_version(obj)
+                except Exception as e:
+                    logger.warning(f"配置迁移失败: {e}")
+                    return None
         else:
             return None
     except Exception as e:
@@ -90,6 +101,8 @@ class UserSettingManager:
         result = _load_user_setting_from_file(UserSetting, target_path)
         if result is not None:
             self._user_setting = result
+            # 如果是迁移的配置，保存新版本
+            self.save_user_setting(target_path)
             logger.info("加载配置成功。")
             logger.debug("当前配置内容：{}", self._user_setting.model_dump())
             return

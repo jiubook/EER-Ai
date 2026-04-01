@@ -67,6 +67,36 @@ class UserSetting(BaseModel):
     update_proxy: str = ""
     """更新代理地址，如 http://127.0.0.1:7890"""
 
+    @classmethod
+    def migrate_from_old_version(cls, old_data: dict) -> UserSetting:
+        """从旧版本配置迁移到当前版本
+
+        Args:
+            old_data: 旧版本的配置字典
+
+        Returns:
+            迁移后的 UserSetting 实例
+
+        Raises:
+            ValueError: 如果版本号无效或不支持迁移
+        """
+        old_version = old_data.get("version", 1)
+
+        # 验证版本号有效性
+        if old_version < 1 or old_version > cls._VERSION:
+            raise ValueError(f"不支持的配置版本: {old_version}")
+
+        # v3 → v4: 添加 update_mirror 和 update_proxy
+        if old_version < 4:
+            old_data.setdefault("update_mirror", "github")
+            old_data.setdefault("update_proxy", "")
+
+        # 更新版本号
+        old_data["version"] = cls._VERSION
+
+        # 验证并返回
+        return cls.model_validate(old_data)
+
     def update_from_model(self, other: UserSetting) -> None:
         for field in self.__class__.model_fields:
             setattr(self, field, getattr(other, field))

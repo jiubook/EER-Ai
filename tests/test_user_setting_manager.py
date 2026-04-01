@@ -155,3 +155,97 @@ def test_update_from_dict_invalid_data(manager):
     """Test that update_from_dict raises an exception when provided with invalid data."""
     with pytest.raises(ValidationError):
         manager.update_from_dict({"trash_weapon_ids": "not a list"})
+
+
+def test_config_migration_from_v3_to_v4():
+    """测试从 v3 迁移到 v4"""
+    old_config = {
+        "version": 3,
+        "trash_weapon_ids": ["weapon_1"],
+        "treasure_essence_stats": [],
+        "treasure_action": "lock",
+        "trash_action": "unlock",
+        "non_five_star_behavior": "process",
+        "high_level_treasure_enabled": False,
+        "high_level_treasure_attribute_threshold": 3,
+        "high_level_treasure_secondary_threshold": 3,
+        "high_level_treasure_skill_threshold": 3,
+        "auto_page_flip": True,
+        # v3 没有 update_mirror 和 update_proxy
+    }
+
+    migrated = UserSetting.migrate_from_old_version(old_config)
+
+    # 验证旧数据保留
+    assert migrated.trash_weapon_ids == ["weapon_1"]
+    assert migrated.auto_page_flip is True
+    # 验证新字段有默认值
+    assert migrated.update_mirror == "github"
+    assert migrated.update_proxy == ""
+    # 验证版本更新
+    assert migrated.version == 4
+
+
+def test_load_user_setting_with_migration(manager, settings_file):
+    """测试加载旧版本配置时自动迁移"""
+    old_config = {
+        "version": 3,
+        "trash_weapon_ids": ["old_weapon"],
+        "treasure_essence_stats": [],
+        "treasure_action": "lock",
+        "trash_action": "unlock",
+        "non_five_star_behavior": "process",
+        "high_level_treasure_enabled": False,
+        "high_level_treasure_attribute_threshold": 3,
+        "high_level_treasure_secondary_threshold": 3,
+        "high_level_treasure_skill_threshold": 3,
+        "auto_page_flip": True,
+    }
+    settings_file.write_text(json.dumps(old_config), encoding="utf-8")
+
+    manager.load_user_setting()
+
+    # 验证迁移成功
+    setting = manager.get_user_setting()
+    assert setting.version == UserSetting._VERSION
+    assert setting.trash_weapon_ids == ["old_weapon"]
+    assert setting.update_mirror == "github"
+    assert setting.update_proxy == ""
+
+    # 验证新版本已保存到文件
+    saved_data = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert saved_data["version"] == UserSetting._VERSION
+    assert saved_data["update_mirror"] == "github"
+
+
+def test_user_setting_schema_stability():
+    """检测 UserSetting schema 变更，提醒开发者更新迁移逻辑"""
+    expected_fields = {
+        "version",
+        "trash_weapon_ids",
+        "treasure_essence_stats",
+        "treasure_action",
+        "trash_action",
+        "non_five_star_behavior",
+        "high_level_treasure_enabled",
+        "high_level_treasure_attribute_threshold",
+        "high_level_treasure_secondary_threshold",
+        "high_level_treasure_skill_threshold",
+        "auto_page_flip",
+        "update_mirror",
+        "update_proxy",
+    }
+
+    actual_fields = set(UserSetting.model_fields.keys())
+
+    # 如果字段变化，测试失败并提示
+    assert actual_fields == expected_fields, (
+        f"UserSetting schema 已变更！\n"
+        f"新增字段: {actual_fields - expected_fields}\n"
+        f"删除字段: {expected_fields - actual_fields}\n"
+        f"请执行以下步骤：\n"
+        f"1. 更新 UserSetting._VERSION\n"
+        f"2. 在 migrate_from_old_version() 添加迁移逻辑\n"
+        f"3. 添加对应的迁移测试\n"
+        f"4. 更新此测试的 expected_fields"
+    )

@@ -42,7 +42,39 @@
 * **模式一致性**：新开发的组件或状态管理应参考项目现有的设计模式，确保风格统一。
 * **变量命名**：同样需遵守语义化命名的原则，避免混淆。
 
-### 4. 注释与可读性
+### 4. 修改配置 Schema
+
+如果需要修改 `UserSetting` 配置结构（位于 `src/endfield_essence_recognizer/schemas/user_setting.py`），**必须**遵循以下步骤：
+
+1. **更新版本号**：递增 `UserSetting._VERSION`
+2. **添加迁移逻辑**：在 `migrate_from_old_version()` 方法中添加从旧版本到新版本的迁移代码
+3. **添加迁移测试**：在 `tests/test_user_setting_manager.py` 中添加测试验证迁移逻辑正确
+4. **更新 Schema 测试**：更新 `test_user_setting_schema_stability()` 中的 `expected_fields` 集合
+
+**示例：**
+```python
+# 1. 更新版本号
+_VERSION: ClassVar[int] = 5  # 从 4 改为 5
+
+# 2. 添加迁移逻辑
+@classmethod
+def migrate_from_old_version(cls, old_data: dict) -> "UserSetting":
+    old_version = old_data.get("version", 1)
+
+    # v4 → v5: 添加新字段
+    if old_version < 5:
+        old_data.setdefault("new_field", "default_value")
+
+    old_data["version"] = cls._VERSION
+    return cls.model_validate(old_data)
+```
+
+**为什么这样做？**
+- 保证用户升级时配置不丢失
+- 自动化测试会在你忘记更新时提醒你
+- 避免用户手动重新配置
+
+### 5. 注释与可读性
 
 * **逻辑清晰**：复杂逻辑块必须配有必要的行内注释，解释其目的和实现思路。
 * **可读性优先**：我们推崇编写自解释的代码。在代码简洁性与可读性发生冲突时，请优先选择可读性。
