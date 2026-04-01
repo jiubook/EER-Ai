@@ -39,8 +39,7 @@ def install_update(zip_path: Path) -> bool:
         # 创建更新脚本
         updater_script = current_dir / "_updater.bat"
 
-        zip_filename = zip_path.name
-        script_content = f"""@echo off
+        script_content = """@echo off
 chcp 65001 >nul
 echo Waiting for program to close...
 timeout /t 3 /nobreak >nul

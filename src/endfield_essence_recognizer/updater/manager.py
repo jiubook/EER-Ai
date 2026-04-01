@@ -19,6 +19,7 @@ class UpdateManager:
         self.cancel_event = asyncio.Event()
         self.is_downloading = False
         self.download_lock = asyncio.Lock()
+        self.download_task: asyncio.Task | None = None
 
     async def check_and_prompt(self) -> dict | None:
         """检查更新并返回更新信息"""
@@ -41,29 +42,38 @@ class UpdateManager:
                 self.download_dir / f"update_{self.update_info['version']}.zip"
             )
 
-            self.is_downloading = True
             self.cancel_event.clear()
+            self.is_downloading = True
 
-            # 下载更新
-            url = download_url or self.update_info["download_url"]
-            success = await download_update(
-                url,
-                download_path,
-                progress_callback,
-                self.cancel_event,
-                proxy,
-            )
+            try:
+                # 创建下载任务
+                url = download_url or self.update_info["download_url"]
+                self.download_task = asyncio.create_task(
+                    download_update(
+                        url,
+                        download_path,
+                        progress_callback,
+                        self.cancel_event,
+                        proxy,
+                    )
+                )
+                success = await self.download_task
 
-            self.is_downloading = False
+                if not success:
+                    return False
 
-            if not success:
-                return False
+                # 安装更新
+                return install_update(download_path)
+            finally:
+                self.is_downloading = False
+                self.download_task = None
 
-            # 安装更新
-            return install_update(download_path)
-
-    def cancel_download(self):
+    def cancel_download(self) -> bool:
         """取消下载"""
-        if self.is_downloading:
+        if self.is_downloading and self.download_task and not self.download_task.done():
             self.cancel_event.set()
+            self.download_task.cancel()
             logger.info("已发送取消下载信号")
+            return True
+        logger.warning("当前没有正在进行的下载")
+        return False

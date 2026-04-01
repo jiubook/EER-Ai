@@ -67,6 +67,11 @@ async def download_update(
         logger.info(f"更新下载完成: {save_path}")
         return True
 
+    except asyncio.CancelledError:
+        logger.info("下载已取消")
+        if await asyncio.to_thread(save_path.exists):
+            await asyncio.to_thread(save_path.unlink)
+        return False
     except Exception as e:
         logger.error(f"下载更新失败: {e}")
         if await asyncio.to_thread(save_path.exists):

@@ -44,7 +44,7 @@ export function useUpdateChecker() {
     // 500ms 防抖
     restartTimer = setTimeout(async () => {
       isRestarting = true
-      await cancelDownload()
+      await cancelDownloadInternal()
       await new Promise((resolve) => setTimeout(resolve, 1500))
       await installUpdate()
       isRestarting = false
@@ -121,16 +121,41 @@ export function useUpdateChecker() {
   }
 
   /**
+   * 内部取消下载（不关闭对话框，用于重启下载）
+   */
+  async function cancelDownloadInternal() {
+    try {
+      const response = await fetch('/api/update/cancel', { method: 'POST' })
+      const result = await response.json()
+      if (result.success) {
+        disconnectProgressWebSocket()
+      }
+      return result.success
+    } catch (error) {
+      console.error('取消下载失败：', error)
+      return false
+    }
+  }
+
+  /**
    * 取消下载
    */
   async function cancelDownload() {
+    // 先清除定时器，防止 watch 触发重启
+    if (restartTimer) {
+      clearTimeout(restartTimer)
+      restartTimer = null
+    }
+    isRestarting = false
+
     try {
       await fetch('/api/update/cancel', { method: 'POST' })
+    } catch (error) {
+      console.error('取消下载失败：', error)
+    } finally {
       disconnectProgressWebSocket()
       updateProgressDialog.value = false
       isUpdating.value = false
-    } catch (error) {
-      console.error('取消下载失败：', error)
     }
   }
   async function installUpdate() {
