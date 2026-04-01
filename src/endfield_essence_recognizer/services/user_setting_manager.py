@@ -97,7 +97,7 @@ class UserSettingManager:
         If a fresh default setting is used, it will be saved to disk.
         """
         target_path = path or self._user_setting_file
-        logger.info("正在尝试加载配置文件：{}", target_path.resolve())
+        logger.info("正在尝试加载配置文件：", target_path.resolve())
         result = _load_user_setting_from_file(UserSetting, target_path)
         if result is not None:
             self._user_setting = result
@@ -108,16 +108,17 @@ class UserSettingManager:
             return
         # Handle invalid or non-existing file
         if target_path.is_file():
-            # Backup invalid file
-            backup_path = target_path.with_suffix(".backup.json")
-            # remove existing backup if any
-            if backup_path.is_file():
-                backup_path.unlink()
+            # Backup invalid file with timestamp
+            from datetime import datetime
+
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_path = target_path.with_suffix(f".backup.{timestamp}.json")
             target_path.rename(backup_path)
-            logger.warning(
-                "配置文件版本不匹配或无效，已备份旧配置到：{}", backup_path.resolve()
+            logger.error(
+                "配置文件加载失败，已备份到：{}\n"
+                "将使用默认配置。如需恢复旧配置，请检查备份文件。",
+                backup_path.resolve(),
             )
-            logger.info("创建并使用默认配置。")
         else:
             logger.info("未找到配置文件，使用默认配置。")
         # Use default settings

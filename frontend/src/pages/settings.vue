@@ -402,6 +402,11 @@
         </v-expansion-panel-text>
       </v-expansion-panel>
     </v-expansion-panels>
+    <v-card class="mt-4" variant="outlined">
+      <v-card-text class="text-center text-caption text-medium-emphasis">
+        配置版本: v{{ configVersion }}
+      </v-card-text>
+    </v-card>
   </v-container>
 </template>
 
@@ -419,6 +424,7 @@ const { weaponTypes, weaponsMap, rarityColors, essencesMap } = useStaticData()
 const { isScanning, pollingEnabled } = useScanningStatus()
 const { mirrorOptions } = useUpdateMirrors()
 const statusPollingEnabled = ref(pollingEnabled)
+const configVersion = ref(0)
 
 const allAttributeStats = computed(() =>
   Array.from(essencesMap.value.values())
@@ -562,6 +568,7 @@ async function getConfig() {
   const response = await fetch(`/api/config`)
   const result = await response.json()
   const {
+    version,
     trash_weapon_ids,
     treasure_essence_stats,
     treasure_action,
@@ -575,6 +582,7 @@ async function getConfig() {
     update_mirror,
     update_proxy,
   } = result
+  configVersion.value = version
   treasureEssenceStats.value = treasure_essence_stats
   treasureAction.value = treasure_action
   trashAction.value = trash_action

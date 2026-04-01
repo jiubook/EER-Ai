@@ -67,6 +67,17 @@ class UserSetting(BaseModel):
     update_proxy: str = ""
     """更新代理地址，如 http://127.0.0.1:7890"""
 
+    @staticmethod
+    def _migrate_v3_to_v4(data: dict) -> None:
+        """v3 → v4: 添加更新镜像源和代理配置"""
+        data.setdefault("update_mirror", "github")
+        data.setdefault("update_proxy", "")
+
+    # 迁移函数映射表：版本号 -> 迁移函数
+    _MIGRATIONS: ClassVar[dict[int, Any]] = {
+        3: _migrate_v3_to_v4,
+    }
+
     @classmethod
     def migrate_from_old_version(cls, old_data: dict) -> UserSetting:
         """从旧版本配置迁移到当前版本
@@ -78,18 +89,22 @@ class UserSetting(BaseModel):
             迁移后的 UserSetting 实例
 
         Raises:
-            ValueError: 如果版本号无效或不支持迁移
+            ValueError: 如果版本号无效或缺少迁移路径
         """
         old_version = old_data.get("version", 1)
 
         # 验证版本号有效性
-        if old_version < 1 or old_version > cls._VERSION:
-            raise ValueError(f"不支持的配置版本: {old_version}")
+        if old_version < 1:
+            raise ValueError(f"无效的配置版本: {old_version}")
+        if old_version > cls._VERSION:
+            raise ValueError("配置文件版本过高，请更新程序")
 
-        # v3 → v4: 添加 update_mirror 和 update_proxy
-        if old_version < 4:
-            old_data.setdefault("update_mirror", "github")
-            old_data.setdefault("update_proxy", "")
+        # 链式迁移：逐版本升级
+        while old_version < cls._VERSION:
+            if old_version not in cls._MIGRATIONS:
+                raise ValueError(f"缺少迁移路径: v{old_version} → v{old_version + 1}")
+            cls._MIGRATIONS[old_version](old_data)
+            old_version += 1
 
         # 更新版本号
         old_data["version"] = cls._VERSION

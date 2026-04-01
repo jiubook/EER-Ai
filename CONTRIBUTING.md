@@ -47,30 +47,32 @@
 如果需要修改 `UserSetting` 配置结构（位于 `src/endfield_essence_recognizer/schemas/user_setting.py`），**必须**遵循以下步骤：
 
 1. **更新版本号**：递增 `UserSetting._VERSION`
-2. **添加迁移逻辑**：在 `migrate_from_old_version()` 方法中添加从旧版本到新版本的迁移代码
-3. **添加迁移测试**：在 `tests/test_user_setting_manager.py` 中添加测试验证迁移逻辑正确
-4. **更新 Schema 测试**：更新 `test_user_setting_schema_stability()` 中的 `expected_fields` 集合
+2. **添加迁移函数**：创建 `_migrate_vN_to_vN+1` 静态方法
+3. **注册迁移函数**：在 `_MIGRATIONS` 字典中添加映射
+4. **添加迁移测试**：在 `tests/test_user_setting_manager.py` 中添加测试验证迁移逻辑正确
+5. **更新 Schema 测试**：更新 `test_user_setting_schema_stability()` 中的 `expected_fields` 集合
 
-**示例：**
+**示例（v4 → v5）：**
 ```python
 # 1. 更新版本号
 _VERSION: ClassVar[int] = 5  # 从 4 改为 5
 
-# 2. 添加迁移逻辑
-@classmethod
-def migrate_from_old_version(cls, old_data: dict) -> "UserSetting":
-    old_version = old_data.get("version", 1)
+# 2. 添加迁移函数
+@staticmethod
+def _migrate_v4_to_v5(data: dict) -> None:
+    """v4 → v5: 添加新字段"""
+    data.setdefault("new_field", "default_value")
 
-    # v4 → v5: 添加新字段
-    if old_version < 5:
-        old_data.setdefault("new_field", "default_value")
-
-    old_data["version"] = cls._VERSION
-    return cls.model_validate(old_data)
+# 3. 注册到迁移映射表
+_MIGRATIONS: ClassVar[dict[int, Any]] = {
+    3: _migrate_v3_to_v4,
+    4: _migrate_v4_to_v5,  # 新增
+}
 ```
 
 **为什么这样做？**
 - 保证用户升级时配置不丢失
+- 链式迁移支持跨版本升级（v2 → v5 会自动执行 v2→v3→v4→v5）
 - 自动化测试会在你忘记更新时提醒你
 - 避免用户手动重新配置
 

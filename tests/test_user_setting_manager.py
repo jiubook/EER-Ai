@@ -71,9 +71,10 @@ def test_load_user_setting_invalid_version_backups_file(manager, settings_file):
 
     manager.load_user_setting()
 
-    # Check backup exists
-    backup_file = settings_file.with_suffix(".backup.json")
-    assert backup_file.exists()
+    # Check backup exists (with timestamp)
+    backup_files = list(settings_file.parent.glob("settings.backup.*.json"))
+    assert len(backup_files) == 1
+    backup_file = backup_files[0]
     assert json.loads(backup_file.read_text(encoding="utf-8"))["trash_weapon_ids"] == [
         "old_weapon"
     ]
@@ -94,8 +95,10 @@ def test_load_user_setting_corrupt_json_backups_file(manager, settings_file):
 
     manager.load_user_setting()
 
-    backup_file = settings_file.with_suffix(".backup.json")
-    assert backup_file.exists()
+    # Check backup exists (with timestamp)
+    backup_files = list(settings_file.parent.glob("settings.backup.*.json"))
+    assert len(backup_files) == 1
+    backup_file = backup_files[0]
     assert backup_file.read_text(encoding="utf-8") == "not a json"
 
     assert manager.get_user_setting().version == UserSetting._VERSION
@@ -184,6 +187,19 @@ def test_config_migration_from_v3_to_v4():
     assert migrated.update_proxy == ""
     # 验证版本更新
     assert migrated.version == 4
+
+
+def test_config_migration_invalid_version():
+    """测试无效版本号迁移失败"""
+    from endfield_essence_recognizer.schemas.user_setting import UserSetting
+
+    # 负数版本
+    with pytest.raises(ValueError, match="无效的配置版本"):
+        UserSetting.migrate_from_old_version({"version": -1})
+
+    # 未来版本
+    with pytest.raises(ValueError, match="配置文件版本过高"):
+        UserSetting.migrate_from_old_version({"version": 999})
 
 
 def test_load_user_setting_with_migration(manager, settings_file):

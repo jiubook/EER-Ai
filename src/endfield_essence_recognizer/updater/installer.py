@@ -55,6 +55,12 @@ if "%ERRORLEVEL%"=="0" (
 echo Waiting for file handles to release...
 timeout /t 2 /nobreak >nul
 
+echo Protecting user configuration...
+if exist "%~dp0config.json" (
+    copy /Y "%~dp0config.json" "%~dp0config.json.protected" >nul
+    echo Config file backed up
+)
+
 echo Deleting old program files...
 if exist "%~dp0endfield-essence-recognizer.exe" del /F /Q "%~dp0endfield-essence-recognizer.exe" 2>nul
 if exist "%~dp0_internal" rmdir /S /Q "%~dp0_internal" 2>nul
@@ -83,6 +89,12 @@ if errorlevel 1 (
 echo Cleaning up...
 rmdir /S /Q "%~dp0_update_temp"
 rmdir /S /Q "%~dp0_updates"
+
+echo Restoring user configuration...
+if exist "%~dp0config.json.protected" (
+    move /Y "%~dp0config.json.protected" "%~dp0config.json" >nul
+    echo Config file restored
+)
 
 echo Starting new version...
 start "" "%~dp0endfield-essence-recognizer.exe"
