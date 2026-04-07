@@ -54,16 +54,21 @@
 
 **示例（v4 → v5）：**
 ```python
-# 1. 更新版本号
-_VERSION: ClassVar[int] = 5  # 从 4 改为 5
+# 1. 更新后端版本号
+_VERSION: ClassVar[int] = 5
+# 从 4 改为 5
 
-# 2. 添加迁移函数
+# 2. 更新前端版本号
+将 frontend/src/pages/settings.vue 中的 version 改为 5
+# 从 4 改为 5
+
+# 3. 添加迁移函数
 @staticmethod
 def _migrate_v4_to_v5(data: dict) -> None:
     """v4 → v5: 添加新字段"""
     data.setdefault("new_field", "default_value")
 
-# 3. 注册到迁移映射表
+# 4. 注册到迁移映射表
 _MIGRATIONS: ClassVar[dict[int, Any]] = {
     3: _migrate_v3_to_v4,
     4: _migrate_v4_to_v5,  # 新增

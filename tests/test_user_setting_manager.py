@@ -305,3 +305,41 @@ def test_migrations_completeness():
             f"缺少迁移函数：v{v} → v{v + 1}\n"
             f"请在 UserSetting 中添加 _migrate_v{v}_to_v{v + 1} 方法"
         )
+
+
+def test_frontend_config_version_matches_backend():
+    """确保前端 settings.vue 中的 config version 与后端 UserSetting._VERSION 一致。
+
+    前端发送的 version 字段必须和后端校验的版本号匹配，否则配置将无法保存。
+    如果此测试失败，请同步更新 frontend/src/pages/settings.vue 中的 version 值。
+    """
+    import re
+    from pathlib import Path
+
+    settings_vue = (
+        Path(__file__).resolve().parent.parent
+        / "frontend"
+        / "src"
+        / "pages"
+        / "settings.vue"
+    )
+    assert settings_vue.exists(), f"找不到前端设置页面: {settings_vue}"
+
+    content = settings_vue.read_text(encoding="utf-8")
+
+    # 从 config computed 中提取 version: <number>
+    # 匹配 return { version: N, ... } 内的 version 字段
+    match = re.search(r"return\s*\{[^}]*version:\s*(\d+)", content)
+    assert match, (
+        "无法从 settings.vue 的 config computed 中提取 version 字段，"
+        "请检查模板格式是否变更"
+    )
+
+    frontend_version = int(match.group(1))
+    backend_version = UserSetting._VERSION
+
+    assert frontend_version == backend_version, (
+        f"前后端配置版本不一致！前端 version={frontend_version}，后端 _VERSION={backend_version}\n"
+        f"请将 frontend/src/pages/settings.vue 中的 version 改为 {backend_version}，"
+        f"或更新 UserSetting._VERSION 以匹配前端。"
+    )
