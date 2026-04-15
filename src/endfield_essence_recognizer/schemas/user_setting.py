@@ -80,9 +80,10 @@ class UserSetting(BaseModel):
         data.setdefault("update_proxy", "")
 
     # 迁移函数映射表：版本号 -> 迁移函数
+    # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）
     _MIGRATIONS: ClassVar[dict[int, Any]] = {
-        2: _migrate_v2_to_v3,
-        3: _migrate_v3_to_v4,
+        2: _migrate_v2_to_v3.__func__,
+        3: _migrate_v3_to_v4.__func__,
     }
 
     @classmethod

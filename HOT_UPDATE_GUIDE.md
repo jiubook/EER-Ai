@@ -6,7 +6,7 @@
 
 ## 实现原理
 
-1. **版本检查** - 启动时自动检查 GitHub Releases
+1. **版本检查** - 启动时自动检查一图流 API
 2. **下载更新** - 后台下载更新包，WebSocket 实时推送进度
 3. **自动安装** - 批处理脚本替换文件并重启程序
 
@@ -19,6 +19,7 @@
 - 失败时显示错误信息和重试按钮，无需重新检查更新
 
 ### 多镜像源
+- 一图流 API 返回的镜像（global、cn）
 - GitHub 官方
 - ghproxy 镜像（多个节点）
 - gitmirror、gh.con.sh、githubproxy.cc 等镜像
@@ -56,7 +57,7 @@
 ## API 接口
 
 ### GET /api/update/check
-检查是否有新版本
+检查是否有新版本（数据来源：一图流 API）
 
 ```json
 {
@@ -64,7 +65,10 @@
   "update_info": {
     "version": "0.9.0",
     "download_url": "https://github.com/.../release.zip",
-    "size": 12345678
+    "mirrors": {
+      "global": {"downloadUrl": "https://github.com/..."},
+      "cn": {"downloadUrl": "https://cos.yituliu.cn/..."}
+    }
   }
 }
 ```
@@ -156,7 +160,7 @@
 修改 `src/endfield_essence_recognizer/updater/checker.py`：
 
 ```python
-UPDATE_CHECK_URL = "https://api.github.com/repos/Logical-Byte/endfield-essence-recognizer/releases/latest"
+UPDATE_CHECK_URL = "https://cos.yituliu.cn/endfield/endfield-essence-recognizer/version.json"
 ```
 
 ### 用户配置
@@ -168,7 +172,7 @@ UPDATE_CHECK_URL = "https://api.github.com/repos/Logical-Byte/endfield-essence-r
 ## 发布新版本
 
 1. 更新 `pyproject.toml` 中的版本号
-2. 更新 `checker.py` 中的 `CURRENT_VERSION`
+2. 更新 `src/endfield_essence_recognizer/version.py` 中的 `__version__`
 3. 构建并打包应用
 4. 在 GitHub 创建 Release 并上传 zip 包
 5. 用户端会自动检测到新版本

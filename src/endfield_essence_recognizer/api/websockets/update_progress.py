@@ -44,9 +44,16 @@ def update_progress(downloaded: int, total: int, speed: float):
             progress_state["speed"] = speed
             progress_state["progress"] = (downloaded / total * 100) if total > 0 else 0
 
+    def _log_task_exception(task: asyncio.Task):
+        try:
+            task.result()
+        except Exception as e:
+            logger.error(f"更新进度任务失败: {e}")
+
     try:
         loop = asyncio.get_running_loop()
-        asyncio.run_coroutine_threadsafe(_update(), loop)
+        task = loop.create_task(_update())
+        task.add_done_callback(_log_task_exception)
     except RuntimeError:
         # 同步上下文中直接更新
         progress_state["downloaded"] = downloaded
