@@ -118,34 +118,68 @@
 
 ## 更新流程
 
+### 基于 Manifest 的增量更新
+
+更新包中包含一个 `manifest.json` 文件（由 CI 在构建时自动生成），描述了该版本应有的所有文件和受保护路径：
+
+```json
+{
+  "version": "0.9.0",
+  "files": [
+    "endfield-essence-recognizer.exe",
+    "_internal/python3.dll",
+    "README.md",
+    ...
+  ],
+  "protected": [
+    "config.json",
+    "logs/",
+    "screenshots/",
+    ...
+  ]
+}
+```
+
+安装时根据 manifest 执行三步操作：
+1. **新增 / 覆盖**：将 manifest 中列出的文件从更新包复制到目标目录
+2. **删除过时文件**：遍历目标目录，删除不在 manifest 且不在 protected 列表中的文件
+3. **清理**：删除临时更新文件
+
+如更新包中不包含 manifest.json（兼容旧版更新包），则回退到硬编码删除列表 + 全量复制的方案。
+
+### 执行步骤
+
 1. 用户点击"一键更新"
 2. 显示进度对话框，建立 WebSocket 连接
 3. 后端下载更新包到 `_updates` 目录
 4. 实时推送下载进度
 5. 解压到临时目录 `_update_temp`
-6. 创建批处理脚本 `_updater.bat`
-7. 启动脚本并退出当前程序
-8. 脚本等待进程完全退出和文件句柄释放
-9. 删除旧版本程序文件
-10. 复制新文件（失败时自动重试最多5次）
-11. 自动启动新版本程序
-12. 清理临时文件和更新包
+6. 读取 manifest.json（如存在）
+7. 生成批处理脚本（manifest 模式或回退模式）
+8. 启动脚本并退出当前程序
+9. 脚本等待进程完全退出和文件句柄释放
+10. 按 manifest 增量复制新文件
+11. 清理过时文件（不在 manifest 且不在 protected 中的）
+12. 自动启动新版本程序
+13. 清理临时文件和更新包
 
 ## 安全特性
 
-更新脚本会删除以下旧版本文件：
-- `endfield-essence-recognizer.exe`
-- `_internal/`
-- `logs/`
-- `resources/`
-- `README.md`
-- `界面白屏解决方法.md`
-- `遇到报错解决方法.webp`
+### 文件保护
 
-以下文件会被保留：
+更新通过 manifest 的 `protected` 列表保护用户数据，以下路径在更新时不会被删除：
+
 - `config.json` - 用户配置
+- `logs/` - 运行日志
+- `screenshots/` - 用户截图
+- `_updates/` - 下载缓存
+- `.env` - 环境变量配置
 
-如需修改删除列表，编辑 `src/endfield_essence_recognizer/updater/installer.py` 中的批处理脚本。
+如需修改保护列表，编辑 `scripts/generate_manifest.py` 中的 `PROTECTED_PATHS` 常量。
+
+### 路径穿越防护
+
+解压更新包时会校验每个 zip 条目的目标路径，拒绝包含 `../` 等路径穿越攻击的条目。
 
 ## 注意事项
 
@@ -174,5 +208,15 @@ UPDATE_CHECK_URL = "https://cos.yituliu.cn/endfield/endfield-essence-recognizer/
 1. 更新 `pyproject.toml` 中的版本号
 2. 更新 `src/endfield_essence_recognizer/version.py` 中的 `__version__`
 3. 构建并打包应用
-4. 在 GitHub 创建 Release 并上传 zip 包
-5. 用户端会自动检测到新版本
+4. CI 会自动在 PyInstaller 构建后执行 `scripts/generate_manifest.py`，将 manifest.json 打入 zip 包
+5. 在 GitHub 创建 Release 并上传 zip 包
+6. 用户端会自动检测到新版本
+
+**本地测试 manifest 生成：**
+```bash
+# 构建后手动生成 manifest
+uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-recognizer
+
+# 或指定自定义路径
+uv run python scripts/generate_manifest.py --dist-dir /path/to/dist --version 0.9.0
+```
