@@ -72,6 +72,17 @@ echo ========================================
 echo  EER Updater - Manifest-based Update
 echo ========================================
 
+REM 根目录检测（防止在 C:\ 或 D:\ 等根目录下运行）
+set "check_dir=%~dp0"
+set "check_dir=%check_dir:~3%"
+if "%check_dir%"=="" (
+    echo ERROR: Do not install to a root directory like C:\ or D:\
+    echo Please create a subfolder, e.g. D:\EER\
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+)
+
 echo [1/5] Waiting for program to close...
 timeout /t 3 /nobreak >nul
 
@@ -96,7 +107,37 @@ if errorlevel 1 (
 )
 del "%~dp0__write_test__.tmp" 2>nul
 
-echo [3/5] Copying new / updated files from update package...
+echo [3/5] Removing old version files...
+
+if not exist "%~dp0_update_temp\\__to_delete.txt" (
+    echo   No old files to delete (first install or no old manifest).
+    goto copy_files
+)
+
+REM 检查删除清单是否为空
+for /F %%A in ('type "%~dp0_update_temp\\__to_delete.txt" 2^>nul ^| find /C /V ""') do set line_count=%%A
+if "%line_count%"=="0" (
+    echo   No old files to delete.
+    goto copy_files
+)
+
+set delete_count=0
+for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__to_delete.txt") do (
+    if exist "%~dp0%%F" (
+        del /F /Q "%~dp0%%F" 2>nul
+        if not errorlevel 1 (
+            echo   Deleted: %%F
+            set /a delete_count+=1
+        ) else (
+            echo   FAILED to delete: %%F
+        )
+    )
+)
+
+echo   Deleted !delete_count! old files.
+
+:copy_files
+echo [4/5] Copying new / updated files from update package...
 
 REM 校验 manifest 文件是否存在
 if not exist "%~dp0_update_temp\\__manifest_files.txt" (
@@ -128,61 +169,12 @@ for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__manifest_files.txt") do 
 
 if !copy_failed!==1 (
     echo WARNING: Some files failed to copy.
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
 )
 
 echo   Copied !copy_count! files.
-
-echo [4/5] Removing obsolete files...
-
-REM 校验 protected 文件是否存在
-if not exist "%~dp0_update_temp\\__protected.txt" (
-    echo ERROR: Protected list missing! Skipping file deletion for safety.
-    goto cleanup
-)
-
-REM 再次确认 manifest 文件存在（删除逻辑依赖它）
-if not exist "%~dp0_update_temp\\__manifest_files.txt" (
-    echo ERROR: Manifest file missing! Skipping file deletion for safety.
-    goto cleanup
-)
-
-REM 读取受保护路径列表
-set protected_list="%~dp0_update_temp\\__protected.txt"
-
-REM 遍历当前目录中的所有文件，删除不在 manifest 中的
-set delete_count=0
-for /R "%~dp0" %%F in (*) do (
-    REM 获取相对路径
-    set "filepath=%%F"
-    set "relpath=!filepath:%~dp0=!"
-    REM 将反斜杠替换为正斜杠
-    set "relpath=!relpath:\\=/!"
-
-    REM 检查是否在 manifest files 列表中
-    findstr /X /C:"!relpath!" "%~dp0_update_temp\\__manifest_files.txt" >nul 2>&1
-    if errorlevel 1 (
-        REM 不在 manifest 中，检查是否在 protected 列表中
-        findstr /X /C:"!relpath!" "!protected_list!" >nul 2>&1
-        if errorlevel 1 (
-            REM 不在 protected 中，检查是否以 protected 目录开头
-            set should_keep=0
-            for /F "usebackq delims=" %%P in ("!protected_list!") do (
-                echo !relpath! | findstr /B /C:"%%P" >nul 2>&1
-                if not errorlevel 1 set should_keep=1
-            )
-
-            if !should_keep!==0 (
-                del /F /Q "%%F" 2>nul
-                if not errorlevel 1 (
-                    echo   Deleted: !relpath!
-                    set /a delete_count+=1
-                )
-            )
-        )
-    )
-)
-
-echo   Deleted !delete_count! obsolete files.
 
 :cleanup
 echo [5/5] Cleaning up update files...
@@ -258,7 +250,8 @@ if errorlevel 1 (
         goto copy_retry
     )
     echo File copy failed after 5 attempts
-    pause
+    echo Press any key to exit...
+    pause >nul
     exit /b 1
 )
 
@@ -280,11 +273,56 @@ del "%~f0"
 """
 
 
-def _prepare_manifest_helper_files(temp_dir: Path, manifest: dict) -> None:
-    """将 manifest 数据写入辅助文本文件，供批处理脚本读取。
+def _prepare_delete_list(
+    current_dir: Path,
+    temp_dir: Path,
+    new_manifest: dict,
+) -> None:
+    """基于旧 manifest 生成需要删除的文件列表。
 
-    批处理脚本使用 findstr 逐行匹配，因此需要将文件列表和保护列表
-    写为每行一个条目的纯文本文件。
+    删除旧 manifest 中的所有文件（排除 protected），
+    确保所有程序文件都会被新版本替换。
+
+    Args:
+        current_dir: 当前程序所在目录。
+        temp_dir: 解压后的临时目录。
+        new_manifest: 新版本的 manifest 字典。
+    """
+    # 读取旧 manifest
+    old_manifest_path = current_dir / "manifest.json"
+    old_files = set()
+    if old_manifest_path.is_file():
+        try:
+            old_manifest = json.loads(old_manifest_path.read_text(encoding="utf-8"))
+            old_files = set(old_manifest.get("files", []))
+            logger.info(f"读取旧 manifest: {len(old_files)} 个文件")
+        except Exception as exc:
+            logger.warning(f"无法读取旧 manifest: {exc}")
+    else:
+        logger.info("未找到旧 manifest（首次安装或旧版本）")
+
+    # 计算需要删除的文件（旧 manifest 中的所有文件，排除 protected）
+    protected = set(new_manifest["protected"])
+
+    to_delete = []
+    for file in old_files:
+        # 检查是否被保护（精确匹配或前缀匹配）
+        is_protected = file in protected or any(file.startswith(p) for p in protected)
+        if not is_protected:
+            to_delete.append(file)
+
+    # 写入删除清单
+    delete_list_path = temp_dir / "__to_delete.txt"
+    delete_list_path.write_text(
+        "\n".join(sorted(to_delete)) + "\n" if to_delete else "",
+        encoding="utf-8",
+    )
+
+    logger.info(f"生成删除清单: {len(to_delete)} 个文件")
+
+
+def _prepare_manifest_files_list(temp_dir: Path, manifest: dict) -> None:
+    """生成 manifest 文件列表，供批处理脚本复制使用。
 
     Args:
         temp_dir: 解压后的临时目录。
@@ -293,12 +331,6 @@ def _prepare_manifest_helper_files(temp_dir: Path, manifest: dict) -> None:
     files_path = temp_dir / "__manifest_files.txt"
     files_path.write_text(
         "\n".join(sorted(manifest["files"])) + "\n",
-        encoding="utf-8",
-    )
-
-    protected_path = temp_dir / "__protected.txt"
-    protected_path.write_text(
-        "\n".join(sorted(manifest["protected"])) + "\n",
         encoding="utf-8",
     )
 
@@ -350,9 +382,10 @@ def install_update(zip_path: Path) -> bool:
         manifest = _load_manifest(temp_dir)
 
         if manifest is not None:
-            # Manifest 模式：基于文件列表的增量更新
-            logger.info("使用 manifest 模式进行增量更新")
-            _prepare_manifest_helper_files(temp_dir, manifest)
+            # Manifest 模式：基于旧 manifest 的精确删除 + 全量复制
+            logger.info("使用 manifest 模式进行更新")
+            _prepare_delete_list(current_dir, temp_dir, manifest)
+            _prepare_manifest_files_list(temp_dir, manifest)
             script_content = _generate_update_script_manifest(
                 current_dir, temp_dir, manifest
             )

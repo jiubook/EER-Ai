@@ -130,3 +130,105 @@ class TestProtectedPaths:
     def test_screenshots_dir_is_protected(self) -> None:
         """screenshots/ 目录必须在保护列表中。"""
         assert "screenshots/" in PROTECTED_PATHS
+
+
+class TestDeleteListGeneration:
+    """删除清单生成的测试。"""
+
+    def test_delete_all_old_files_except_protected(self, tmp_path: Path) -> None:
+        """应删除旧 manifest 中的所有文件（排除 protected）。"""
+        from src.endfield_essence_recognizer.updater.installer import (
+            _prepare_delete_list,
+        )
+
+        # 创建旧 manifest
+        current_dir = tmp_path / "current"
+        current_dir.mkdir()
+        old_manifest = {
+            "version": "0.8.0",
+            "files": ["app.exe", "old.dll", "lib.pyd", "config.json"],
+            "protected": ["config.json", "logs/"],
+        }
+        (current_dir / "manifest.json").write_text(
+            json.dumps(old_manifest), encoding="utf-8"
+        )
+
+        # 新 manifest
+        temp_dir = tmp_path / "temp"
+        temp_dir.mkdir()
+        new_manifest = {
+            "version": "0.9.0",
+            "files": ["app.exe", "new.dll", "lib.pyd"],
+            "protected": ["config.json", "logs/"],
+        }
+
+        # 生成删除清单
+        _prepare_delete_list(current_dir, temp_dir, new_manifest)
+
+        # 读取删除清单
+        delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
+        deleted_files = [line for line in delete_list.strip().split("\n") if line]
+
+        # 验证：应删除所有旧文件（排除 protected）
+        assert "app.exe" in deleted_files
+        assert "old.dll" in deleted_files
+        assert "lib.pyd" in deleted_files
+        assert "config.json" not in deleted_files  # protected
+
+    def test_no_old_manifest_generates_empty_list(self, tmp_path: Path) -> None:
+        """首次安装（无旧 manifest）应生成空删除清单。"""
+        from src.endfield_essence_recognizer.updater.installer import (
+            _prepare_delete_list,
+        )
+
+        current_dir = tmp_path / "current"
+        current_dir.mkdir()
+        # 没有旧 manifest
+
+        temp_dir = tmp_path / "temp"
+        temp_dir.mkdir()
+        new_manifest = {
+            "version": "0.9.0",
+            "files": ["app.exe", "new.dll"],
+            "protected": ["config.json"],
+        }
+
+        _prepare_delete_list(current_dir, temp_dir, new_manifest)
+
+        delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
+        assert delete_list.strip() == ""
+
+    def test_protected_prefix_matching(self, tmp_path: Path) -> None:
+        """protected 目录下的文件应被保护（前缀匹配）。"""
+        from src.endfield_essence_recognizer.updater.installer import (
+            _prepare_delete_list,
+        )
+
+        current_dir = tmp_path / "current"
+        current_dir.mkdir()
+        old_manifest = {
+            "version": "0.8.0",
+            "files": ["app.exe", "logs/app.log", "logs/error.log"],
+            "protected": ["logs/"],
+        }
+        (current_dir / "manifest.json").write_text(
+            json.dumps(old_manifest), encoding="utf-8"
+        )
+
+        temp_dir = tmp_path / "temp"
+        temp_dir.mkdir()
+        new_manifest = {
+            "version": "0.9.0",
+            "files": ["app.exe"],
+            "protected": ["logs/"],
+        }
+
+        _prepare_delete_list(current_dir, temp_dir, new_manifest)
+
+        delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
+        deleted_files = [line for line in delete_list.strip().split("\n") if line]
+
+        # logs/ 下的文件应被保护
+        assert "app.exe" in deleted_files
+        assert "logs/app.log" not in deleted_files
+        assert "logs/error.log" not in deleted_files
