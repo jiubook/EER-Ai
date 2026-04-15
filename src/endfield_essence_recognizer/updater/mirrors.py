@@ -19,6 +19,7 @@ MIRRORS = {
 
 MIRROR_NAMES = {
     "github": "GitHub 官方",
+    "cn": "一图流 API (CN 镜像)",
     "ghproxy": "GHProxy 官方镜像",
     "ghproxy_net": "GHProxy 镜像（net）",
     "ghproxy_homeboy": "GHProxy 镜像（homeboy）",

@@ -41,6 +41,7 @@ def install_update(zip_path: Path) -> bool:
 
         script_content = """@echo off
 chcp 65001 >nul
+setlocal EnableDelayedExpansion
 echo Waiting for program to close...
 timeout /t 3 /nobreak >nul
 
@@ -102,7 +103,7 @@ start "" "%~dp0endfield-essence-recognizer.exe"
 timeout /t 1 /nobreak >nul
 del "%~f0"
 """
-        updater_script.write_text(script_content, encoding="gbk")
+        updater_script.write_text(script_content, encoding="utf-8-sig")
 
         logger.info("启动更新脚本并退出程序")
         subprocess.Popen(

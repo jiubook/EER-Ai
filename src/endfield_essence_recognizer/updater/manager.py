@@ -62,8 +62,14 @@ class UpdateManager:
                 if not success:
                     return False
 
-                # 安装更新
-                return install_update(download_path)
+                # TODO: 添加下载包完整性校验（sha256），版本 API 返回哈希值后启用
+                # expected_hash = self.update_info.get("sha256")
+                # if expected_hash and not verify_hash(download_path, expected_hash):
+                #     logger.error("更新包校验失败")
+                #     return False
+
+                # 安装更新（放到线程中执行，避免阻塞事件循环）
+                return await asyncio.to_thread(install_update, download_path)
             finally:
                 self.is_downloading = False
                 self.download_task = None

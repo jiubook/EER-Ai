@@ -15,34 +15,36 @@ __all__ = ["UserSettingManager"]
 
 def _load_user_setting_from_file(
     model_cls: type[UserSetting], path: Path
-) -> UserSetting | None:
+) -> tuple[UserSetting | None, bool]:
     """
-    Load UserSetting from a file. Return None if loading fails.
+    Load UserSetting from a file. Return (result, migrated).
+    - result: UserSetting or None if loading fails
+    - migrated: True if migration from an older version was performed
     """
     if not path.is_file():
-        return None
+        return None, False
     try:
         # pydantic model loading
         obj = json.loads(path.read_text(encoding="utf-8"))
         if "version" in obj:
             if obj["version"] == model_cls._VERSION:
-                return model_cls.model_validate(obj)
+                return model_cls.model_validate(obj), False
             else:
                 # 尝试从旧版本迁移
                 try:
                     logger.info(
                         f"检测到旧版本配置 (v{obj['version']})，尝试迁移到 v{model_cls._VERSION}"
                     )
-                    return model_cls.migrate_from_old_version(obj)
+                    return model_cls.migrate_from_old_version(obj), True
                 except Exception as e:
                     logger.warning(f"配置迁移失败: {e}")
-                    return None
+                    return None, False
         else:
-            return None
+            return None, False
     except Exception as e:
         # returning None masks the error, so log it here
         logger.error("Failed to load user setting from file {}: {}", path, e)
-        return None
+        return None, False
 
 
 def _save_user_setting_to_file(model: UserSetting, path: Path) -> bool:
@@ -113,12 +115,15 @@ class UserSettingManager:
         """
         target_path = path or self._user_setting_file
         logger.info("正在尝试加载配置文件：{}", target_path.resolve())
-        result = _load_user_setting_from_file(UserSetting, target_path)
+        result, migrated = _load_user_setting_from_file(UserSetting, target_path)
         if result is not None:
             self._user_setting = result
-            # 如果是迁移的配置，保存新版本
-            self.save_user_setting(target_path)
-            logger.info("加载配置成功。")
+            # 仅在发生迁移时保存新版本
+            if migrated:
+                self.save_user_setting(target_path)
+                logger.info("配置已从旧版本迁移并保存。")
+            else:
+                logger.info("加载配置成功。")
             logger.debug("当前配置内容：{}", self._user_setting.model_dump())
             return
         # Handle invalid or non-existing file

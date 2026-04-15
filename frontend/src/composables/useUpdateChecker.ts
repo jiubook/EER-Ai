@@ -77,6 +77,10 @@ export function useUpdateChecker() {
           latestVersion: result.update_info.version,
           downloadUrl: result.update_info.download_url,
         }
+        // 如果 API 返回了 CN 镜像，默认使用 CN 镜像
+        if (result.update_info.mirrors?.cn?.downloadUrl) {
+          selectedMirror.value = 'cn'
+        }
         hasNewVersionDialog.value = true
       } else if (showIfLatest) {
         isLatestVersionDialog.value = true
@@ -93,7 +97,8 @@ export function useUpdateChecker() {
    * 连接进度 WebSocket
    */
   function connectProgressWebSocket() {
-    const wsUrl = `ws://${window.location.host}/ws/update/progress`
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/update/progress`
     progressWs = new WebSocket(wsUrl)
 
     progressWs.addEventListener('message', (event) => {
@@ -166,15 +171,16 @@ export function useUpdateChecker() {
       hasNewVersionDialog.value = false
       updateProgressDialog.value = true
 
-      // 保存配置
+      // 保存配置：先 GET 当前配置，合并更新字段后 POST，避免覆盖用户其他设置
       const proxyUrl = proxyEnabled.value ? `http://127.0.0.1:${proxyPort.value}` : ''
+      const currentConfigRes = await fetch('/api/config')
+      const currentConfig = await currentConfigRes.json()
+      currentConfig.update_mirror = selectedMirror.value
+      currentConfig.update_proxy = proxyUrl
       await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          update_mirror: selectedMirror.value,
-          update_proxy: proxyUrl,
-        }),
+        body: JSON.stringify(currentConfig),
       })
 
       connectProgressWebSocket()

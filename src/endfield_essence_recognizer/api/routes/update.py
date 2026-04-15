@@ -51,21 +51,33 @@ async def install_update_route(
         proxy = settings.update_proxy if settings.update_proxy else None
         mirror = settings.update_mirror
 
-        # 转换下载 URL 为镜像源 URL
+        # 转换下载 URL
         download_url = None
         if mirror and mirror != "github" and update_manager.update_info:
-            from endfield_essence_recognizer.updater.mirrors import get_mirror_url
+            mirrors = update_manager.update_info.get("mirrors", {})
+            # 优先使用一图流 API 返回的镜像
+            if mirror in mirrors and "downloadUrl" in mirrors[mirror]:
+                download_url = mirrors[mirror]["downloadUrl"]
+                logger.info(f"使用 API 镜像源: {mirror}")
+            elif "cn" in mirrors and "downloadUrl" in mirrors["cn"]:
+                # 国内用户默认走 CN 镜像
+                download_url = mirrors["cn"]["downloadUrl"]
+                logger.info("使用 CN 镜像源")
+            else:
+                # 回退到 mirrors.py 中的模板镜像
+                from endfield_essence_recognizer.updater.mirrors import get_mirror_url
 
-            original_url = update_manager.update_info["download_url"]
-            # 解析 GitHub URL: https://github.com/owner/repo/releases/download/tag/file
-            match = re.match(
-                r"https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/(.+)",
-                original_url,
-            )
-            if match:
-                owner, repo, tag, filename = match.groups()
-                download_url = get_mirror_url(mirror, f"{owner}/{repo}", tag, filename)
-                logger.info(f"使用镜像源: {mirror}")
+                original_url = update_manager.update_info["download_url"]
+                match = re.match(
+                    r"https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/(.+)",
+                    original_url,
+                )
+                if match:
+                    owner, repo, tag, filename = match.groups()
+                    download_url = get_mirror_url(
+                        mirror, f"{owner}/{repo}", tag, filename
+                    )
+                    logger.info(f"使用模板镜像源: {mirror}")
 
         success = await update_manager.download_and_install(
             progress_callback=update_progress,
