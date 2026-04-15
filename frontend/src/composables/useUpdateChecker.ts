@@ -14,11 +14,12 @@ const currentVersion = ref<string | null>(null)
 const updateInfo = ref<UpdateInfo | null>(null)
 const updateErrorMessage = ref<string>('')
 
-// 新增状态
+// 下载进度状态
 const downloadProgress = ref<number>(0)
 const downloadSpeed = ref<number>(0)
 const downloadedSize = ref<number>(0)
 const totalSize = ref<number>(0)
+const totalKnown = ref<boolean>(false)
 const selectedMirror = ref<string>('github')
 const proxyEnabled = ref<boolean>(false)
 const proxyPort = ref<string>('7890')
@@ -27,6 +28,15 @@ const downloadFailed = ref<boolean>(false)
 const downloadErrorMessage = ref<string>('')
 
 let progressWs: WebSocket | null = null
+
+/** 重置前端进度状态，每次新下载开始前调用 */
+function resetProgressState() {
+  downloadProgress.value = 0
+  downloadSpeed.value = 0
+  downloadedSize.value = 0
+  totalSize.value = 0
+  totalKnown.value = false
+}
 
 export function useUpdateChecker() {
   let restartTimer: ReturnType<typeof setTimeout> | null = null
@@ -44,9 +54,12 @@ export function useUpdateChecker() {
     // 500ms 防抖
     restartTimer = setTimeout(async () => {
       isRestarting = true
-      await cancelDownloadInternal()
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      await installUpdate()
+      const cancelled = await cancelDownloadInternal()
+      // 只有在确实取消成功时才重启，避免无下载任务时的误操作
+      if (cancelled) {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        await installUpdate()
+      }
       isRestarting = false
       restartTimer = null
     }, 500)
@@ -62,6 +75,8 @@ export function useUpdateChecker() {
       const response = await fetch('/api/update/check')
       const result = await response.json()
 
+      // 后端现在保证：有错误时 has_update=false 且 error=string
+      // 没有错误时 has_update=false 且 error=null
       if (result.error) {
         updateErrorMessage.value = result.error
         checkUpdateFailedDialog.value = true
@@ -105,6 +120,7 @@ export function useUpdateChecker() {
       const data = JSON.parse(event.data)
       downloadedSize.value = data.downloaded
       totalSize.value = data.total
+      totalKnown.value = data.total_known
       downloadSpeed.value = data.speed
       downloadProgress.value = data.progress
     })
@@ -127,8 +143,9 @@ export function useUpdateChecker() {
 
   /**
    * 内部取消下载（不关闭对话框，用于重启下载）
+   * @returns 是否确实取消了一个活跃的下载任务
    */
-  async function cancelDownloadInternal() {
+  async function cancelDownloadInternal(): Promise<boolean> {
     try {
       const response = await fetch('/api/update/cancel', { method: 'POST' })
       const result = await response.json()
@@ -143,7 +160,7 @@ export function useUpdateChecker() {
   }
 
   /**
-   * 取消下载
+   * 取消下载（用户主动取消，关闭对话框）
    */
   async function cancelDownload() {
     // 先清除定时器，防止 watch 触发重启
@@ -163,6 +180,7 @@ export function useUpdateChecker() {
       isUpdating.value = false
     }
   }
+
   async function installUpdate() {
     try {
       isUpdating.value = true
@@ -170,6 +188,9 @@ export function useUpdateChecker() {
       downloadErrorMessage.value = ''
       hasNewVersionDialog.value = false
       updateProgressDialog.value = true
+
+      // 重置进度状态，避免看到上一轮残留值
+      resetProgressState()
 
       // 保存配置：先 GET 当前配置，合并更新字段后 POST，避免覆盖用户其他设置
       const proxyUrl = proxyEnabled.value ? `http://127.0.0.1:${proxyPort.value}` : ''
@@ -216,6 +237,7 @@ export function useUpdateChecker() {
     downloadSpeed,
     downloadedSize,
     totalSize,
+    totalKnown,
     selectedMirror,
     proxyEnabled,
     proxyPort,

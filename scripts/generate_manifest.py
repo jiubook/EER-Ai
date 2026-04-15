@@ -3,6 +3,9 @@
 在 PyInstaller 构建完成后运行此脚本，扫描 dist 目录并生成 manifest.json，
 用于热更新时确定哪些文件应该新增 / 覆盖 / 删除。
 
+manifest.json 写入 ``_internal/manifest.json``（而非 dist 根目录），
+避免用户误删，也符合 PyInstaller 的 _internal 约定。
+
 用法：
     python scripts/generate_manifest.py [--dist-dir DIST_DIR] [--version VERSION]
 
@@ -13,10 +16,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
-# 用户数据目录 / 文件，更新时绝对不能删除
+# 用户数据目录 / 文件，更新时绝对不能删除或覆盖
 PROTECTED_PATHS: list[str] = [
     "config.json",
     "logs/",
@@ -26,6 +30,9 @@ PROTECTED_PATHS: list[str] = [
     "_updater.bat",
     ".env",
 ]
+
+# manifest 在 dist 中的相对路径（放在 _internal 内）
+MANIFEST_RELATIVE_PATH: str = "_internal/manifest.json"
 
 
 def scan_dist_directory(dist_dir: Path) -> list[str]:
@@ -74,12 +81,31 @@ def read_version_from_pyproject(project_root: Path) -> str:
     raise ValueError("pyproject.toml 中未找到 version 字段")
 
 
+def compute_file_sha256(file_path: Path) -> str:
+    """计算文件的 SHA-256 哈希值。
+
+    Args:
+        file_path: 文件路径。
+
+    Returns:
+        十六进制 SHA-256 哈希字符串。
+    """
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
 def generate_manifest(
     dist_dir: Path,
     version: str,
     protected_paths: list[str] | None = None,
 ) -> dict:
     """生成 manifest 字典。
+
+    manifest.json 自身（``_internal/manifest.json``）会被自动加入 files 列表，
+    确保更新时能被复制到目标目录，同时也能在下次更新时作为"旧 manifest"被读取。
 
     Args:
         dist_dir: PyInstaller 构建产物的根目录。
@@ -93,6 +119,11 @@ def generate_manifest(
         protected_paths = PROTECTED_PATHS
 
     files = scan_dist_directory(dist_dir)
+
+    # manifest.json 自身必须在 files 列表中，否则下次更新读不到"旧 manifest"
+    if MANIFEST_RELATIVE_PATH not in files:
+        files.append(MANIFEST_RELATIVE_PATH)
+        files.sort()
 
     return {
         "version": version,
@@ -120,7 +151,10 @@ def main() -> None:
         "--output",
         type=Path,
         default=None,
-        help="manifest.json 输出路径（默认: 写入 dist-dir/manifest.json）",
+        help=(
+            "manifest.json 输出路径 "
+            "（默认: 写入 dist-dir/_internal/manifest.json）"
+        ),
     )
     args = parser.parse_args()
 
@@ -138,14 +172,14 @@ def main() -> None:
     print(f"dist 目录:   {dist_dir}")
     print(f"版本号:      {version}")
 
-    # 生成 manifest
+    # 先扫描，生成 manifest（此时 manifest.json 尚未写入磁盘，不会出现在扫描结果中）
     manifest = generate_manifest(dist_dir, version)
     file_count = len(manifest["files"])
     protected_count = len(manifest["protected"])
     print(f"扫描到 {file_count} 个文件, {protected_count} 个受保护路径")
 
-    # 输出
-    output_path = args.output or (dist_dir / "manifest.json")
+    # 输出到 _internal/manifest.json（而非 dist 根目录）
+    output_path = args.output or (dist_dir / MANIFEST_RELATIVE_PATH)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",

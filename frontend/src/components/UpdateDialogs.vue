@@ -48,19 +48,22 @@
         <div class="mb-4">
           <div class="d-flex justify-space-between mb-2">
             <span>{{ currentVersion }} → {{ updateInfo?.latestVersion }}</span>
-            <span>{{ formatSize(downloadedSize) }} / {{ formatSize(totalSize) }}</span>
+            <span v-if="totalKnown">{{ formatSize(downloadedSize) }} / {{ formatSize(totalSize) }}</span>
+            <span v-else>{{ formatSize(downloadedSize) }} 已下载</span>
           </div>
           <v-progress-linear
             color="primary"
             height="20"
-            :model-value="downloadProgress"
+            :indeterminate="!totalKnown && downloadedSize > 0"
+            :model-value="totalKnown ? downloadProgress : 0"
           >
             <template #default>
-              <strong>{{ downloadProgress.toFixed(1) }}%</strong>
+              <strong v-if="totalKnown">{{ downloadProgress.toFixed(1) }}%</strong>
+              <strong v-else>下载中…</strong>
             </template>
           </v-progress-linear>
           <div class="text-center mt-2 text-caption">
-            {{ formatSpeed(downloadSpeed) }}
+            {{ downloadSpeed > 0 ? formatSpeed(downloadSpeed) : '连接中…' }}
           </div>
         </div>
 
@@ -143,6 +146,7 @@ const {
   downloadSpeed,
   downloadedSize,
   totalSize,
+  totalKnown,
   selectedMirror,
   proxyEnabled,
   proxyPort,
