@@ -64,10 +64,6 @@ def _generate_update_script_manifest(
     manifest_files = set(manifest["files"])
     protected_paths = set(manifest["protected"])
 
-    # 将文件列表和保护列表序列化为换行分隔的文本，嵌入到 bat 脚本中
-    files_text = "\n".join(sorted(manifest_files))
-    protected_text = "\n".join(sorted(protected_paths))
-
     # manifest 文件本身也需要在更新后保留
     # （它已经在 manifest_files 中了，因为 generate_manifest 会把它加进去）
 
