@@ -27,6 +27,11 @@ const showProxyInput = ref<boolean>(false)
 const downloadFailed = ref<boolean>(false)
 const downloadErrorMessage = ref<string>('')
 
+// SHA-256 校验失败状态
+const sha256MismatchDialog = ref<boolean>(false)
+const sha256Expected = ref<string>('')
+const sha256Actual = ref<string>('')
+
 let progressWs: WebSocket | null = null
 
 /** 重置前端进度状态，每次新下载开始前调用 */
@@ -181,11 +186,16 @@ export function useUpdateChecker() {
     }
   }
 
-  async function installUpdate() {
+  /**
+   * 执行更新下载和安装
+   * @param skipVerify 是否跳过 SHA-256 校验
+   */
+  async function installUpdate(skipVerify: boolean = false) {
     try {
       isUpdating.value = true
       downloadFailed.value = false
       downloadErrorMessage.value = ''
+      sha256MismatchDialog.value = false
       hasNewVersionDialog.value = false
       updateProgressDialog.value = true
 
@@ -206,13 +216,24 @@ export function useUpdateChecker() {
 
       connectProgressWebSocket()
 
-      const response = await fetch('/api/update/install', { method: 'POST' })
+      const response = await fetch('/api/update/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skip_verify: skipVerify }),
+      })
       const result = await response.json()
 
       if (!result.success) {
         disconnectProgressWebSocket()
-        downloadFailed.value = true
-        downloadErrorMessage.value = result.error || '更新失败'
+        if (result.error === 'sha256_mismatch') {
+          // SHA-256 校验失败，弹出让用户选择是否继续
+          sha256Expected.value = result.sha256_expected || ''
+          sha256Actual.value = result.sha256_actual || ''
+          sha256MismatchDialog.value = true
+        } else {
+          downloadFailed.value = true
+          downloadErrorMessage.value = result.error || '更新失败'
+        }
       }
     } catch (error) {
       disconnectProgressWebSocket()
@@ -221,6 +242,18 @@ export function useUpdateChecker() {
     } finally {
       isUpdating.value = false
     }
+  }
+
+  /** 用户确认跳过 SHA-256 校验继续安装 */
+  async function forceInstall() {
+    sha256MismatchDialog.value = false
+    await installUpdate(true)
+  }
+
+  /** 用户取消 SHA-256 校验失败后的安装 */
+  function cancelSha256Mismatch() {
+    sha256MismatchDialog.value = false
+    updateProgressDialog.value = false
   }
 
   return {
@@ -244,9 +277,14 @@ export function useUpdateChecker() {
     showProxyInput,
     downloadFailed,
     downloadErrorMessage,
+    sha256MismatchDialog,
+    sha256Expected,
+    sha256Actual,
     // 方法
     checkForUpdates,
     installUpdate,
+    forceInstall,
+    cancelSha256Mismatch,
     cancelDownload,
   }
 }

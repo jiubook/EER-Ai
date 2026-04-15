@@ -121,8 +121,37 @@
 
       <v-card-actions>
         <v-spacer />
-        <v-btn v-if="downloadFailed" color="primary" @click="installUpdate">重试</v-btn>
+        <v-btn v-if="downloadFailed" color="primary" @click="installUpdate()">重试</v-btn>
         <v-btn @click="cancelDownload">{{ downloadFailed ? '关闭' : '取消' }}</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <!-- SHA-256 校验失败 -->
+  <v-dialog v-model="sha256MismatchDialog" max-width="520" persistent>
+    <v-card>
+      <v-card-title class="text-error">
+        <v-icon class="mr-2">mdi-shield-alert</v-icon>
+        更新包完整性校验失败
+      </v-card-title>
+      <v-card-text>
+        <v-alert class="mb-3" color="warning" variant="tonal">
+          更新包的 SHA-256 哈希值与预期不符，可能是下载不完整、文件损坏，或源站/镜像被篡改。
+        </v-alert>
+        <div class="text-body-2 mb-2">
+          <strong>期望：</strong>
+          <code class="text-caption">{{ sha256Expected }}</code>
+        </div>
+        <div class="text-body-2 mb-3">
+          <strong>实际：</strong>
+          <code class="text-caption">{{ sha256Actual }}</code>
+        </div>
+        <p class="text-body-2">是否仍然继续安装？</p>
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn @click="cancelSha256Mismatch">取消更新</v-btn>
+        <v-btn color="warning" variant="elevated" @click="forceInstall">继续安装</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -153,7 +182,12 @@ const {
   showProxyInput,
   downloadFailed,
   downloadErrorMessage,
+  sha256MismatchDialog,
+  sha256Expected,
+  sha256Actual,
   installUpdate,
+  forceInstall,
+  cancelSha256Mismatch,
   cancelDownload,
 } = useUpdateChecker()
 

@@ -66,10 +66,20 @@ async def check_update(
 
 @router.post("/install")
 async def install_update_route(
+    body: dict | None = None,
     setting_manager: UserSettingManager = Depends(get_user_setting_manager_dep),
 ):
-    """下载并安装更新"""
+    """下载并安装更新。
+
+    请求体可选字段：
+    - skip_verify: bool — 跳过 SHA-256 校验（用户在前端确认风险后主动选择）
+
+    返回值包含 success + error（如有），其中 error="sha256_mismatch" 时
+    附带 sha256_expected / sha256_actual 供前端展示。
+    """
     try:
+        skip_verify = bool((body or {}).get("skip_verify", False))
+
         settings = setting_manager.get_user_setting()
         proxy = settings.update_proxy if settings.update_proxy else None
         mirror = settings.update_mirror
@@ -105,12 +115,13 @@ async def install_update_route(
         # 重置进度状态，避免上一轮残留值
         reset_progress()
 
-        success = await update_manager.download_and_install(
+        result = await update_manager.download_and_install(
             progress_callback=update_progress,
             proxy=proxy,
             download_url=download_url,
+            skip_verify=skip_verify,
         )
-        return {"success": success}
+        return result
     except Exception as e:
         logger.error(f"安装更新失败: {e}")
         return {"success": False, "error": str(e)}

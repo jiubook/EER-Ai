@@ -63,17 +63,32 @@ class UpdateManager:
             self.update_info = result
         return result
 
+    def _compute_sha256(self, file_path: Path) -> str:
+        """计算文件 SHA-256，供前端展示实际值。"""
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
     async def download_and_install(
         self,
         progress_callback: Callable[[int, int, float], None] | None = None,
         proxy: str | None = None,
         download_url: str | None = None,
-    ) -> bool:
-        """下载并安装更新"""
+        skip_verify: bool = False,
+    ) -> dict:
+        """下载并安装更新。
+
+        返回值：
+        - {"success": True}                     → 安装成功
+        - {"success": False, "error": "xxx"}     → 一般错误
+        - {"success": False, "error": "sha256_mismatch", ...} → 校验失败（前端可提示用户）
+        """
         async with self.download_lock:
             if not self.update_info:
                 logger.warning("没有可用的更新信息")
-                return False
+                return {"success": False, "error": "没有可用的更新信息"}
 
             download_path = (
                 self.download_dir / f"update_{self.update_info['version']}.zip"
@@ -97,22 +112,41 @@ class UpdateManager:
                 success = await self.download_task
 
                 if not success:
-                    return False
+                    return {"success": False, "error": "下载失败或已取消"}
 
                 # SHA-256 完整性校验
-                # 如果检查阶段从 GitHub Releases API 获取到了 sha256，则在此验证
                 expected_hash = self.update_info.get("sha256")
-                if expected_hash:
-                    verified = await asyncio.to_thread(
-                        _verify_sha256, download_path, expected_hash
+                if expected_hash and not skip_verify:
+                    actual_hash = await asyncio.to_thread(
+                        self._compute_sha256, download_path
                     )
-                    if not verified:
-                        return False
+                    if actual_hash != expected_hash:
+                        logger.error(
+                            f"SHA-256 校验失败: "
+                            f"期望 {expected_hash[:16]}... 实际 {actual_hash[:16]}..."
+                        )
+                        return {
+                            "success": False,
+                            "error": "sha256_mismatch",
+                            "sha256_expected": expected_hash,
+                            "sha256_actual": actual_hash,
+                        }
+                    else:
+                        logger.info("SHA-256 校验通过")
+                elif expected_hash and skip_verify:
+                    logger.warning("用户选择跳过 SHA-256 校验")
                 else:
                     logger.info("无可用的 sha256 校验值，跳过完整性验证")
 
                 # 安装更新（放到线程中执行，避免阻塞事件循环）
-                return await asyncio.to_thread(install_update, download_path)
+                install_ok = await asyncio.to_thread(install_update, download_path)
+                if install_ok:
+                    return {"success": True}
+                else:
+                    return {"success": False, "error": "安装失败"}
+            except Exception as exc:
+                logger.error(f"更新流程异常: {exc}")
+                return {"success": False, "error": str(exc)}
             finally:
                 self.is_downloading = False
                 self.download_task = None

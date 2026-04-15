@@ -409,9 +409,9 @@ def _prepare_delete_list(
             if not _is_protected(file, protected):
                 to_delete.append(file)
     else:
-        # 无旧 manifest（首次升级）：扫描磁盘，清理"旧程序文件"
-        # 策略：删除安装目录中 manifest 未声明的、非 protected 的已知程序文件类型
-        _PROGRAM_EXTENSIONS = {".exe", ".dll", ".pyd", ".pyz", ".pyi"}
+        # 无旧 manifest（首次升级到 manifest 方案）：
+        # 新 manifest 就是新版本的文件全集，磁盘上不在其中的文件 = 旧版本残留。
+        # 用 (磁盘文件 - 新 manifest - protected) 做精确删除。
         for path in current_dir.rglob("*"):
             if not path.is_file():
                 continue
@@ -422,13 +422,15 @@ def _prepare_delete_list(
             # 跳过 protected
             if _is_protected(rel, protected):
                 continue
-            # 跳过新 manifest 中的文件
+            # 跳过新 manifest 中的文件（这些会被复制阶段覆盖/补充）
             if rel in new_files:
                 continue
-            # 只清理已知的程序文件类型（保守策略，避免误删用户数据）
-            if path.suffix.lower() in _PROGRAM_EXTENSIONS:
-                to_delete.append(rel)
-        logger.info(f"首次升级：扫描到 {len(to_delete)} 个待清理的旧程序文件")
+            # 磁盘上有、新 manifest 中没有、非 protected → 旧版本残留，应删除
+            to_delete.append(rel)
+        logger.info(
+            f"首次升级（无旧 manifest）：基于新 manifest 扫描到 "
+            f"{len(to_delete)} 个待清理的旧文件"
+        )
 
     # 写入删除清单
     delete_list_path = temp_dir / "__to_delete.txt"
