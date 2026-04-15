@@ -86,7 +86,26 @@ if "%ERRORLEVEL%"=="0" (
 echo [2/5] Waiting for file handles to release...
 timeout /t 2 /nobreak >nul
 
+REM 检查写入权限（尝试创建测试文件）
+echo test >"%~dp0__write_test__.tmp" 2>nul
+if errorlevel 1 (
+    echo ERROR: No write permission! Please run as administrator.
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+)
+del "%~dp0__write_test__.tmp" 2>nul
+
 echo [3/5] Copying new / updated files from update package...
+
+REM 校验 manifest 文件是否存在
+if not exist "%~dp0_update_temp\\__manifest_files.txt" (
+    echo ERROR: Manifest file missing! Update aborted.
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+)
+
 set copy_failed=0
 set copy_count=0
 
@@ -114,6 +133,18 @@ if !copy_failed!==1 (
 echo   Copied !copy_count! files.
 
 echo [4/5] Removing obsolete files...
+
+REM 校验 protected 文件是否存在
+if not exist "%~dp0_update_temp\\__protected.txt" (
+    echo ERROR: Protected list missing! Skipping file deletion for safety.
+    goto cleanup
+)
+
+REM 再次确认 manifest 文件存在（删除逻辑依赖它）
+if not exist "%~dp0_update_temp\\__manifest_files.txt" (
+    echo ERROR: Manifest file missing! Skipping file deletion for safety.
+    goto cleanup
+)
 
 REM 读取受保护路径列表
 set protected_list="%~dp0_update_temp\\__protected.txt"
@@ -153,6 +184,7 @@ for /R "%~dp0" %%F in (*) do (
 
 echo   Deleted !delete_count! obsolete files.
 
+:cleanup
 echo [5/5] Cleaning up update files...
 rmdir /S /Q "%~dp0_update_temp" 2>nul
 rmdir /S /Q "%~dp0_updates" 2>nul
