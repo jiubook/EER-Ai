@@ -410,8 +410,19 @@ def _prepare_delete_list(
                 to_delete.append(file)
     else:
         # 无旧 manifest（首次升级到 manifest 方案）：
-        # 新 manifest 就是新版本的文件全集，磁盘上不在其中的文件 = 旧版本残留。
-        # 用 (磁盘文件 - 新 manifest - protected) 做精确删除。
+        # 核心原则：不要删除用户本来就有的文件。
+        # 此前版本的更新策略是"删文件夹+重新解压"，不需要额外兜底。
+        # 只清理 manifest 中声明的目录内的旧程序文件残留（.exe/.dll/.pyd），
+        # 确保 _internal 等目录干净即可，其他文件一律不动。
+        _PROGRAM_EXTENSIONS = {".exe", ".dll", ".pyd", ".pyz", ".pyi"}
+
+        # 从新 manifest 中提取涉及的目录前缀
+        manifest_dirs: set[str] = set()
+        for f in new_files:
+            parts = f.split("/")
+            for i in range(1, len(parts)):
+                manifest_dirs.add("/".join(parts[:i]) + "/")
+
         for path in current_dir.rglob("*"):
             if not path.is_file():
                 continue
@@ -422,14 +433,18 @@ def _prepare_delete_list(
             # 跳过 protected
             if _is_protected(rel, protected):
                 continue
-            # 跳过新 manifest 中的文件（这些会被复制阶段覆盖/补充）
+            # 跳过新 manifest 中的文件
             if rel in new_files:
                 continue
-            # 磁盘上有、新 manifest 中没有、非 protected → 旧版本残留，应删除
-            to_delete.append(rel)
+            # 只清理 manifest 涉及目录下的旧程序文件（.exe/.dll/.pyd 等）
+            in_manifest_dir = any(
+                rel.startswith(d) for d in manifest_dirs
+            )
+            if in_manifest_dir and path.suffix.lower() in _PROGRAM_EXTENSIONS:
+                to_delete.append(rel)
         logger.info(
-            f"首次升级（无旧 manifest）：基于新 manifest 扫描到 "
-            f"{len(to_delete)} 个待清理的旧文件"
+            f"首次升级（无旧 manifest）：清理 manifest 目录下的旧程序文件残留，"
+            f"共 {len(to_delete)} 个"
         )
 
     # 写入删除清单

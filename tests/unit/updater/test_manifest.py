@@ -182,27 +182,43 @@ class TestDeleteListGeneration:
         assert "lib.pyd" in deleted_files
         assert "config.json" not in deleted_files  # protected
 
-    def test_no_old_manifest_scans_disk_for_cleanup(self, tmp_path: Path) -> None:
-        """首次升级（无旧 manifest）应基于新 manifest 清理旧文件。"""
+    def test_no_old_manifest_only_cleans_program_files_in_manifest_dirs(
+        self, tmp_path: Path
+    ) -> None:
+        """首次升级（无旧 manifest）只清理 manifest 目录下的旧程序文件，不删用户文件。"""
         from src.endfield_essence_recognizer.updater.installer import (
             _prepare_delete_list,
         )
 
         current_dir = tmp_path / "current"
         current_dir.mkdir()
-        # 没有旧 manifest，但磁盘上有旧版本文件
-        (current_dir / "old.exe").write_text("old")
-        (current_dir / "old.dll").write_text("old")
-        (current_dir / "old_data.json").write_text("old")  # 旧数据文件
+        _internal = current_dir / "_internal"
+        _internal.mkdir()
+        # 旧程序文件在 manifest 目录下 → 应删除
+        (_internal / "old.dll").write_text("old")
+        (_internal / "old.exe").write_text("old")
+        # 新文件 → 不删除（复制阶段覆盖）
+        (_internal / "new.dll").write_text("new")
+        # 根目录的用户文件 → 不删除
+        (current_dir / "my_data.txt").write_text("user")
         (current_dir / "config.json").write_text("{}")  # protected
+        # 根目录的旧程序文件（不在 manifest 目录下）→ 不删除
+        (current_dir / "old_root.exe").write_text("old")
+        # protected 目录
         (current_dir / "logs").mkdir()
-        (current_dir / "logs" / "app.log").write_text("log")  # protected dir
+        (current_dir / "logs" / "app.log").write_text("log")
 
         temp_dir = tmp_path / "temp"
         temp_dir.mkdir()
         new_manifest = {
             "version": "0.9.0",
-            "files": ["app.exe", "new.dll", "config.json", "logs/app.log"],
+            "files": [
+                "app.exe",
+                "_internal/new.dll",
+                "_internal/manifest.json",
+                "config.json",
+                "logs/app.log",
+            ],
             "protected": ["config.json", "logs/"],
         }
 
@@ -211,16 +227,18 @@ class TestDeleteListGeneration:
         delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
         deleted_files = [line for line in delete_list.strip().split("\n") if line]
 
-        # 磁盘上所有不在新 manifest 中的文件都应被删除
-        assert "old.exe" in deleted_files
-        assert "old.dll" in deleted_files
-        assert "old_data.json" in deleted_files
-        # 不应删除 protected
+        # _internal/ 下的旧程序文件 → 删除
+        assert "_internal/old.dll" in deleted_files
+        assert "_internal/old.exe" in deleted_files
+        # _internal/ 下的新文件 → 不删除
+        assert "_internal/new.dll" not in deleted_files
+        # 根目录的用户文件 → 不删除
+        assert "my_data.txt" not in deleted_files
+        # 根目录的旧程序文件（不在 manifest 目录下）→ 不删除
+        assert "old_root.exe" not in deleted_files
+        # protected → 不删除
         assert "config.json" not in deleted_files
         assert "logs/app.log" not in deleted_files
-        # 不应删除新 manifest 中的文件
-        assert "app.exe" not in deleted_files
-        assert "new.dll" not in deleted_files
 
     def test_no_old_manifest_empty_install_dir(self, tmp_path: Path) -> None:
         """首次升级且安装目录为空时，删除清单也应为空。"""
