@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-
 
 # 用户数据目录 / 文件，更新时绝对不能删除
 PROTECTED_PATHS: list[str] = [

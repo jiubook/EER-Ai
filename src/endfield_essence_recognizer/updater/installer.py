@@ -61,13 +61,10 @@ def _generate_update_script_manifest(
     Returns:
         批处理脚本内容。
     """
-    manifest_files = set(manifest["files"])
-    protected_paths = set(manifest["protected"])
-
     # manifest 文件本身也需要在更新后保留
-    # （它已经在 manifest_files 中了，因为 generate_manifest 会把它加进去）
+    # （它已经在 manifest["files"] 中了，因为 generate_manifest 会把它加进去）
 
-    script = f"""@echo off
+    script = """@echo off
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
 
