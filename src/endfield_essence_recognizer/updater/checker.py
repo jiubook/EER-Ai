@@ -7,7 +7,9 @@ from endfield_essence_recognizer.utils.log import logger
 from endfield_essence_recognizer.version import __version__
 
 # 一图流版本检查 API
-UPDATE_CHECK_URL = "https://cos.yituliu.cn/endfield/endfield-essence-recognizer/version.json"
+UPDATE_CHECK_URL = (
+    "https://cos.yituliu.cn/endfield/endfield-essence-recognizer/version.json"
+)
 
 
 async def check_for_updates() -> dict | None:

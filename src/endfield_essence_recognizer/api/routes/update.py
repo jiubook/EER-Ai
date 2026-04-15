@@ -74,7 +74,9 @@ async def install_update_route(
                 )
                 if match:
                     owner, repo, tag, filename = match.groups()
-                    download_url = get_mirror_url(mirror, f"{owner}/{repo}", tag, filename)
+                    download_url = get_mirror_url(
+                        mirror, f"{owner}/{repo}", tag, filename
+                    )
                     logger.info(f"使用模板镜像源: {mirror}")
 
         success = await update_manager.download_and_install(
