@@ -106,9 +106,7 @@ async def check_for_updates(
         return UpdateCheckError("无法获取当前版本号")
 
     try:
-        async with httpx.AsyncClient(
-            timeout=10.0, proxy=proxy or None
-        ) as client:
+        async with httpx.AsyncClient(timeout=10.0, proxy=proxy or None) as client:
             response = await client.get(UPDATE_CHECK_URL)
             response.raise_for_status()
             data = response.json()

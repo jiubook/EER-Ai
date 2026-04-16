@@ -16,7 +16,6 @@ from endfield_essence_recognizer.services.user_setting_manager import (
 )
 from endfield_essence_recognizer.updater.checker import (
     NoUpdateAvailable,
-    UpdateCheckError,
 )
 from endfield_essence_recognizer.updater.manager import UpdateManager
 from endfield_essence_recognizer.updater.mirrors import MIRROR_NAMES

@@ -151,10 +151,7 @@ def main() -> None:
         "--output",
         type=Path,
         default=None,
-        help=(
-            "manifest.json 输出路径 "
-            "（默认: 写入 dist-dir/_internal/manifest.json）"
-        ),
+        help=("manifest.json 输出路径 （默认: 写入 dist-dir/_internal/manifest.json）"),
     )
     args = parser.parse_args()
 

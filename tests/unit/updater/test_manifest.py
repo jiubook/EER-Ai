@@ -368,7 +368,9 @@ class TestProtectedBackupList:
 
         _prepare_protected_files_list(temp_dir, manifest)
 
-        protected_list = (temp_dir / "__protected_files.txt").read_text(encoding="utf-8")
+        protected_list = (temp_dir / "__protected_files.txt").read_text(
+            encoding="utf-8"
+        )
         entries = [line for line in protected_list.strip().split("\n") if line]
 
         # 目录条目（logs/）不应在备份列表中
@@ -412,9 +414,7 @@ class TestPathTraversalProtection:
         tricky_dir.mkdir()
 
         # "update_evil/../update/../../evil.exe" 不应通过
-        assert _is_path_traversal(
-            tricky_dir, "../update/../../evil.exe"
-        )
+        assert _is_path_traversal(tricky_dir, "../update/../../evil.exe")
 
     def test_absolute_path_rejected(self, tmp_path: Path) -> None:
         """绝对路径应被拒绝。"""

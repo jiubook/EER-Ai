@@ -437,9 +437,7 @@ def _prepare_delete_list(
             if rel in new_files:
                 continue
             # 只清理 manifest 涉及目录下的旧程序文件（.exe/.dll/.pyd 等）
-            in_manifest_dir = any(
-                rel.startswith(d) for d in manifest_dirs
-            )
+            in_manifest_dir = any(rel.startswith(d) for d in manifest_dirs)
             if in_manifest_dir and path.suffix.lower() in _PROGRAM_EXTENSIONS:
                 to_delete.append(rel)
         logger.info(
@@ -457,9 +455,7 @@ def _prepare_delete_list(
     logger.info(f"生成删除清单: {len(to_delete)} 个文件")
 
 
-def _prepare_manifest_files_list(
-    temp_dir: Path, manifest: dict
-) -> None:
+def _prepare_manifest_files_list(temp_dir: Path, manifest: dict) -> None:
     """生成 manifest 文件列表，供批处理脚本复制使用。
 
     已排除 protected 文件，避免覆盖用户配置等敏感数据。
@@ -480,9 +476,7 @@ def _prepare_manifest_files_list(
     )
 
 
-def _prepare_protected_files_list(
-    temp_dir: Path, manifest: dict
-) -> None:
+def _prepare_protected_files_list(temp_dir: Path, manifest: dict) -> None:
     """生成 protected 文件列表，供批处理脚本备份/恢复使用。
 
     仅列出在磁盘上实际存在的 protected 文件（非目录）。

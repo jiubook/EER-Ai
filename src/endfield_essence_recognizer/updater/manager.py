@@ -32,9 +32,7 @@ def _verify_sha256(file_path: Path, expected: str) -> bool:
     actual = sha256.hexdigest()
     match = actual == expected
     if not match:
-        logger.error(
-            f"SHA-256 校验失败: 期望 {expected[:16]}... 实际 {actual[:16]}..."
-        )
+        logger.error(f"SHA-256 校验失败: 期望 {expected[:16]}... 实际 {actual[:16]}...")
     else:
         logger.info("SHA-256 校验通过")
     return match
