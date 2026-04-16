@@ -227,18 +227,18 @@ class TestDeleteListGeneration:
         delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
         deleted_files = [line for line in delete_list.strip().split("\n") if line]
 
-        # _internal/ 下的旧程序文件 → 删除
-        assert "_internal/old.dll" in deleted_files
-        assert "_internal/old.exe" in deleted_files
+        # _internal/ 下的旧程序文件 → 删除（Windows 路径格式）
+        assert "_internal\\old.dll" in deleted_files
+        assert "_internal\\old.exe" in deleted_files
         # _internal/ 下的新文件 → 不删除
-        assert "_internal/new.dll" not in deleted_files
+        assert "_internal\\new.dll" not in deleted_files
         # 根目录的用户文件 → 不删除
         assert "my_data.txt" not in deleted_files
         # 根目录的旧程序文件（不在 manifest 目录下）→ 不删除
         assert "old_root.exe" not in deleted_files
         # protected → 不删除
         assert "config.json" not in deleted_files
-        assert "logs/app.log" not in deleted_files
+        assert "logs\\app.log" not in deleted_files
 
     def test_no_old_manifest_empty_install_dir(self, tmp_path: Path) -> None:
         """首次升级且安装目录为空时，删除清单也应为空。"""
@@ -346,7 +346,8 @@ class TestCopyListExcludesProtected:
         copy_list = (temp_dir / "__manifest_files.txt").read_text(encoding="utf-8")
         copy_files = [line for line in copy_list.strip().split("\n") if line]
 
-        assert MANIFEST_RELATIVE_PATH in copy_files
+        # Windows 路径格式
+        assert MANIFEST_RELATIVE_PATH.replace("/", "\\") in copy_files
 
 
 class TestProtectedBackupList:

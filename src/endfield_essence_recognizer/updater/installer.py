@@ -115,20 +115,23 @@ def _generate_update_script_manifest(
     # manifest 文件本身也需要在更新后保留
     # （它已经在 manifest["files"] 中了，因为 generate_manifest 会把它加进去）
 
-    script = """@echo off
-chcp 65001 >nul
+    script = r"""@echo off
 setlocal EnableDelayedExpansion
 
 echo ========================================
 echo  EER Updater - Manifest-based Update
 echo ========================================
 
-REM 根目录检测（防止在 C:\\ 或 D:\\ 等根目录下运行）
+REM Root directory detection (prevent installation to C:\ or D:\)
 set "check_dir=%~dp0"
-set "check_dir=%check_dir:~3%"
+REM Remove drive letter and colon (e.g., "C:" -> "")
+set "check_dir=%check_dir:~2%"
+REM Remove trailing backslash
+if "%check_dir:~-1%"=="\\" set "check_dir=%check_dir:~0,-1%"
+REM If empty after removing drive and backslash, we're at root
 if "%check_dir%"=="" (
-    echo ERROR: Do not install to a root directory like C:\\ or D:\\
-    echo Please create a subfolder, e.g. D:\\EER\\
+    echo ERROR: Do not install to a root directory like C:\ or D:\
+    echo Please create a subfolder, e.g. D:\EER\
     echo Press any key to exit...
     pause >nul
     exit /b 1
@@ -148,7 +151,7 @@ if "%ERRORLEVEL%"=="0" (
 echo [2/6] Waiting for file handles to release...
 timeout /t 2 /nobreak >nul
 
-REM 检查写入权限
+REM Check write permission
 echo test >"%~dp0__write_test__.tmp" 2>nul
 if errorlevel 1 (
     echo ERROR: No write permission! Please run as administrator.
@@ -168,7 +171,7 @@ if not exist "%~dp0_update_temp\\__protected_files.txt" (
 set backup_count=0
 for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__protected_files.txt") do (
     if exist "%~dp0%%F" (
-        REM 备份到 _update_temp 目录（更新完成后会恢复）
+        REM Backup to _update_temp directory (will be restored after update)
         for %%D in ("%~dp0_update_temp\\__backup\\%%F") do (
             if not exist "%%~dpD" mkdir "%%~dpD" 2>nul
         )
@@ -187,14 +190,7 @@ echo   Backed up !backup_count! protected files.
 echo [4/6] Removing old version files...
 
 if not exist "%~dp0_update_temp\\__to_delete.txt" (
-    echo   No old files to delete (first install or no old manifest).
-    goto copy_files
-)
-
-REM 检查删除清单是否为空
-for /F %%A in ('type "%~dp0_update_temp\\__to_delete.txt" 2^>nul ^| find /C /V ""') do set line_count=%%A
-if "%line_count%"=="0" (
-    echo   No old files to delete.
+    echo   No old files to delete ^(first install or no old manifest^).
     goto copy_files
 )
 
@@ -214,9 +210,9 @@ for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__to_delete.txt") do (
 echo   Deleted !delete_count! old files.
 
 :copy_files
-echo [5/6] Copying new / updated files from update package...
+echo [5/7] Copying new / updated files from update package...
 
-REM 校验 manifest 文件是否存在
+REM Verify manifest file exists
 if not exist "%~dp0_update_temp\\__manifest_files.txt" (
     echo ERROR: Manifest file missing! Update aborted.
     echo Press any key to exit...
@@ -227,10 +223,10 @@ if not exist "%~dp0_update_temp\\__manifest_files.txt" (
 set copy_failed=0
 set copy_count=0
 
-REM 复制 manifest 中列出的所有文件（新增 + 覆盖），已排除 protected
+REM Copy all files listed in manifest (new + overwrite), protected files excluded
 for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__manifest_files.txt") do (
     if exist "%~dp0_update_temp\\%%F" (
-        REM 确保目标目录存在
+        REM Ensure target directory exists
         for %%D in ("%~dp0%%F") do (
             if not exist "%%~dpD" mkdir "%%~dpD" 2>nul
         )
@@ -253,9 +249,9 @@ if !copy_failed!==1 (
 
 echo   Copied !copy_count! files.
 
-REM 恢复 protected 文件（如果被备份过）
+REM Restore protected files (if backed up)
 if exist "%~dp0_update_temp\\__backup" (
-    echo Restoring protected files...
+    echo [6/7] Restoring protected files...
     for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__protected_files.txt") do (
         if exist "%~dp0_update_temp\\__backup\\%%F" (
             for %%D in ("%~dp0%%F") do (
@@ -268,7 +264,7 @@ if exist "%~dp0_update_temp\\__backup" (
 )
 
 :cleanup
-echo [6/6] Cleaning up update files...
+echo [7/7] Cleaning up update files...
 rmdir /S /Q "%~dp0_update_temp" 2>nul
 rmdir /S /Q "%~dp0_updates" 2>nul
 
@@ -296,66 +292,89 @@ def _generate_update_script_fallback(current_dir: Path, temp_dir: Path) -> str:
     Returns:
         批处理脚本内容。
     """
-    return """@echo off
+    return r"""@echo off
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
 
-echo Waiting for program to close...
+echo ========================================
+echo  EER Updater - Fallback Mode
+echo ========================================
+
+REM Root directory detection (prevent installation to C:\ or D:\)
+set "check_dir=%~dp0"
+REM Remove drive letter and colon (e.g., "C:" -> "")
+set "check_dir=%check_dir:~2%"
+REM Remove trailing backslash
+if "%check_dir:~-1%"=="\\" set "check_dir=%check_dir:~0,-1%"
+REM If empty after removing drive and backslash, we're at root
+if "%check_dir%"=="" (
+    echo ERROR: Do not install to a root directory like C:\ or D:\
+    echo Please create a subfolder, e.g. D:\EER\
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+)
+
+echo [1/5] Waiting for program to close...
 timeout /t 3 /nobreak >nul
 
 :wait_loop
 tasklist /FI "IMAGENAME eq endfield-essence-recognizer.exe" 2>NUL | find /I /N "endfield-essence-recognizer.exe">NUL
 if "%ERRORLEVEL%"=="0" (
-    echo Program still running, waiting...
+    echo   Program still running, waiting...
     timeout /t 1 /nobreak >nul
     goto wait_loop
 )
 
-echo Waiting for file handles to release...
+echo [2/5] Waiting for file handles to release...
 timeout /t 2 /nobreak >nul
 
-echo Protecting user configuration...
+echo [3/5] Protecting user configuration...
 if exist "%~dp0config.json" (
     copy /Y "%~dp0config.json" "%~dp0config.json.protected" >nul
-    echo Config file backed up
+    echo   Config file backed up
 )
 
-echo Deleting old program files...
+echo [4/5] Deleting old program files...
 if exist "%~dp0endfield-essence-recognizer.exe" del /F /Q "%~dp0endfield-essence-recognizer.exe" 2>nul
 if exist "%~dp0_internal" rmdir /S /Q "%~dp0_internal" 2>nul
+if exist "%~dp0logs" rmdir /S /Q "%~dp0logs" 2>nul
 if exist "%~dp0resources" rmdir /S /Q "%~dp0resources" 2>nul
 if exist "%~dp0README.md" del /F /Q "%~dp0README.md" 2>nul
 if exist "%~dp0界面白屏解决方法.md" del /F /Q "%~dp0界面白屏解决方法.md" 2>nul
 if exist "%~dp0遇到报错解决方法.webp" del /F /Q "%~dp0遇到报错解决方法.webp" 2>nul
 
-echo Copying new files...
+echo [5/5] Copying new files...
 set retry=0
 :copy_retry
 xcopy /E /Y /I "%~dp0_update_temp\\*" "%~dp0" 2>nul
 if errorlevel 1 (
     set /a retry+=1
     if !retry! lss 5 (
-        echo Copy failed, retrying... (attempt !retry!/5^)
+        echo   Copy failed, retrying... ^(attempt !retry!/5^)
         timeout /t 2 /nobreak >nul
         goto copy_retry
     )
-    echo File copy failed after 5 attempts
+    echo ERROR: File copy failed after 5 attempts
     echo Press any key to exit...
     pause >nul
     exit /b 1
 )
 
 echo Cleaning up...
-rmdir /S /Q "%~dp0_update_temp"
-rmdir /S /Q "%~dp0_updates"
+rmdir /S /Q "%~dp0_update_temp" 2>nul
+rmdir /S /Q "%~dp0_updates" 2>nul
 
 echo Restoring user configuration...
 if exist "%~dp0config.json.protected" (
     move /Y "%~dp0config.json.protected" "%~dp0config.json" >nul
-    echo Config file restored
+    echo   Config file restored
 )
 
-echo Starting new version...
+echo.
+echo ========================================
+echo  Update complete! Starting new version...
+echo ========================================
 start "" "%~dp0endfield-essence-recognizer.exe"
 
 timeout /t 1 /nobreak >nul
@@ -444,10 +463,12 @@ def _prepare_delete_list(
             f"共 {len(to_delete)} 个"
         )
 
-    # 写入删除清单
+    # 写入删除清单（转换为 Windows 路径格式）
     delete_list_path = temp_dir / "__to_delete.txt"
     delete_list_path.write_text(
-        "\n".join(sorted(to_delete)) + "\n" if to_delete else "",
+        "\n".join(f.replace("/", "\\") for f in sorted(to_delete)) + "\n"
+        if to_delete
+        else "",
         encoding="utf-8",
     )
 
@@ -466,11 +487,21 @@ def _prepare_manifest_files_list(temp_dir: Path, manifest: dict) -> None:
         manifest: manifest 字典。
     """
     protected = set(manifest["protected"])
-    copy_files = [f for f in manifest["files"] if not _is_protected(f, protected)]
+    # 过滤掉 protected 文件和 .git 相关文件
+    copy_files = [
+        f
+        for f in manifest["files"]
+        if not _is_protected(f, protected)
+        and not f.startswith(".git")
+        and "/.git" not in f
+        and not f.startswith("resources/.git")
+        and "/resources/.git" not in f
+    ]
 
     files_path = temp_dir / "__manifest_files.txt"
+    # 转换为 Windows 路径格式
     files_path.write_text(
-        "\n".join(sorted(copy_files)) + "\n",
+        "\n".join(f.replace("/", "\\") for f in sorted(copy_files)) + "\n",
         encoding="utf-8",
     )
 
@@ -491,8 +522,9 @@ def _prepare_protected_files_list(temp_dir: Path, manifest: dict) -> None:
         # 目录条目（如 logs/）不需要备份，只备份具体文件
         if not p.endswith("/"):
             protected_entries.append(p)
+    # 转换为 Windows 路径格式
     protected_path.write_text(
-        "\n".join(sorted(protected_entries)) + "\n",
+        "\n".join(p.replace("/", "\\") for p in sorted(protected_entries)) + "\n",
         encoding="utf-8",
     )
 
@@ -554,14 +586,16 @@ def install_update(zip_path: Path) -> bool:
             script_content = _generate_update_script_manifest(
                 current_dir, temp_dir, manifest
             )
+            encoding = "ansi"
         else:
             # 回退模式：兼容无 manifest 的旧版更新包
             logger.info("使用回退模式进行全量更新")
             script_content = _generate_update_script_fallback(current_dir, temp_dir)
+            encoding = "utf-8-sig"  # 回退模式需要 UTF-8 以支持中文文件名
 
         # 创建更新脚本
         updater_script = current_dir / "_updater.bat"
-        updater_script.write_text(script_content, encoding="utf-8-sig")
+        updater_script.write_text(script_content, encoding=encoding, errors="replace")
 
         logger.info("启动更新脚本并退出程序")
         subprocess.Popen(
