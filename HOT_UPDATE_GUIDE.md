@@ -221,12 +221,11 @@ UPDATE_CHECK_URL = "https://cos.yituliu.cn/endfield/endfield-essence-recognizer/
 
 ## 发布新版本
 
-1. 更新 `pyproject.toml` 中的版本号
-2. 更新 `src/endfield_essence_recognizer/version.py` 中的 `__version__`
-3. 构建并打包应用
-4. CI 会自动在 PyInstaller 构建后执行 `scripts/generate_manifest.py`，将 manifest.json 打入 zip 包
-5. 在 GitHub 创建 Release 并上传 zip 包
-6. 用户端会自动检测到新版本
+1. 更新 `pyproject.toml` 中的版本号（`version.py` 通过 `importlib.metadata` 动态读取包版本，无需手动修改）
+2. 构建并打包应用
+3. CI 会自动在 PyInstaller 构建后执行 `scripts/generate_manifest.py`，将 manifest.json 打入 zip 包
+4. 在 GitHub 创建 Release 并上传 zip 包
+5. 用户端会自动检测到新版本
 
 **本地测试 manifest 生成：**
 ```bash
