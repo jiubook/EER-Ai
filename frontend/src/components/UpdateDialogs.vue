@@ -14,7 +14,7 @@
         color="primary"
         :loading="isUpdating"
         variant="elevated"
-        @click="installUpdate"
+        @click="installUpdate(false)"
         >一键更新</v-btn
       >
     </template>

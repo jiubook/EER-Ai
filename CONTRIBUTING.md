@@ -278,6 +278,9 @@ cd ..
 
 # 打包
 uv run pyinstaller main.spec -y
+
+# 打包完成后，手动执行 manifest 生成
+uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-recognizer
 ```
 
 打包产物位于 `dist/endfield-essence-recognizer` 目录。
