@@ -214,7 +214,7 @@ for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__to_delete.txt") do (
 echo   Deleted !delete_count! old files.
 
 :copy_files
-echo [5/7] Copying new / updated files from update package...
+echo [5/6] Copying new / updated files from update package...
 
 REM 校验 manifest 文件是否存在
 if not exist "%~dp0_update_temp\\__manifest_files.txt" (
@@ -268,7 +268,7 @@ if exist "%~dp0_update_temp\\__backup" (
 )
 
 :cleanup
-echo [7/7] Cleaning up update files...
+echo [6/6] Cleaning up update files...
 rmdir /S /Q "%~dp0_update_temp" 2>nul
 rmdir /S /Q "%~dp0_updates" 2>nul
 
@@ -323,7 +323,6 @@ if exist "%~dp0config.json" (
 echo Deleting old program files...
 if exist "%~dp0endfield-essence-recognizer.exe" del /F /Q "%~dp0endfield-essence-recognizer.exe" 2>nul
 if exist "%~dp0_internal" rmdir /S /Q "%~dp0_internal" 2>nul
-if exist "%~dp0logs" rmdir /S /Q "%~dp0logs" 2>nul
 if exist "%~dp0resources" rmdir /S /Q "%~dp0resources" 2>nul
 if exist "%~dp0README.md" del /F /Q "%~dp0README.md" 2>nul
 if exist "%~dp0界面白屏解决方法.md" del /F /Q "%~dp0界面白屏解决方法.md" 2>nul
