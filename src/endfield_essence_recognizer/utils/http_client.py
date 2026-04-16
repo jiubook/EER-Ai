@@ -10,7 +10,10 @@ class HotkeyClient:
     def __init__(self):
         config = get_server_config()
         self.base_url = f"http://{config.api_host}:{config.api_port}/api"
-        self.client = httpx.Client(timeout=5.0)
+        self.client = httpx.Client(
+            timeout=5.0,
+            transport=httpx.HTTPTransport(proxy=None),  # 明确禁用代理
+        )
 
     def post(
         self, endpoint: str, json: dict | None = None, key_pressed: str = ""
