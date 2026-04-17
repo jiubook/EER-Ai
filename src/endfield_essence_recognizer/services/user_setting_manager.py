@@ -15,23 +15,36 @@ __all__ = ["UserSettingManager"]
 
 def _load_user_setting_from_file(
     model_cls: type[UserSetting], path: Path
-) -> UserSetting | None:
+) -> tuple[UserSetting | None, bool]:
     """
-    Load UserSetting from a file. Return None if loading fails.
+    Load UserSetting from a file. Return (result, migrated).
+    - result: UserSetting or None if loading fails
+    - migrated: True if migration from an older version was performed
     """
     if not path.is_file():
-        return None
+        return None, False
     try:
         # pydantic model loading
         obj = json.loads(path.read_text(encoding="utf-8"))
-        if "version" in obj and obj["version"] == model_cls._VERSION:
-            return model_cls.model_validate(obj)
+        if "version" in obj:
+            if obj["version"] == model_cls._VERSION:
+                return model_cls.model_validate(obj), False
+            else:
+                # 尝试从旧版本迁移
+                try:
+                    logger.info(
+                        f"检测到旧版本配置 (v{obj['version']})，尝试迁移到 v{model_cls._VERSION}"
+                    )
+                    return model_cls.migrate_from_old_version(obj), True
+                except Exception as e:
+                    logger.warning(f"配置迁移失败: {e}")
+                    return None, False
         else:
-            return None
+            return None, False
     except Exception as e:
         # returning None masks the error, so log it here
         logger.error("Failed to load user setting from file {}: {}", path, e)
-        return None
+        return None, False
 
 
 def _save_user_setting_to_file(model: UserSetting, path: Path) -> bool:
@@ -63,6 +76,21 @@ class UserSettingManager:
         self._user_setting_file = user_setting_file
         self._user_setting = UserSetting()  # In-memory UserSetting instance
 
+    def _cleanup_old_backups(self, config_path: Path, keep: int = 3) -> None:
+        """清理旧备份文件，保留最近 N 个"""
+        pattern = f"{config_path.stem}.backup.*.json"
+        backups = sorted(
+            config_path.parent.glob(pattern),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old_backup in backups[keep:]:
+            try:
+                old_backup.unlink()
+                logger.debug("已删除旧备份：{}", old_backup)
+            except Exception as e:
+                logger.warning("删除旧备份失败 {}: {}", old_backup, e)
+
     def get_user_setting(self) -> UserSetting:
         """
         Get a copy of the current UserSetting.
@@ -87,24 +115,32 @@ class UserSettingManager:
         """
         target_path = path or self._user_setting_file
         logger.info("正在尝试加载配置文件：{}", target_path.resolve())
-        result = _load_user_setting_from_file(UserSetting, target_path)
+        result, migrated = _load_user_setting_from_file(UserSetting, target_path)
         if result is not None:
             self._user_setting = result
-            logger.info("加载配置成功。")
+            # 仅在发生迁移时保存新版本
+            if migrated:
+                self.save_user_setting(target_path)
+                logger.info("配置已从旧版本迁移并保存。")
+            else:
+                logger.info("加载配置成功。")
             logger.debug("当前配置内容：{}", self._user_setting.model_dump())
             return
         # Handle invalid or non-existing file
         if target_path.is_file():
-            # Backup invalid file
-            backup_path = target_path.with_suffix(".backup.json")
-            # remove existing backup if any
-            if backup_path.is_file():
-                backup_path.unlink()
+            # Backup invalid file with timestamp
+            from datetime import datetime
+
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_path = target_path.with_suffix(f".backup.{timestamp}.json")
             target_path.rename(backup_path)
-            logger.warning(
-                "配置文件版本不匹配或无效，已备份旧配置到：{}", backup_path.resolve()
+            logger.error(
+                "配置文件加载失败，已备份到：{}\n"
+                "将使用默认配置。如需恢复旧配置，请检查备份文件。",
+                backup_path.resolve(),
             )
-            logger.info("创建并使用默认配置。")
+            # 清理旧备份，保留最近 3 个
+            self._cleanup_old_backups(target_path, keep=3)
         else:
             logger.info("未找到配置文件，使用默认配置。")
         # Use default settings

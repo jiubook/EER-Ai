@@ -48,6 +48,10 @@ jobs:
         run: |
           uv run --no-dev --group build pyinstaller main.spec
 
+      - name: Generate update manifest
+        run: |
+          uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-recognizer
+
       - name: Zip the built files
         shell: pwsh
         run: |

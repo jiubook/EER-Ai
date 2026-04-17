@@ -353,9 +353,60 @@
               </v-radio-group>
             </v-col>
           </v-row>
+          <v-divider class="my-4" />
+          <h2>更新设置</h2>
+          <v-row class="my-4">
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="updateMirror"
+                density="comfortable"
+                hide-details
+                :items="mirrorOptions"
+                label="下载镜像源"
+                variant="outlined"
+              >
+                <template #append-inner>
+                  <v-tooltip location="top">
+                    <template #activator="{ props }">
+                      <v-icon v-bind="props" size="small">mdi-information-outline</v-icon>
+                    </template>
+                    <span>{{ selectedMirrorName }}</span>
+                  </v-tooltip>
+                </template>
+              </v-select>
+            </v-col>
+            <v-col cols="12" md="6">
+              <div class="d-flex align-center">
+                <v-text-field
+                  v-model="updateProxyPort"
+                  class="flex-grow-1"
+                  density="comfortable"
+                  :disabled="!updateProxyEnabled"
+                  hide-details
+                  label="代理端口"
+                  placeholder="7890"
+                  type="number"
+                  variant="outlined"
+                />
+                <v-switch
+                  v-model="updateProxyEnabled"
+                  class="ms-4 flex-shrink-0"
+                  color="primary"
+                  density="comfortable"
+                  hide-details
+                  label="使用代理"
+                />
+              </div>
+            </v-col>
+          </v-row>
         </v-expansion-panel-text>
       </v-expansion-panel>
     </v-expansion-panels>
+    <v-card class="mt-4" variant="outlined">
+      <v-card-text class="text-center text-caption text-medium-emphasis">
+        配置版本: v{{ configVersion }}
+      </v-card-text>
+    </v-card>
   </v-container>
 </template>
 
@@ -364,13 +415,16 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { setScanningStatusPolling, useScanningStatus } from '@/composables/useScanningStatus'
+import { useUpdateMirrors } from '@/composables/useUpdateMirrors'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
 
 const theme = useTheme()
 const { weaponTypes, weaponsMap, rarityColors, essencesMap } = useStaticData()
 const { isScanning, pollingEnabled } = useScanningStatus()
+const { mirrorOptions } = useUpdateMirrors()
 const statusPollingEnabled = ref(pollingEnabled)
+const configVersion = ref(0)
 
 const allAttributeStats = computed(() =>
   Array.from(essencesMap.value.values())
@@ -404,12 +458,20 @@ const highLevelTreasureEnabled = ref(false)
 const highLevelTreasureAttributeThreshold = ref(3)
 const highLevelTreasureSecondaryThreshold = ref(3)
 const highLevelTreasureSkillThreshold = ref(3)
+const updateMirror = ref('github')
+const updateProxyEnabled = ref(false)
+const updateProxyPort = ref('7890')
 const weaponEssenceCounts = ref<Record<string, number>>({})
 
 const notSelectedWeaponIds = computed(() => {
   return Array.from(weaponsMap.value.keys()).filter(
     (weaponId) => !selectedWeaponIds.value.includes(weaponId),
   )
+})
+
+const selectedMirrorName = computed(() => {
+  const mirror = mirrorOptions.value.find((m) => m.value === updateMirror.value)
+  return mirror ? mirror.title : 'GitHub 官方'
 })
 
 function getWeaponStatsDescription(weaponId: string): string {
@@ -484,8 +546,9 @@ function isTypePartiallySelected(groupId: string): boolean {
 }
 
 const config = computed(() => {
+  const proxyUrl = updateProxyEnabled.value ? `http://127.0.0.1:${updateProxyPort.value}` : ''
   return {
-    version: 3,
+    version: 4,
     trash_weapon_ids: notSelectedWeaponIds.value,
     treasure_essence_stats: treasureEssenceStats.value,
     treasure_action: treasureAction.value,
@@ -496,6 +559,8 @@ const config = computed(() => {
     high_level_treasure_attribute_threshold: highLevelTreasureAttributeThreshold.value,
     high_level_treasure_secondary_threshold: highLevelTreasureSecondaryThreshold.value,
     high_level_treasure_skill_threshold: highLevelTreasureSkillThreshold.value,
+    update_mirror: updateMirror.value,
+    update_proxy: proxyUrl,
   }
 })
 
@@ -503,6 +568,7 @@ async function getConfig() {
   const response = await fetch(`/api/config`)
   const result = await response.json()
   const {
+    version,
     trash_weapon_ids,
     treasure_essence_stats,
     treasure_action,
@@ -513,7 +579,10 @@ async function getConfig() {
     high_level_treasure_attribute_threshold,
     high_level_treasure_secondary_threshold,
     high_level_treasure_skill_threshold,
+    update_mirror,
+    update_proxy,
   } = result
+  configVersion.value = version
   treasureEssenceStats.value = treasure_essence_stats
   treasureAction.value = treasure_action
   trashAction.value = trash_action
@@ -523,6 +592,18 @@ async function getConfig() {
   highLevelTreasureAttributeThreshold.value = high_level_treasure_attribute_threshold
   highLevelTreasureSecondaryThreshold.value = high_level_treasure_secondary_threshold
   highLevelTreasureSkillThreshold.value = high_level_treasure_skill_threshold
+  updateMirror.value = update_mirror || 'github'
+
+  // 解析代理配置
+  if (update_proxy) {
+    updateProxyEnabled.value = true
+    const match = update_proxy.match(/:(\d+)$/)
+    updateProxyPort.value = match ? match[1] : '7890'
+  } else {
+    updateProxyEnabled.value = false
+    updateProxyPort.value = '7890'
+  }
+
   selectedWeaponIds.value = Array.from(weaponsMap.value.keys()).filter(
     (weaponId) => !trash_weapon_ids.includes(weaponId),
   )
@@ -587,6 +668,7 @@ async function startPolling() {
 onMounted(async () => {
   await getConfig()
   await startPolling()
+
   watch(config, postConfig, { deep: true })
 })
 </script>

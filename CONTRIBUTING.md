@@ -33,7 +33,7 @@
 
 ### 2. Python 后端规范 (`src/`)
 
-* **文档字符串 (Docstrings)**：公有函数、和类必须包含完整的 Docstring。如果修改了函数或类的行为，其文档字符串也必须同步更新。
+* **文档字符串 (Docstrings)**：公有函数和类必须包含完整的 Docstring。如果修改了函数或类的行为，其文档字符串也必须同步更新。
 * **类型标注 (Type Hints)**：强烈建议为函数参数和返回值添加类型注解，以增强代码的健壮性。
 * **代码一致性**：新代码应在风格、布局和设计模式上与项目现有代码保持高度一致。
 
@@ -42,7 +42,46 @@
 * **模式一致性**：新开发的组件或状态管理应参考项目现有的设计模式，确保风格统一。
 * **变量命名**：同样需遵守语义化命名的原则，避免混淆。
 
-### 4. 注释与可读性
+### 4. 修改配置 Schema
+
+如果需要修改 `UserSetting` 配置结构（位于 `src/endfield_essence_recognizer/schemas/user_setting.py`），**必须**遵循以下步骤：
+
+1. **更新版本号**：递增 `UserSetting._VERSION`
+2. **添加迁移函数**：创建 `_migrate_vN_to_vN+1` 静态方法
+3. **注册迁移函数**：在 `_MIGRATIONS` 字典中添加映射
+4. **添加迁移测试**：在 `tests/test_user_setting_manager.py` 中添加测试验证迁移逻辑正确
+5. **更新 Schema 测试**：更新 `test_user_setting_schema_stability()` 中的 `expected_fields` 集合
+
+**示例（v4 → v5）：**
+```python
+# 1. 更新后端版本号
+_VERSION: ClassVar[int] = 5
+# 从 4 改为 5
+
+# 2. 更新前端版本号
+将 frontend/src/pages/settings.vue 中的 version 改为 5
+# 从 4 改为 5
+
+# 3. 添加迁移函数
+@staticmethod
+def _migrate_v4_to_v5(data: dict) -> None:
+    """v4 → v5: 添加新字段"""
+    data.setdefault("new_field", "default_value")
+
+# 4. 注册到迁移映射表
+_MIGRATIONS: ClassVar[dict[int, Any]] = {
+    3: _migrate_v3_to_v4,
+    4: _migrate_v4_to_v5,  # 新增
+}
+```
+
+**为什么这样做？**
+- 保证用户升级时配置不丢失
+- 链式迁移支持跨版本升级（v2 → v5 会自动执行 v2→v3→v4→v5）
+- 自动化测试会在你忘记更新时提醒你
+- 避免用户手动重新配置
+
+### 5. 注释与可读性
 
 * **逻辑清晰**：复杂逻辑块必须配有必要的行内注释，解释其目的和实现思路。
 * **可读性优先**：我们推崇编写自解释的代码。在代码简洁性与可读性发生冲突时，请优先选择可读性。
@@ -239,6 +278,9 @@ cd ..
 
 # 打包
 uv run pyinstaller main.spec -y
+
+# 打包完成后，手动执行 manifest 生成
+uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-recognizer
 ```
 
 打包产物位于 `dist/endfield-essence-recognizer` 目录。

@@ -71,9 +71,10 @@ def test_load_user_setting_invalid_version_backups_file(manager, settings_file):
 
     manager.load_user_setting()
 
-    # Check backup exists
-    backup_file = settings_file.with_suffix(".backup.json")
-    assert backup_file.exists()
+    # Check backup exists (with timestamp)
+    backup_files = list(settings_file.parent.glob("settings.backup.*.json"))
+    assert len(backup_files) == 1
+    backup_file = backup_files[0]
     assert json.loads(backup_file.read_text(encoding="utf-8"))["trash_weapon_ids"] == [
         "old_weapon"
     ]
@@ -94,8 +95,10 @@ def test_load_user_setting_corrupt_json_backups_file(manager, settings_file):
 
     manager.load_user_setting()
 
-    backup_file = settings_file.with_suffix(".backup.json")
-    assert backup_file.exists()
+    # Check backup exists (with timestamp)
+    backup_files = list(settings_file.parent.glob("settings.backup.*.json"))
+    assert len(backup_files) == 1
+    backup_file = backup_files[0]
     assert backup_file.read_text(encoding="utf-8") == "not a json"
 
     assert manager.get_user_setting().version == UserSetting._VERSION
@@ -155,3 +158,188 @@ def test_update_from_dict_invalid_data(manager):
     """Test that update_from_dict raises an exception when provided with invalid data."""
     with pytest.raises(ValidationError):
         manager.update_from_dict({"trash_weapon_ids": "not a list"})
+
+
+def test_config_migration_from_v3_to_v4():
+    """测试从 v3 迁移到 v4"""
+    old_config = {
+        "version": 3,
+        "trash_weapon_ids": ["weapon_1"],
+        "treasure_essence_stats": [],
+        "treasure_action": "lock",
+        "trash_action": "unlock",
+        "non_five_star_behavior": "process",
+        "high_level_treasure_enabled": False,
+        "high_level_treasure_attribute_threshold": 3,
+        "high_level_treasure_secondary_threshold": 3,
+        "high_level_treasure_skill_threshold": 3,
+        "auto_page_flip": True,
+        # v3 没有 update_mirror 和 update_proxy
+    }
+
+    migrated = UserSetting.migrate_from_old_version(old_config)
+
+    # 验证旧数据保留
+    assert migrated.trash_weapon_ids == ["weapon_1"]
+    assert migrated.auto_page_flip is True
+    # 验证新字段有默认值
+    assert migrated.update_mirror == "github"
+    assert migrated.update_proxy == ""
+    # 验证版本更新
+    assert migrated.version == 4
+
+
+def test_config_migration_invalid_version():
+    """测试无效版本号迁移失败"""
+    from endfield_essence_recognizer.schemas.user_setting import UserSetting
+
+    # 负数版本
+    with pytest.raises(ValueError, match="无效的配置版本"):
+        UserSetting.migrate_from_old_version({"version": -1})
+
+    # 未来版本
+    with pytest.raises(ValueError, match="配置文件版本过高"):
+        UserSetting.migrate_from_old_version({"version": 999})
+
+
+def test_load_user_setting_with_migration(manager, settings_file):
+    """测试加载旧版本配置时自动迁移"""
+    old_config = {
+        "version": 3,
+        "trash_weapon_ids": ["old_weapon"],
+        "treasure_essence_stats": [],
+        "treasure_action": "lock",
+        "trash_action": "unlock",
+        "non_five_star_behavior": "process",
+        "high_level_treasure_enabled": False,
+        "high_level_treasure_attribute_threshold": 3,
+        "high_level_treasure_secondary_threshold": 3,
+        "high_level_treasure_skill_threshold": 3,
+        "auto_page_flip": True,
+    }
+    settings_file.write_text(json.dumps(old_config), encoding="utf-8")
+
+    manager.load_user_setting()
+
+    # 验证迁移成功
+    setting = manager.get_user_setting()
+    assert setting.version == UserSetting._VERSION
+    assert setting.trash_weapon_ids == ["old_weapon"]
+    assert setting.update_mirror == "github"
+    assert setting.update_proxy == ""
+
+    # 验证新版本已保存到文件
+    saved_data = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert saved_data["version"] == UserSetting._VERSION
+    assert saved_data["update_mirror"] == "github"
+
+
+def test_user_setting_schema_stability():
+    """检测 UserSetting schema 变更，提醒开发者更新迁移逻辑"""
+    expected_fields = {
+        "version",
+        "trash_weapon_ids",
+        "treasure_essence_stats",
+        "treasure_action",
+        "trash_action",
+        "non_five_star_behavior",
+        "high_level_treasure_enabled",
+        "high_level_treasure_attribute_threshold",
+        "high_level_treasure_secondary_threshold",
+        "high_level_treasure_skill_threshold",
+        "auto_page_flip",
+        "update_mirror",
+        "update_proxy",
+    }
+
+    actual_fields = set(UserSetting.model_fields.keys())
+
+    # 如果字段变化，测试失败并提示
+    assert actual_fields == expected_fields, (
+        f"UserSetting schema 已变更！\n"
+        f"新增字段: {actual_fields - expected_fields}\n"
+        f"删除字段: {expected_fields - actual_fields}\n"
+        f"请执行以下步骤：\n"
+        f"1. 更新 UserSetting._VERSION\n"
+        f"2. 在 migrate_from_old_version() 添加迁移逻辑\n"
+        f"3. 添加对应的迁移测试\n"
+        f"4. 更新此测试的 expected_fields"
+    )
+
+
+def test_config_migration_chain_v2_to_v4():
+    """测试跨版本链式迁移：v2 → v3 → v4（早期 v2，缺少后期新增字段）"""
+    early_v2_config = {
+        "version": 2,
+        "trash_weapon_ids": ["weapon_v2"],
+        "treasure_essence_stats": [],
+        "treasure_action": "lock",
+        "trash_action": "unlock",
+        "high_level_treasure_enabled": False,
+        "high_level_treasure_attribute_threshold": 3,
+        "high_level_treasure_secondary_threshold": 3,
+        "high_level_treasure_skill_threshold": 3,
+        # 早期 v2 没有 non_five_star_behavior 和 auto_page_flip
+    }
+
+    migrated = UserSetting.migrate_from_old_version(early_v2_config)
+
+    assert migrated.version == 4
+    assert migrated.trash_weapon_ids == ["weapon_v2"]
+    # v2→v3 补充的字段
+    assert migrated.non_five_star_behavior == "process"
+    assert migrated.auto_page_flip is True
+    # v3→v4 补充的字段
+    assert migrated.update_mirror == "github"
+    assert migrated.update_proxy == ""
+
+
+def test_migrations_completeness():
+    """测试 _MIGRATIONS 字典完整性，确保所有中间版本都有迁移函数"""
+    current_version = UserSetting._VERSION
+    migrations = UserSetting._MIGRATIONS
+
+    # 检查从版本 2 到当前版本的所有迁移路径
+    for v in range(2, current_version):
+        assert v in migrations, (
+            f"缺少迁移函数：v{v} → v{v + 1}\n"
+            f"请在 UserSetting 中添加 _migrate_v{v}_to_v{v + 1} 方法"
+        )
+
+
+def test_frontend_config_version_matches_backend():
+    """确保前端 settings.vue 中的 config version 与后端 UserSetting._VERSION 一致。
+
+    前端发送的 version 字段必须和后端校验的版本号匹配，否则配置将无法保存。
+    如果此测试失败，请同步更新 frontend/src/pages/settings.vue 中的 version 值。
+    """
+    import re
+    from pathlib import Path
+
+    settings_vue = (
+        Path(__file__).resolve().parent.parent
+        / "frontend"
+        / "src"
+        / "pages"
+        / "settings.vue"
+    )
+    assert settings_vue.exists(), f"找不到前端设置页面: {settings_vue}"
+
+    content = settings_vue.read_text(encoding="utf-8")
+
+    # 从 config computed 中提取 version: <number>
+    # 匹配 return { version: N, ... } 内的 version 字段
+    match = re.search(r"return\s*\{[^}]*version:\s*(\d+)", content)
+    assert match, (
+        "无法从 settings.vue 的 config computed 中提取 version 字段，"
+        "请检查模板格式是否变更"
+    )
+
+    frontend_version = int(match.group(1))
+    backend_version = UserSetting._VERSION
+
+    assert frontend_version == backend_version, (
+        f"前后端配置版本不一致！前端 version={frontend_version}，后端 _VERSION={backend_version}\n"
+        f"请将 frontend/src/pages/settings.vue 中的 version 改为 {backend_version}，"
+        f"或更新 UserSetting._VERSION 以匹配前端。"
+    )
