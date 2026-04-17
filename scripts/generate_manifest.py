@@ -185,7 +185,7 @@ def main() -> None:
     # print(f"manifest 已写入: {output_path}")
 
     # 打印摘要
-    print("\n--- manifest 摘要 ---")
+    # print("\n--- manifest 摘要 ---")
     # print(f"  version:   {manifest['version']}")
     # print(f"  files:     {file_count} 个")
     # print(f"  protected: {manifest['protected']}")
