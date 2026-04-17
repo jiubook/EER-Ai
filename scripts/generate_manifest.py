@@ -165,15 +165,15 @@ def main() -> None:
     # 确定版本号
     version = args.version or read_version_from_pyproject(project_root)
 
-    print(f"项目根目录: {project_root}")
-    print(f"dist 目录:   {dist_dir}")
-    print(f"版本号:      {version}")
+    # print(f"项目根目录: {project_root}")
+    # print(f"dist 目录:   {dist_dir}")
+    # print(f"版本号:      {version}")
 
     # 先扫描，生成 manifest（此时 manifest.json 尚未写入磁盘，不会出现在扫描结果中）
     manifest = generate_manifest(dist_dir, version)
-    file_count = len(manifest["files"])
-    protected_count = len(manifest["protected"])
-    print(f"扫描到 {file_count} 个文件, {protected_count} 个受保护路径")
+    # file_count = len(manifest["files"])
+    # protected_count = len(manifest["protected"])
+    # print(f"扫描到 {file_count} 个文件, {protected_count} 个受保护路径")
 
     # 输出到 _internal/manifest.json（而非 dist 根目录）
     output_path = args.output or (dist_dir / MANIFEST_RELATIVE_PATH)
@@ -182,13 +182,13 @@ def main() -> None:
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    print(f"manifest 已写入: {output_path}")
+    # print(f"manifest 已写入: {output_path}")
 
     # 打印摘要
     print("\n--- manifest 摘要 ---")
-    print(f"  version:   {manifest['version']}")
-    print(f"  files:     {file_count} 个")
-    print(f"  protected: {manifest['protected']}")
+    # print(f"  version:   {manifest['version']}")
+    # print(f"  files:     {file_count} 个")
+    # print(f"  protected: {manifest['protected']}")
 
 
 if __name__ == "__main__":
