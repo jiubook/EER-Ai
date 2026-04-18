@@ -4,8 +4,9 @@ Legacy game data module, kept for generate_templates.py script.
 
 from __future__ import annotations
 
-import importlib.resources
 import json
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -73,8 +74,11 @@ def get_translation(text_data: TranslationKey, language: str) -> str:
 
 
 # 配置
-CBT3_dir = importlib.resources.files("endfield_essence_recognizer") / "data"
-table_cfg_dir = CBT3_dir / "endfielddata/TableCfg"
+endfield_data_dir = os.getenv("ENDFIELD_DATA_DIR")
+if not endfield_data_dir:
+    raise OSError("环境变量 ENDFIELD_DATA_DIR 未设置")
+endfield_data_dir = Path(endfield_data_dir)
+table_cfg_dir = endfield_data_dir / "TableCfg"
 i18n_languages = ["CN", "EN", "JP", "KR", "MX", "RU", "TC"]
 used_i18n_languages = ["CN"]
 
