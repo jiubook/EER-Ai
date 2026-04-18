@@ -209,6 +209,28 @@ for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__to_delete.txt") do (
 
 echo   Deleted !delete_count! old files.
 
+REM Clean up empty directories left after file deletion
+echo [4.5/6] Removing empty directories...
+REM First pass: remove immediate parent directories of deleted files
+for /F "usebackq delims=" %%D in ("%~dp0_update_temp\\__to_delete.txt") do (
+    for %%P in ("%~dp0%%D") do (
+        if exist "%%~dpP" (
+            rmdir "%%~dpP" 2>nul
+        )
+    )
+)
+REM Second pass: recursively remove empty directories in _internal
+for /d %%D in ("%~dp0_internal\*") do (
+    rmdir "%%D" 2>nul
+    if exist "%%D" (
+        for /d %%S in ("%%D\*") do (
+            rmdir "%%S" 2>nul
+        )
+        rmdir "%%D" 2>nul
+    )
+)
+echo   Empty directories cleaned.
+
 :copy_files
 echo [5/7] Copying new / updated files from update package...
 
