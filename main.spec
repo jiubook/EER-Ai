@@ -18,6 +18,7 @@ a = Analysis(
     binaries=[],
     datas=[
         *collect_data_files("endfield_essence_recognizer"),
+        *collect_data_files("certifi"),  # 新增：打包 CA 证书
         (
             "frontend/dist",
             "endfield_essence_recognizer/webui_dist",

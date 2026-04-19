@@ -12,7 +12,9 @@ class HotkeyClient:
         self.base_url = f"http://{config.api_host}:{config.api_port}/api"
         self.client = httpx.Client(
             timeout=5.0,
-            transport=httpx.HTTPTransport(proxy=None),  # 明确禁用代理
+            transport=httpx.HTTPTransport(
+                proxy=None, verify=False
+            ),  # 明确禁用代理，仅与本地 HTTP 服务通信，无需 SSL 验证
         )
 
     def post(
