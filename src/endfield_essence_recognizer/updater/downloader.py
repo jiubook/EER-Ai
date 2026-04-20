@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import aiofiles
+import certifi
 import httpx
 
 from endfield_essence_recognizer.utils.log import logger
@@ -34,7 +35,7 @@ async def download_update(
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         async with httpx.AsyncClient(
-            timeout=300.0, follow_redirects=True, proxy=proxy
+            timeout=300.0, verify=certifi.where(), follow_redirects=True, proxy=proxy
         ) as client:
             logger.info(f"开始下载更新: {download_url}")
 
