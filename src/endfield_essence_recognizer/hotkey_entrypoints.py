@@ -86,16 +86,32 @@ def temp_handle_keyboard_save_screenshot_for_debug(key: str):
     )
 
 
+def _safe_add_hotkey(key, handler, args, fallback=None):
+    try:
+        keyboard.add_hotkey(key, handler, args=args)
+    except Exception:
+        if fallback:
+            try:
+                keyboard.add_hotkey(fallback, handler, args=args)
+                logger.warning(f'热键 "{key}" 注册失败，已替换为 "{fallback}"')
+            except Exception as e:
+                logger.warning(
+                    f'热键 "{key}" 和备用热键 "{fallback}" 均注册失败: {e}，该热键将不可用'
+                )
+        else:
+            logger.warning(f'热键 "{key}" 注册失败，该热键将不可用')
+
+
 @contextmanager
 def bind_hotkeys(server_config: ServerConfig):
     """Context manager to bind and unbind global hotkeys."""
-    keyboard.add_hotkey("[", handle_keyboard_single_recognition, args=("[",))
-    keyboard.add_hotkey("]", handle_keyboard_auto_click, args=("]",))
-    keyboard.add_hotkey("\\", handle_keyboard_delivery_claim, args=("\\",))
-    keyboard.add_hotkey("alt+delete", handle_keyboard_on_exit, args=("alt+delete",))
+    _safe_add_hotkey("[", handle_keyboard_single_recognition, args=("[",), fallback=",")
+    _safe_add_hotkey("]", handle_keyboard_auto_click, args=("]",), fallback=".")
+    _safe_add_hotkey("\\", handle_keyboard_delivery_claim, args=("\\",))
+    _safe_add_hotkey("alt+delete", handle_keyboard_on_exit, args=("alt+delete",))
     if server_config.dev_mode:
         logger.debug("开发模式下，启用截图调试热键 `=`")
-        keyboard.add_hotkey(
+        _safe_add_hotkey(
             "=", temp_handle_keyboard_save_screenshot_for_debug, args=("=",)
         )  # 临时热键，用于调试截图功能
     logger.info("全局热键已注册")
