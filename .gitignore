@@ -18,6 +18,7 @@ screenshots/
 # local app settings
 config.json
 .env
+profiles.json
 
 # enfield data table config
 src/endfield_essence_recognizer/data/endfielddata/TableCfg/**.json

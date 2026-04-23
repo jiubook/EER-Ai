@@ -6,12 +6,15 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from endfield_essence_recognizer.api.routes.profiles import set_profile_manager
 from endfield_essence_recognizer.core.config import ServerConfig, get_server_config
+from endfield_essence_recognizer.core.path import get_root_dir
 from endfield_essence_recognizer.dependencies import (
     default_user_setting_manager,
     get_log_service,
 )
 from endfield_essence_recognizer.hotkey_entrypoints import bind_hotkeys
+from endfield_essence_recognizer.services.profile_manager import ProfileManager
 from endfield_essence_recognizer.utils.log import logger
 
 
@@ -43,6 +46,14 @@ def init_load_user_setting():
     """Load user settings at startup."""
     user_setting_manager = default_user_setting_manager()
     user_setting_manager.load_user_setting()
+
+
+def init_load_profiles():
+    """Load profiles at startup."""
+    profiles_file = get_root_dir() / "profiles.json"
+    profile_manager = ProfileManager(profiles_file)
+    profile_manager.load()
+    set_profile_manager(profile_manager)
 
 
 def init_mount_frontend_build(app: FastAPI, server_config: ServerConfig):
@@ -83,6 +94,7 @@ async def lifespan(app: FastAPI):
         logger.success(f"Server configuration: {server_config.model_dump()}")
         init_mount_frontend_build(app, server_config)
         init_load_user_setting()
+        init_load_profiles()
         log_welcome_message()
         with bind_hotkeys(server_config):
             yield

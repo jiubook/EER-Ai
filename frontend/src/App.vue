@@ -23,6 +23,7 @@
       <v-app-bar-nav-icon @click="drawer = !drawer" />
       <v-app-bar-title>{{ route.meta?.title || '终末地基质妙妙小工具' }}</v-app-bar-title>
       <template #append>
+        <profile-selector />
         <v-btn icon="mdi-update" @click="checkForUpdates(true)" />
         <v-btn icon="mdi-theme-light-dark" @click="theme.toggle()" />
       </template>
@@ -42,6 +43,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTheme } from 'vuetify'
 import Logo from '@/components/icons/logo.vue'
+import ProfileSelector from '@/components/ProfileSelector.vue'
 import UpdateDialogs from '@/components/UpdateDialogs.vue'
 import { useLogs } from '@/composables/useLogs'
 import { useUpdateChecker } from '@/composables/useUpdateChecker'
