@@ -38,6 +38,7 @@ class ScannerService:
         self._audio_service = audio_service
         self._current_engine: AutomationEngine | None = None
         self._last_weapon_essence_counts: dict[WeaponId, int] = {}
+        self._last_weapon_essence_levels: dict[WeaponId, tuple[int, int, int]] = {}
 
     def start_scan(self, scanner_factory: Callable[[], AutomationEngine]) -> None:
         """
@@ -63,9 +64,19 @@ class ScannerService:
             scanner = scanner_factory()
             self._current_engine = scanner
 
+            def wrapped_execute():
+                """包装执行逻辑，在完成后触发同步"""
+                # 在执行前保存引擎引用，避免竞态条件
+                engine_ref = scanner
+                try:
+                    scanner.execute(self._stop_event)
+                finally:
+                    # 扫描完成后保存数据并同步（无论是正常完成还是被中断）
+                    # 使用保存的引擎引用，而不是 self._current_engine
+                    self._on_scan_complete(engine_ref)
+
             self._thread = threading.Thread(
-                target=scanner.execute,
-                args=(self._stop_event,),
+                target=wrapped_execute,
                 daemon=True,
                 name="ScannerThread",
             )
@@ -75,6 +86,55 @@ class ScannerService:
             if self._audio_service:
                 self._audio_service.play_enable()
 
+    def _on_scan_complete(self, engine: AutomationEngine) -> None:
+        """扫描完成后的回调，保存数据并触发同步
+
+        Args:
+            engine: 扫描引擎实例（从 wrapped_execute 传入，避免竞态条件）
+        """
+        logger.info("扫描完成回调被触发")
+
+        from endfield_essence_recognizer.core.scanner.engine import (
+            ScannerEngine,
+        )
+
+        # 只有 ScannerEngine 才有 get_weapon_essence_data 方法
+        if not isinstance(engine, ScannerEngine):
+            logger.warning(f"引擎不是 ScannerEngine: {type(engine)}")
+            return
+
+        # 从引擎获取数据（不需要锁，因为 engine 是局部引用，不会被其他线程访问）
+        # 且此时扫描已完成，引擎内部数据不会再被修改
+        try:
+            data = engine.get_weapon_essence_data()
+            logger.debug(f"从引擎获取的数据 - counts: {len(data.counts)}, levels: {len(data.levels)}")
+            logger.debug(f"counts 内容: {data.counts}")
+            logger.debug(f"levels 内容: {data.levels}")
+        except Exception as e:
+            logger.error(f"获取扫描数据失败: {e}", exc_info=True)
+            return
+
+        # 在锁内保存数据到实例变量（保护共享状态）
+        with self._lock:
+            self._last_weapon_essence_counts = data.counts
+            self._last_weapon_essence_levels = data.levels
+            # 在锁内复制数据，确保数据一致性
+            data_to_sync = data.levels.copy()
+
+        logger.info(f"获取到扫描数据: {len(data_to_sync)} 把武器")
+
+        # 在锁外触发同步，避免死锁
+        # _sync_to_treasure_matrix 可能调用其他服务（如 profile_manager），
+        # 这些服务可能有自己的锁，在持有 self._lock 时调用可能导致死锁
+        if data_to_sync:
+            logger.info(f"开始同步 {len(data_to_sync)} 把武器到宝藏基质配置")
+            try:
+                self._sync_to_treasure_matrix(data_to_sync)
+            except Exception as e:
+                logger.error(f"同步扫描数据失败: {e}", exc_info=True)
+        else:
+            logger.warning("没有数据需要同步")
+
     def stop_scan(self) -> None:
         """
         Stop the scanning process.
@@ -82,6 +142,7 @@ class ScannerService:
         Sets the stop event and waits for the background thread to join.
         If no scan is running, a warning is logged.
         """
+        thread_to_join = None
         with self._lock:
             if not self.is_running():
                 logger.warning("扫描未在运行。")
@@ -89,26 +150,17 @@ class ScannerService:
 
             logger.debug("正在停止扫描服务...")
             self._stop_event.set()
-            if self._thread is not None:
-                self._thread.join()
-                logger.debug("Scanner thread joined.")
-                self._thread = None
-
-            # 保存最后一次扫描的统计数据
-            if self._current_engine is not None:
-                from endfield_essence_recognizer.core.scanner.engine import (
-                    ScannerEngine,
-                )
-
-                if isinstance(self._current_engine, ScannerEngine):
-                    self._last_weapon_essence_counts = (
-                        self._current_engine.get_weapon_essence_counts()
-                    )
-
+            thread_to_join = self._thread
+            self._thread = None
             self._current_engine = None
 
-            if self._audio_service:
-                self._audio_service.play_disable()
+        # 在锁外等待线程结束，避免死锁
+        if thread_to_join is not None:
+            thread_to_join.join()
+            logger.debug("Scanner thread joined.")
+
+        if self._audio_service:
+            self._audio_service.play_disable()
 
     def is_running(self) -> bool:
         """
@@ -153,20 +205,143 @@ class ScannerService:
             # 否则返回最后一次扫描的数据
             return self._last_weapon_essence_counts.copy()
 
+    def get_weapon_essence_data(self):
+        """
+        获取完整的武器基质数据（包括等级）。
+
+        Returns:
+            WeaponEssenceData 对象，包含计数和等级信息。
+        """
+        from endfield_essence_recognizer.schemas.scanner import WeaponEssenceData
+
+        with self._lock:
+            # 如果当前有正在运行的 ScannerEngine，返回实时数据
+            if self._current_engine is not None:
+                from endfield_essence_recognizer.core.scanner.engine import (
+                    ScannerEngine,
+                )
+
+                if isinstance(self._current_engine, ScannerEngine):
+                    return self._current_engine.get_weapon_essence_data()
+
+            # 否则返回最后一次扫描的数据
+            return WeaponEssenceData(
+                counts=self._last_weapon_essence_counts.copy(),
+                levels=self._last_weapon_essence_levels.copy(),
+            )
+
+    def _sync_to_treasure_matrix(
+        self, weapon_levels: dict[str, tuple[int, int, int]]
+    ) -> None:
+        """同步扫描数据到宝藏基质配置
+
+        Args:
+            weapon_levels: 武器ID到等级元组的映射
+        """
+        logger.info(f"开始同步扫描数据，共 {len(weapon_levels)} 把武器")
+        try:
+            # 延迟导入避免循环依赖
+            from endfield_essence_recognizer.api.routes.profiles import (
+                get_profile_manager,
+            )
+            from endfield_essence_recognizer.dependencies import (
+                get_static_game_data,
+            )
+            from endfield_essence_recognizer.schemas.profile import (
+                TreasureMatrixEntry,
+            )
+
+            profile_manager = get_profile_manager()
+            static_data = get_static_game_data()
+
+            logger.info("获取到 profile_manager 和 static_data")
+
+            # 遍历扫描到的武器
+            added_count = 0
+            updated_count = 0
+            for weapon_id, levels in weapon_levels.items():
+                logger.debug(f"处理武器 {weapon_id}, 等级: {levels}")
+                # 检查是否已存在
+                existing = next(
+                    (
+                        e
+                        for e in profile_manager.get_active_profile().treasure_matrix
+                        if e.weapon_id == weapon_id
+                    ),
+                    None,
+                )
+
+                if existing is None:
+                    # 不存在则添加
+                    weapon = static_data.get_weapon(weapon_id)
+                    weapon_name = weapon.name if weapon else weapon_id
+
+                    # 满级（6/6/3）默认不参与计算
+                    is_maxed = levels[0] == 6 and levels[1] == 6 and levels[2] == 3
+
+                    entry = TreasureMatrixEntry(
+                        weapon_id=weapon_id,
+                        weapon_name=weapon_name,
+                        affix1_level=levels[0],
+                        affix2_level=levels[1],
+                        affix3_level=levels[2],
+                        include_in_calculation=not is_maxed,
+                    )
+                    profile_manager.add_treasure_matrix_entry(entry)
+                    added_count += 1
+                    logger.info(
+                        f"已将武器 {weapon_name} 添加到宝藏基质配置，等级: +{levels[0]}/+{levels[1]}/+{levels[2]}"
+                    )
+                else:
+                    # 已存在则更新为更高的等级
+                    updated = False
+                    if existing.affix1_level < levels[0]:
+                        existing.affix1_level = levels[0]
+                        updated = True
+                    if existing.affix2_level < levels[1]:
+                        existing.affix2_level = levels[1]
+                        updated = True
+                    if existing.affix3_level < levels[2]:
+                        existing.affix3_level = levels[2]
+                        updated = True
+
+                    # 如果更新后达到满级，自动取消勾选
+                    if (
+                        existing.affix1_level == 6
+                        and existing.affix2_level == 6
+                        and existing.affix3_level == 3
+                    ):
+                        existing.include_in_calculation = False
+                        updated = True
+
+                    if updated:
+                        profile_manager.update_treasure_matrix(
+                            profile_manager.get_active_profile().treasure_matrix
+                        )
+                        updated_count += 1
+                        logger.info(
+                            f"已更新武器 {existing.weapon_name} 的等级: +{existing.affix1_level}/+{existing.affix2_level}/+{existing.affix3_level}"
+                        )
+
+            logger.info(
+                f"扫描数据同步完成: 新增 {added_count} 把武器，更新 {updated_count} 把武器"
+            )
+        except Exception as e:
+            logger.error(f"同步扫描数据到宝藏基质配置失败: {e}", exc_info=True)
+
     def toggle_scan(self, scanner_factory: Callable[[], AutomationEngine]) -> None:
         """
         Toggle the scanning state.
 
         Starts the scan if it's not running, or stops it if it is.
-        Uses a single lock to ensure atomicity of the toggle operation.
 
         Args:
             scanner_factory: A callable that returns an AutomationEngine instance. Called if starting a scan.
         """
-        # Use a single lock for the whole toggle operation to prevent races
-        # between checking and acting. RLock allows us to call start/stop internally.
-        with self._lock:
-            if self.is_running():
-                self.stop_scan()
-            else:
-                self.start_scan(scanner_factory)
+        # 检查状态，但不在锁内调用 start/stop，避免死锁
+        should_stop = self.is_running()
+
+        if should_stop:
+            self.stop_scan()
+        else:
+            self.start_scan(scanner_factory)

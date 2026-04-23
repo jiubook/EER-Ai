@@ -4,11 +4,15 @@
  * 改编自 ef-frontend-v1 的基质计算器逻辑，帮助用户找到刷取所需基质的最佳位置。
  */
 
-import { computed, ref } from 'vue'
+import { computed, ref, type Ref, watch } from 'vue'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
 
+let _nextId = 1
+
 export interface PlannerEssenceStat {
+  /** 唯一标识符，用于 v-for key 和稳定引用 */
+  id: number
   isCustom: boolean
   weaponId: string | null
   attribute: string | null
@@ -35,63 +39,63 @@ export interface EnergyAlluvium {
 
 // 能量淤积点数据（刷取位置）
 const energyAlluviums: Record<string, EnergyAlluvium> = {
-  '重度能量淤积点·枢纽区': {
-    battleId: '重度能量淤积点·枢纽区',
-    battleName: '重度能量淤积点·枢纽区',
+  枢纽区: {
+    battleId: '枢纽区',
+    battleName: '枢纽区',
     secondaryStats: [
       '攻击提升', '灼热伤害提升', '电磁伤害提升', '寒冷伤害提升',
       '自然伤害提升', '源石技艺提升', '终结技充能效率提升', '法术伤害提升',
     ],
     skillStats: ['强攻', '压制', '追袭', '粉碎', '巧技', '迸发', '流转', '效益'],
   },
-  '重度能量淤积点·源石研究园': {
-    battleId: '重度能量淤积点·源石研究园',
-    battleName: '重度能量淤积点·源石研究园',
+  源石研究园: {
+    battleId: '源石研究园',
+    battleName: '源石研究园',
     secondaryStats: [
       '攻击提升', '物理伤害提升', '电磁伤害提升', '寒冷伤害提升',
       '自然伤害提升', '暴击率提升', '终结技充能效率提升', '法术伤害提升',
     ],
     skillStats: ['压制', '追袭', '昂扬', '巧技', '附术', '医疗', '切骨', '效益'],
   },
-  '重度能量淤积点·矿脉源区': {
-    battleId: '重度能量淤积点·矿脉源区',
-    battleName: '重度能量淤积点·矿脉源区',
+  矿脉源区: {
+    battleId: '矿脉源区',
+    battleName: '矿脉源区',
     secondaryStats: [
       '生命提升', '物理伤害提升', '灼热伤害提升', '寒冷伤害提升',
       '自然伤害提升', '暴击率提升', '源石技艺提升', '治疗效率提升',
     ],
     skillStats: ['强攻', '压制', '巧技', '残暴', '附术', '迸发', '夜幕', '效益'],
   },
-  '重度能量淤积点·供能高地': {
-    battleId: '重度能量淤积点·供能高地',
-    battleName: '重度能量淤积点·供能高地',
+  供能高地: {
+    battleId: '供能高地',
+    battleName: '供能高地',
     secondaryStats: [
       '攻击提升', '生命提升', '物理伤害提升', '灼热伤害提升',
       '自然伤害提升', '暴击率提升', '源石技艺提升', '治疗效率提升',
     ],
     skillStats: ['追袭', '粉碎', '昂扬', '残暴', '附术', '医疗', '切骨', '流转'],
   },
-  '重度能量淤积点·武陵城': {
-    battleId: '重度能量淤积点·武陵城',
-    battleName: '重度能量淤积点·武陵城',
+  武陵城: {
+    battleId: '武陵城',
+    battleName: '武陵城',
     secondaryStats: [
       '攻击提升', '生命提升', '电磁伤害提升', '寒冷伤害提升',
       '暴击率提升', '终结技充能效率提升', '法术伤害提升', '治疗效率提升',
     ],
     skillStats: ['强攻', '粉碎', '残暴', '医疗', '切骨', '迸发', '夜幕', '流转'],
   },
-  '重度能量淤积点·清波寨': {
-    battleId: '重度能量淤积点·清波寨',
-    battleName: '重度能量淤积点·清波寨',
+  清波寨: {
+    battleId: '清波寨',
+    battleName: '清波寨',
     secondaryStats: [
       '生命提升', '物理伤害提升', '电磁伤害提升', '寒冷伤害提升',
       '源石技艺提升', '终结技充能效率提升', '法术伤害提升', '治疗效率提升',
     ],
     skillStats: ['压制', '粉碎', '昂扬', '巧技', '医疗', '切骨', '迸发', '夜幕'],
   },
-  '重度能量淤积点·首墩': {
-    battleId: '重度能量淤积点·首墩',
-    battleName: '重度能量淤积点·首墩',
+  首墩: {
+    battleId: '首墩',
+    battleName: '首墩',
     secondaryStats: [
       '攻击提升', '物理伤害提升', '灼热伤害提升', '电磁伤害提升',
       '自然伤害提升', '暴击率提升', '终结技充能效率提升', '法术伤害提升',
@@ -132,6 +136,11 @@ function combinations<T>(arr: T[], size: number): T[][] {
 function getStatDisplayName(statId: string | null): string {
   if (!statId) return ''
   return getGemTagName(statId)
+}
+
+function clearAllStats(requiredEssenceStats: Ref<PlannerEssenceStat[]>, lastSelectedWeaponId: Ref<string | null>) {
+  requiredEssenceStats.value = []
+  lastSelectedWeaponId.value = null
 }
 
 /** 将单个需求词条与战斗可用词条进行匹配。 */
@@ -183,12 +192,31 @@ function findMatchingWeapons(
 
 export function useMatrixPlanner() {
   const { weaponsMap } = useStaticData()
-  const requiredEssenceStats = ref<PlannerEssenceStat[]>([])
+
+  // 从localStorage加载保存的状态
+  const savedStats = localStorage.getItem('matrixPlannerStats')
+  const initialStats: PlannerEssenceStat[] = savedStats ? JSON.parse(savedStats) : []
+
+  const requiredEssenceStats = ref<PlannerEssenceStat[]>(initialStats)
+  const lastSelectedWeaponId = ref<string | null>(null)
+
+  // 监听变化并保存到localStorage
+  watch(
+    requiredEssenceStats,
+    (newStats) => {
+      localStorage.setItem('matrixPlannerStats', JSON.stringify(newStats))
+    },
+    { deep: true },
+  )
 
   function addStatFromWeapon(weaponId: string) {
     const weapon = weaponsMap.value.get(weaponId)
     if (!weapon) return
-    // Check if already added
+
+    // 记录最后选择的武器
+    lastSelectedWeaponId.value = weaponId
+
+    // 检查是否已添加 — 切换关闭
     const existing = requiredEssenceStats.value.findIndex(
       (s) => !s.isCustom && s.weaponId === weaponId,
     )
@@ -196,17 +224,20 @@ export function useMatrixPlanner() {
       requiredEssenceStats.value.splice(existing, 1)
       return
     }
+    // 存储显示名（而非内部 ID），确保与 allAttributeStats 等匹配一致
     requiredEssenceStats.value.push({
+      id: _nextId++,
       isCustom: false,
       weaponId,
-      attribute: weapon.attributeStatId,
-      secondary: weapon.secondaryStatId,
-      skill: weapon.skillStatId,
+      attribute: getStatDisplayName(weapon.attributeStatId),
+      secondary: getStatDisplayName(weapon.secondaryStatId),
+      skill: getStatDisplayName(weapon.skillStatId),
     })
   }
 
   function addCustomStat() {
     requiredEssenceStats.value.push({
+      id: _nextId++,
       isCustom: true,
       weaponId: null,
       attribute: null,
@@ -276,35 +307,64 @@ export function useMatrixPlanner() {
     return { battleId, battleName, selectedAttribute, selectedSecondary: null, selectedSkill, matchedSelectedIndices, matchedWeaponIds }
   }
 
-  const battleChoices = computed(() => {
-    const result: BattleChoice[] = []
+  // 使用防抖的 battleChoices — 当需求列表变化时延迟计算，避免频繁重算
+  const _debouncedChoices = ref<BattleChoice[]>([])
+  let _choicesTimer: ReturnType<typeof setTimeout> | null = null
 
+  function _recomputeChoices() {
+    const result: BattleChoice[] = []
     for (const { battleId, battleName, secondaryStats, skillStats } of Object.values(energyAlluviums)) {
       for (const selectedAttribute of combinations(allAttributeStats, 3)) {
-        // Enumerate secondary stats
         for (const selectedSecondary of secondaryStats) {
           const choice = buildChoiceForSecondary(battleId, battleName, selectedAttribute, selectedSecondary, skillStats)
           if (choice) result.push(choice)
         }
-
-        // Enumerate skill stats
         for (const selectedSkill of skillStats) {
           const choice = buildChoiceForSkill(battleId, battleName, selectedAttribute, selectedSkill, secondaryStats)
           if (choice) result.push(choice)
         }
       }
     }
-    return result
-  })
+    _debouncedChoices.value = result
+  }
+
+  watch(
+    requiredEssenceStats,
+    () => {
+      if (_choicesTimer) clearTimeout(_choicesTimer)
+      _choicesTimer = setTimeout(_recomputeChoices, 150)
+    },
+    { deep: true, immediate: true },
+  )
+
+  const battleChoices = computed(() => _debouncedChoices.value)
 
   const bestChoices = computed(() => {
     const filtered = battleChoices.value.filter(
       ({ matchedSelectedIndices }) => matchedSelectedIndices.length > 0,
     )
+
+    // 获取所有已选择的武器ID
+    const selectedWeaponIds = new Set(
+      requiredEssenceStats.value
+        .filter(s => !s.isCustom && s.weaponId)
+        .map(s => s.weaponId!)
+    )
+
     filtered.sort((a, b) => {
+      // 优先：满足更多需求
       if (b.matchedSelectedIndices.length !== a.matchedSelectedIndices.length) {
         return b.matchedSelectedIndices.length - a.matchedSelectedIndices.length
       }
+
+      // 其次：匹配更多已选择的武器
+      const aMatchedSelected = a.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
+      const bMatchedSelected = b.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
+      if (aMatchedSelected !== bMatchedSelected) {
+        return bMatchedSelected - aMatchedSelected
+      }
+
+      // 最后：匹配武器总数
       return b.matchedWeaponIds.length - a.matchedWeaponIds.length
     })
     return filtered.slice(0, 5)
@@ -312,6 +372,7 @@ export function useMatrixPlanner() {
 
   return {
     requiredEssenceStats,
+    lastSelectedWeaponId,
     allAttributeStats,
     allSecondaryStats,
     allSkillStats,
@@ -325,5 +386,6 @@ export function useMatrixPlanner() {
     getStatDisplayName,
     battleChoices,
     bestChoices,
+    clearAllStats: () => clearAllStats(requiredEssenceStats, lastSelectedWeaponId),
   }
 }

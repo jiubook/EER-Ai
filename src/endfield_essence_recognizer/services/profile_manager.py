@@ -252,3 +252,17 @@ class ProfileManager:
         ]
         self.save()
         return profile
+
+    def update_weapon_overview_filters(self, filters: dict[str, bool]) -> ProfileData:
+        """更新激活账号的武器总览过滤器配置。
+
+        Args:
+            filters: 星级过滤器配置字典。
+
+        Returns:
+            更新后的 ProfileData。
+        """
+        profile = self.get_active_profile()
+        profile.weapon_overview_filters = filters
+        self.save()
+        return profile

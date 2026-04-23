@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from endfield_essence_recognizer.core.farming_calculator import (
@@ -76,7 +77,7 @@ async def switch_profile(
     """切换到不同的账号。"""
     try:
         return manager.switch_profile(request.name)
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
@@ -144,6 +145,7 @@ class AddTreasureMatrixEntryRequest(BaseModel):
     affix1_level: int = Field(default=1, ge=1, le=6)
     affix2_level: int = Field(default=1, ge=1, le=6)
     affix3_level: int = Field(default=1, ge=1, le=3)
+    include_in_calculation: bool = True
 
 
 @router.post("/treasure_matrix/add")
@@ -158,6 +160,7 @@ async def add_treasure_matrix_entry(
         affix1_level=request.affix1_level,
         affix2_level=request.affix2_level,
         affix3_level=request.affix3_level,
+        include_in_calculation=request.include_in_calculation,
     )
     return manager.add_treasure_matrix_entry(entry)
 
@@ -234,7 +237,25 @@ async def get_batch_farming_recommendations(
                         target_levels=item.target_levels,
                     )
                 )
-            except ValueError:
-                # 批量模式下跳过无效条目
+            except ValueError as e:
+                logger.warning("Skipping invalid batch entry {}: {}", item.weapon_id, e)
                 continue
     return results
+
+
+# --- 武器总览过滤器 ---
+
+
+class UpdateWeaponOverviewFiltersRequest(BaseModel):
+    filters: dict[str, bool] = Field(
+        default_factory=lambda: {"3star": True, "4star": True, "5star": True}
+    )
+
+
+@router.post("/weapon_overview_filters")
+async def update_weapon_overview_filters(
+    request: UpdateWeaponOverviewFiltersRequest,
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> ProfileData:
+    """更新当前激活账号的武器总览过滤器配置。"""
+    return manager.update_weapon_overview_filters(request.filters)

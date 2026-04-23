@@ -1,32 +1,47 @@
 <template>
-  <v-container>
-    <v-expansion-panels :model-value="[0, 1]" multiple>
+  <v-container class="treasure-matrix-page">
+    <v-expansion-panels :model-value="[0, 1, 2]" multiple>
+      <!-- 武器总览 -->
+      <weapon-overview />
+
       <!-- Treasure Matrix Config -->
-      <v-expansion-panel :value="0">
+      <v-expansion-panel :value="1">
         <v-expansion-panel-title>
           <v-icon class="mr-2">mdi-diamond-stone</v-icon>
           宝藏基质配置
-          <v-chip class="ml-2" color="primary" size="small">
+          <v-chip class="ml-2" color="primary" size="small" variant="flat">
             {{ activeProfileName }}
           </v-chip>
         </v-expansion-panel-title>
         <v-expansion-panel-text>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            保存你当前账号下每把武器的宝藏基质词条等级，用于计算建议刷取次数。
+            保存你当前账号下每把武器的宝藏基质词条等级，用于计算建议刷取次数。点击武器卡片可切换是否参与计算。
           </v-alert>
+
+          <!-- 显示满级武器开关 -->
+          <div class="d-flex align-center mb-3">
+            <v-switch
+              v-model="showMaxedWeapons"
+              color="primary"
+              density="compact"
+              hide-details
+              label="显示满级武器（6/6/3）"
+            />
+          </div>
 
           <!-- Existing entries -->
           <v-card
-            v-for="(entry, index) in matrixEntries"
+            v-for="(entry, index) in filteredMatrixEntries"
             :key="entry.weapon_id"
-            class="mb-3"
+            class="mb-3 entry-card"
+            :class="{ 'entry-card--selected': entry.include_in_calculation !== false }"
             variant="outlined"
           >
-            <v-card-text>
+            <v-card-text class="clickable-card" @click="toggleIncludeInCalculation(entry)">
               <v-row align="center">
                 <v-col cols="12" md="3">
                   <div class="d-flex align-center">
-                    <item-icon class="me-2" :item-id="entry.weapon_id" />
+                    <item-icon class="me-2 weapon-icon-small" :item-id="entry.weapon_id" />
                     <div>
                       <div class="font-weight-bold">{{ entry.weapon_name || entry.weapon_id }}</div>
                       <div class="text-caption text-medium-emphasis">
@@ -35,7 +50,7 @@
                     </div>
                   </div>
                 </v-col>
-                <v-col cols="12" md="2">
+                <v-col cols="6" md="2">
                   <v-select
                     v-model="entry.affix1_level"
                     density="compact"
@@ -43,17 +58,20 @@
                     :items="[1, 2, 3, 4, 5, 6]"
                     label="基础属性"
                     variant="outlined"
+                    @click.stop
                     @update:model-value="onEntryChange"
                   >
-                    <template #selection="{ item }">+{{ item }}</template>
+                    <template #selection="{ item }">
+                      <v-chip color="primary" size="x-small" variant="flat">+{{ item.title }}</v-chip>
+                    </template>
                     <template #item="{ item, props }">
                       <v-list-item v-bind="props">
-                        <template #title>+{{ item }}</template>
+                        <template #title>+{{ item.title }}</template>
                       </v-list-item>
                     </template>
                   </v-select>
                 </v-col>
-                <v-col cols="12" md="2">
+                <v-col cols="6" md="2">
                   <v-select
                     v-model="entry.affix2_level"
                     density="compact"
@@ -61,17 +79,20 @@
                     :items="[1, 2, 3, 4, 5, 6]"
                     label="附加属性"
                     variant="outlined"
+                    @click.stop
                     @update:model-value="onEntryChange"
                   >
-                    <template #selection="{ item }">+{{ item }}</template>
+                    <template #selection="{ item }">
+                      <v-chip color="teal" size="x-small" variant="flat">+{{ item.title }}</v-chip>
+                    </template>
                     <template #item="{ item, props }">
                       <v-list-item v-bind="props">
-                        <template #title>+{{ item }}</template>
+                        <template #title>+{{ item.title }}</template>
                       </v-list-item>
                     </template>
                   </v-select>
                 </v-col>
-                <v-col cols="12" md="2">
+                <v-col cols="6" md="2">
                   <v-select
                     v-model="entry.affix3_level"
                     density="compact"
@@ -79,40 +100,61 @@
                     :items="[1, 2, 3]"
                     label="技能属性"
                     variant="outlined"
+                    @click.stop
                     @update:model-value="onEntryChange"
                   >
-                    <template #selection="{ item }">+{{ item }}</template>
+                    <template #selection="{ item }">
+                      <v-chip color="blue" size="x-small" variant="flat">+{{ item.title }}</v-chip>
+                    </template>
                     <template #item="{ item, props }">
                       <v-list-item v-bind="props">
-                        <template #title>+{{ item }}</template>
+                        <template #title>+{{ item.title }}</template>
                       </v-list-item>
                     </template>
                   </v-select>
                 </v-col>
                 <v-col cols="12" md="3">
-                  <v-btn
-                    color="primary"
-                    icon="mdi-calculator"
-                    size="small"
-                    variant="text"
-                    @click="computeSingle(entry)"
-                  />
-                  <v-btn
-                    color="error"
-                    icon="mdi-delete"
-                    size="small"
-                    variant="text"
-                    @click="removeEntry(index)"
-                  />
+                  <div class="d-flex ga-2 justify-end">
+                    <v-tooltip text="计算此武器的刷取建议">
+                      <template #activator="{ props }">
+                        <v-btn
+                          v-bind="props"
+                          color="primary"
+                          icon="mdi-calculator"
+                          size="default"
+                          variant="tonal"
+                          @click.stop="computeSingle(entry)"
+                        />
+                      </template>
+                    </v-tooltip>
+                    <v-tooltip text="移除此武器">
+                      <template #activator="{ props }">
+                        <v-btn
+                          v-bind="props"
+                          color="error"
+                          icon="mdi-delete"
+                          size="default"
+                          variant="tonal"
+                          @click.stop="removeEntry(index)"
+                        />
+                      </template>
+                    </v-tooltip>
+                  </div>
                 </v-col>
               </v-row>
             </v-card-text>
           </v-card>
 
+          <div v-if="filteredMatrixEntries.length === 0" class="text-center py-6">
+            <v-icon class="mb-2" color="medium-emphasis" size="48">mdi-diamond-outline</v-icon>
+            <div class="text-medium-emphasis">尚未添加任何武器，点击下方按钮开始配置</div>
+          </div>
+
           <v-btn
             class="mt-2"
             color="primary"
             prepend-icon="mdi-plus"
+            variant="flat"
             @click="showAddWeaponDialog = true"
           >
             添加武器
@@ -121,7 +163,7 @@
       </v-expansion-panel>
 
       <!-- Farming Recommendations -->
-      <v-expansion-panel :value="1">
+      <v-expansion-panel :value="2">
         <v-expansion-panel-title>
           <v-icon class="mr-2">mdi-calculator</v-icon>
           刷取建议
@@ -137,10 +179,10 @@
                 label="目标基础属性"
                 variant="outlined"
               >
-                <template #selection="{ item }">+{{ item }}</template>
+                <template #selection="{ item }">+{{ item.title }}</template>
                 <template #item="{ item, props }">
                   <v-list-item v-bind="props">
-                    <template #title>+{{ item }}</template>
+                    <template #title>+{{ item.title }}</template>
                   </v-list-item>
                 </template>
               </v-select>
@@ -154,10 +196,10 @@
                 label="目标附加属性"
                 variant="outlined"
               >
-                <template #selection="{ item }">+{{ item }}</template>
+                <template #selection="{ item }">+{{ item.title }}</template>
                 <template #item="{ item, props }">
                   <v-list-item v-bind="props">
-                    <template #title>+{{ item }}</template>
+                    <template #title>+{{ item.title }}</template>
                   </v-list-item>
                 </template>
               </v-select>
@@ -171,10 +213,10 @@
                 label="目标技能属性"
                 variant="outlined"
               >
-                <template #selection="{ item }">+{{ item }}</template>
+                <template #selection="{ item }">+{{ item.title }}</template>
                 <template #item="{ item, props }">
                   <v-list-item v-bind="props">
-                    <template #title>+{{ item }}</template>
+                    <template #title>+{{ item.title }}</template>
                   </v-list-item>
                 </template>
               </v-select>
@@ -186,6 +228,7 @@
             color="primary"
             :loading="computing"
             prepend-icon="mdi-calculator"
+            variant="flat"
             @click="computeAll"
           >
             计算所有武器的刷取建议
@@ -198,12 +241,12 @@
           <v-card
             v-for="rec in recommendations"
             :key="rec.weapon_id"
-            class="mb-4"
+            class="mb-4 rec-card"
             variant="outlined"
           >
             <v-card-item>
               <template #prepend>
-                <item-icon :item-id="rec.weapon_id" />
+                <item-icon class="weapon-icon-small" :item-id="rec.weapon_id" />
               </template>
               <v-card-title>{{ rec.weapon_name }}</v-card-title>
               <v-card-subtitle>
@@ -222,7 +265,10 @@
               <v-row>
                 <v-col cols="12" md="4">
                   <v-list density="compact">
-                    <v-list-subheader>基础属性 +{{ rec.current_levels[0] }} → +{{ rec.target_levels[0] }}</v-list-subheader>
+                    <v-list-subheader>
+                      <v-icon class="mr-1" color="primary" size="small">mdi-circle</v-icon>
+                      基础属性 +{{ rec.current_levels[0] }} → +{{ rec.target_levels[0] }}
+                    </v-list-subheader>
                     <v-list-item
                       v-for="step in rec.affix_results[0]?.steps"
                       :key="'a1-' + step.from_level"
@@ -232,7 +278,7 @@
                         +{{ step.from_level }} → +{{ step.to_level }}
                       </v-list-item-title>
                       <template #append>
-                        <v-chip size="small" variant="tonal">
+                        <v-chip size="x-small" variant="tonal">
                           {{ (step.success_prob * 100).toFixed(1) }}%
                         </v-chip>
                         <span class="text-caption ml-2">
@@ -241,13 +287,19 @@
                       </template>
                     </v-list-item>
                     <v-list-item v-if="rec.affix_results[0]?.steps.length === 0" density="compact">
-                      <v-list-item-title class="text-medium-emphasis">已达标</v-list-item-title>
+                      <v-list-item-title class="text-medium-emphasis">
+                        <v-icon class="mr-1" color="success" size="small">mdi-check</v-icon>
+                        已达标
+                      </v-list-item-title>
                     </v-list-item>
                   </v-list>
                 </v-col>
                 <v-col cols="12" md="4">
                   <v-list density="compact">
-                    <v-list-subheader>附加属性 +{{ rec.current_levels[1] }} → +{{ rec.target_levels[1] }}</v-list-subheader>
+                    <v-list-subheader>
+                      <v-icon class="mr-1" color="teal" size="small">mdi-circle</v-icon>
+                      附加属性 +{{ rec.current_levels[1] }} → +{{ rec.target_levels[1] }}
+                    </v-list-subheader>
                     <v-list-item
                       v-for="step in rec.affix_results[1]?.steps"
                       :key="'a2-' + step.from_level"
@@ -257,7 +309,7 @@
                         +{{ step.from_level }} → +{{ step.to_level }}
                       </v-list-item-title>
                       <template #append>
-                        <v-chip size="small" variant="tonal">
+                        <v-chip size="x-small" variant="tonal">
                           {{ (step.success_prob * 100).toFixed(1) }}%
                         </v-chip>
                         <span class="text-caption ml-2">
@@ -266,13 +318,19 @@
                       </template>
                     </v-list-item>
                     <v-list-item v-if="rec.affix_results[1]?.steps.length === 0" density="compact">
-                      <v-list-item-title class="text-medium-emphasis">已达标</v-list-item-title>
+                      <v-list-item-title class="text-medium-emphasis">
+                        <v-icon class="mr-1" color="success" size="small">mdi-check</v-icon>
+                        已达标
+                      </v-list-item-title>
                     </v-list-item>
                   </v-list>
                 </v-col>
                 <v-col cols="12" md="4">
                   <v-list density="compact">
-                    <v-list-subheader>技能属性 +{{ rec.current_levels[2] }} → +{{ rec.target_levels[2] }}</v-list-subheader>
+                    <v-list-subheader>
+                      <v-icon class="mr-1" color="blue" size="small">mdi-circle</v-icon>
+                      技能属性 +{{ rec.current_levels[2] }} → +{{ rec.target_levels[2] }}
+                    </v-list-subheader>
                     <v-list-item
                       v-for="step in rec.affix_results[2]?.steps"
                       :key="'a3-' + step.from_level"
@@ -282,7 +340,7 @@
                         +{{ step.from_level }} → +{{ step.to_level }}
                       </v-list-item-title>
                       <template #append>
-                        <v-chip size="small" variant="tonal">
+                        <v-chip size="x-small" variant="tonal">
                           {{ (step.success_prob * 100).toFixed(1) }}%
                         </v-chip>
                         <span class="text-caption ml-2">
@@ -291,26 +349,43 @@
                       </template>
                     </v-list-item>
                     <v-list-item v-if="rec.affix_results[2]?.steps.length === 0" density="compact">
-                      <v-list-item-title class="text-medium-emphasis">已达标</v-list-item-title>
+                      <v-list-item-title class="text-medium-emphasis">
+                        <v-icon class="mr-1" color="success" size="small">mdi-check</v-icon>
+                        已达标
+                      </v-list-item-title>
                     </v-list-item>
                   </v-list>
                 </v-col>
               </v-row>
               <v-divider class="my-2" />
               <div class="d-flex flex-wrap ga-4 text-caption">
-                <div>
-                  <strong>期望消耗无暇基质:</strong> {{ rec.total_expected_essences.toFixed(1) }} 个
+                <div class="d-flex align-center">
+                  <v-icon class="mr-1" color="primary" size="small">mdi-diamond-stone</v-icon>
+                  <strong>期望消耗无暇基质:</strong>&nbsp;{{ rec.total_expected_essences.toFixed(1) }} 个
                 </div>
-                <div>
-                  <strong>期望获得冷却脂:</strong>
+                <div class="d-flex align-center">
+                  <v-icon class="mr-1" color="success" size="small">mdi-arrow-up-bold</v-icon>
+                  <strong>期望获得冷却脂:</strong>&nbsp;
                   {{ rec.affix_results.reduce((sum, r) => sum + r.expected_grease_gained, 0).toFixed(0) }} 点
                 </div>
-                <div>
-                  <strong>期望消耗冷却脂:</strong>
+                <div class="d-flex align-center">
+                  <v-icon class="mr-1" color="warning" size="small">mdi-arrow-down-bold</v-icon>
+                  <strong>期望消耗冷却脂:</strong>&nbsp;
                   {{ rec.affix_results.reduce((sum, r) => sum + r.expected_grease_used, 0).toFixed(0) }} 点
                 </div>
               </div>
             </v-card-text>
+            <v-card-actions>
+              <v-spacer />
+              <v-btn
+                color="primary"
+                prepend-icon="mdi-map-search"
+                variant="tonal"
+                @click="navigateToPlanner(rec.weapon_id)"
+              >
+                查看最优刷取方案
+              </v-btn>
+            </v-card-actions>
           </v-card>
         </v-expansion-panel-text>
       </v-expansion-panel>
@@ -319,7 +394,10 @@
     <!-- Add Weapon Dialog -->
     <v-dialog v-model="showAddWeaponDialog" max-width="800">
       <v-card>
-        <v-card-title>选择武器</v-card-title>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-sword</v-icon>
+          选择武器
+        </v-card-title>
         <v-card-text>
           <v-text-field
             v-model="weaponSearch"
@@ -332,7 +410,7 @@
             variant="outlined"
           />
           <template v-for="wType in weaponTypes" :key="wType.id">
-            <h4 class="mt-4 mb-2">
+            <h4 class="mt-4 mb-2 d-flex align-center">
               <img
                 :alt="wType.name"
                 class="group-icon me-2"
@@ -363,10 +441,14 @@
 
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ItemIcon from '@/components/ItemIcon.vue'
+import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
+
+const router = useRouter()
 
 const {
   activeProfileName,
@@ -418,11 +500,23 @@ interface Recommendation {
 
 const recommendations = ref<Recommendation[]>([])
 
+const showMaxedWeapons = ref(false)
+
 const matrixEntries = computed({
   get: () => treasureMatrix.value,
   set: (val) => {
     updateTreasureMatrix(val)
   },
+})
+
+const filteredMatrixEntries = computed(() => {
+  if (showMaxedWeapons.value) {
+    return matrixEntries.value
+  }
+  return matrixEntries.value.filter(
+    (entry) =>
+      !(entry.affix1_level === 6 && entry.affix2_level === 6 && entry.affix3_level === 3),
+  )
 })
 
 function getWeaponStats(weaponId: string): string {
@@ -460,20 +554,38 @@ async function onAddWeapon(weaponId: string) {
     affix1_level: 1,
     affix2_level: 1,
     affix3_level: 1,
+    include_in_calculation: true,
   })
   showAddWeaponDialog.value = false
 }
 
 async function removeEntry(index: number) {
-  const entry = matrixEntries.value[index]
+  const entry = filteredMatrixEntries.value[index]
   if (entry) {
     await removeTreasureMatrixEntry(entry.weapon_id)
   }
 }
 
+function toggleIncludeInCalculation(entry: TreasureMatrixEntry) {
+  entry.include_in_calculation = !entry.include_in_calculation
+  onEntryChange()
+}
+
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 function onEntryChange() {
+  // 检查是否有武器达到满级（6/6/3），自动取消勾选
+  for (const entry of matrixEntries.value) {
+    if (
+      entry.affix1_level === 6 &&
+      entry.affix2_level === 6 &&
+      entry.affix3_level === 3 &&
+      entry.include_in_calculation !== false
+    ) {
+      entry.include_in_calculation = false
+    }
+  }
+
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
     updateTreasureMatrix([...matrixEntries.value])
@@ -502,18 +614,41 @@ async function computeAll() {
   if (matrixEntries.value.length === 0) return
   computing.value = true
   try {
-    const items = matrixEntries.value.map((entry) => ({
-      weapon_id: entry.weapon_id,
-      current_levels: [entry.affix1_level, entry.affix2_level, entry.affix3_level] as [number, number, number],
-      target_levels: [targetAffix1.value, targetAffix2.value, targetAffix3.value] as [number, number, number],
-    }))
+    // 只计算勾选了"参与计算"的武器
+    const items = matrixEntries.value
+      .filter((entry) => entry.include_in_calculation !== false)
+      .map((entry) => ({
+        weapon_id: entry.weapon_id,
+        current_levels: [entry.affix1_level, entry.affix2_level, entry.affix3_level] as [
+          number,
+          number,
+          number,
+        ],
+        target_levels: [targetAffix1.value, targetAffix2.value, targetAffix3.value] as [
+          number,
+          number,
+          number,
+        ],
+      }))
     const results = await getBatchFarmingRecommendations(items)
     // Sort by expected runs (ascending - least runs first)
-    results.sort((a: Recommendation, b: Recommendation) => a.total_expected_runs - b.total_expected_runs)
+    results.sort(
+      (a: Recommendation, b: Recommendation) => a.total_expected_runs - b.total_expected_runs,
+    )
     recommendations.value = results
   } finally {
     computing.value = false
   }
+}
+
+/**
+ * 跳转到基质规划页面并传递武器 ID。
+ */
+function navigateToPlanner(weaponId: string) {
+  router.push({
+    name: 'matrix-planner',
+    query: { weapon: weaponId, clear: 'true' },
+  })
 }
 
 onMounted(() => {
@@ -523,6 +658,49 @@ onMounted(() => {
 
 <style scoped lang="scss">
 $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
+
+.treasure-matrix-page {
+  .entry-card {
+    position: relative;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    overflow: hidden;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+    }
+
+    // 选中状态的左侧淡蓝色渐变
+    &.entry-card--selected::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 10px;
+      background: linear-gradient(
+        to right,
+        rgba(33, 150, 243, 0.8),
+        rgba(33, 150, 243, 0.4),
+        transparent
+      );
+      z-index: 1;
+    }
+
+    .clickable-card {
+      cursor: pointer;
+      user-select: none;
+    }
+  }
+
+  .rec-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+    }
+  }
+}
 
 .group-icon {
   width: 1.5rem;
@@ -541,8 +719,16 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
   height: $weapon-icon-size;
   cursor: pointer;
   transition: transform 0.15s;
+  border-radius: 6px;
   &:hover {
     transform: scale(1.1);
   }
+}
+
+.weapon-icon-small {
+  width: 2.5rem !important;
+  height: 2.5rem !important;
+  display: inline-block;
+  flex-shrink: 0;
 }
 </style>

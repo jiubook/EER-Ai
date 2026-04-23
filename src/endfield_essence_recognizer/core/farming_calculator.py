@@ -5,8 +5,7 @@
 
 关键参数：
 - 使用刻写券：每次刷取掉落 3 个完美基质
-- 每个掉落有 1/24 的概率获得所需基质
-- 每次词条升级尝试消耗 1 个随机完美基质
+- 每次词条升级尝试消耗 1 个随机完美基质（任何武器的基质都可以）
 - 升级成功率：
   - 词条 1&2（属性/副属性）：1→2(60%), 2→3(24%), 3→4(10.9%), 4→5(5%), 5→6(2.7%)
   - 词条 3（技能）：1→2(10.9%), 2→3(4.2%)
@@ -14,6 +13,9 @@
 - 冷却脂可以在达到阈值时保证成功：
   - 词条 1&2：1→2(30), 2→3(60), 3→4(120), 4→5(250), 5→6(450)
   - 词条 3：1→2(120), 2→3(300)
+
+注意：此计算器假设用户已经拥有该武器的宝藏基质，只需要任意完美基质来进行强化。
+如果需要刷取特定武器的基质，则需要额外考虑 1/24 的掉落概率。
 """
 
 from __future__ import annotations
@@ -21,9 +23,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # --- 常量 ---
-
-DESIRED_ESSENCE_PROB = 1 / 24
-"""每次掉落获得所需基质的概率。"""
 
 ESSENCES_PER_RUN = 3
 """每次刷取掉落的完美基质数量（使用刻写券）。"""
@@ -157,6 +156,8 @@ class FarmingRecommendation:
 def _compute_single_step(
     success_prob: float,
     grease_threshold: int,
+    from_level: int = 0,
+    to_level: int = 0,
 ) -> UpgradeStepDetail:
     """
     计算单个等级升级步骤的预期尝试次数和冷却脂。
@@ -170,6 +171,8 @@ def _compute_single_step(
     Args:
         success_prob: 每次尝试的成功概率。
         grease_threshold: 保证成功所需的冷却脂。
+        from_level: 此步骤的起始等级。
+        to_level: 此步骤的目标等级。
 
     Returns:
         包含计算值的 UpgradeStepDetail。
@@ -199,8 +202,8 @@ def _compute_single_step(
     grease_used = prob_all_fail * grease_threshold
 
     return UpgradeStepDetail(
-        from_level=0,  # 由调用者填充
-        to_level=0,  # 由调用者填充
+        from_level=from_level,
+        to_level=to_level,
         success_prob=success_prob,
         grease_threshold=grease_threshold,
         expected_attempts=expected_attempts,
@@ -252,9 +255,9 @@ def _compute_upgrade_steps(
         if success_prob is None or grease_threshold is None:
             break
 
-        step = _compute_single_step(success_prob, grease_threshold)
-        step.from_level = level
-        step.to_level = level + 1
+        step = _compute_single_step(
+            success_prob, grease_threshold, from_level=level, to_level=level + 1
+        )
         result.steps.append(step)
 
         total_attempts += step.expected_attempts
@@ -361,7 +364,7 @@ def compute_farming_recommendation(
         )
     )
 
-    # 总基质数：每次升级尝试消耗 1 个随机完美基质
+    # 总基质数：每次升级尝试消耗 1 个随机完美基质（任何武器的基质都可以）
     total_essences = sum(
         affix_result.expected_essences_consumed
         for affix_result in recommendation.affix_results
@@ -369,11 +372,10 @@ def compute_farming_recommendation(
     recommendation.total_expected_essences = total_essences
     recommendation.total_expected_desired_essences = total_essences
 
-    # 刷取次数：每次刷取掉落 ESSENCES_PER_RUN 个基质，
-    # 每个基质有 DESIRED_ESSENCE_PROB 的概率是所需的基质。
-    desired_essences_per_run = ESSENCES_PER_RUN * DESIRED_ESSENCE_PROB
-    if desired_essences_per_run > 0:
-        recommendation.total_expected_runs = total_essences / desired_essences_per_run
+    # 刷取次数：每次刷取掉落 ESSENCES_PER_RUN 个完美基质，可以直接用于强化
+    # 假设用户已经拥有该武器的宝藏基质，只需要任意基质来强化
+    if ESSENCES_PER_RUN > 0:
+        recommendation.total_expected_runs = total_essences / ESSENCES_PER_RUN
     else:
         recommendation.total_expected_runs = float("inf")
 
