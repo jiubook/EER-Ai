@@ -236,8 +236,6 @@ async def get_batch_farming_recommendations(
                     )
                 )
             except ValueError as e:
-                logger.warning(
-                    "Skipping invalid batch entry {}: {}", item.weapon_id, e
-                )
+                logger.warning("Skipping invalid batch entry {}: {}", item.weapon_id, e)
                 continue
     return results

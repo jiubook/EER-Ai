@@ -20,7 +20,7 @@
                   rounded="lg"
                   variant="outlined"
                 >
-                  <v-card-item :class="i === 0 ? 'bg-primary' : 'bg-info'" class="py-3">
+                  <v-card-item class="py-3" :class="i === 0 ? 'bg-primary' : 'bg-info'">
                     <v-card-title class="text-h6 font-weight-bold d-flex align-center">
                       <v-icon v-if="i === 0" class="mr-2" size="small">mdi-trophy</v-icon>
                       方案 {{ i + 1 }}
@@ -44,7 +44,7 @@
                         </div>
                         <div class="pl-1 mb-4">
                           <v-chip color="info" label variant="flat">
-                            <v-icon start size="small">mdi-sword-cross</v-icon>
+                            <v-icon size="small" start>mdi-sword-cross</v-icon>
                             {{ choice.battleName }}
                           </v-chip>
                         </div>
@@ -105,7 +105,7 @@
                             <div class="text-medium-emphasis mb-1">匹配的武器</div>
                             <div class="d-flex flex-wrap ga-2">
                               <div v-for="weaponId in sortedWeaponIds(choice.matchedWeaponIds)" :key="weaponId">
-                                <item-icon class="weapon-item" :item-id="weaponId" show-item-name />
+                                <item-icon class="weapon-item-small" :item-id="weaponId" show-item-name />
                               </div>
                             </div>
                           </div>
@@ -145,13 +145,15 @@
                 elevation="1"
                 variant="outlined"
               >
-                <v-row align="center">
-                  <v-col cols="12" md="2">
+                <v-row align="center" dense>
+                  <v-col cols="12" md="3">
                     <div class="d-flex align-center">
                       <v-avatar class="mr-2" color="primary" size="small" variant="tonal">
                         <span class="text-caption font-weight-bold">{{ index + 1 }}</span>
                       </v-avatar>
-                      <span class="text-caption text-medium-emphasis">{{ getEssenceStatDescription(stat) }}</span>
+                      <span class="text-caption text-medium-emphasis text-truncate" :title="getEssenceStatDescription(stat)">
+                        {{ getEssenceStatDescription(stat) }}
+                      </span>
                     </div>
                   </v-col>
                   <v-col cols="12" md="2">
@@ -164,11 +166,11 @@
                       label="基础属性"
                       variant="outlined"
                     />
-                    <v-chip v-else color="primary" size="small" variant="flat">
+                    <v-chip v-else class="text-truncate" color="primary" size="small" style="max-width: 100%;" :title="getStatDisplayName(stat.attribute)" variant="flat">
                       {{ getStatDisplayName(stat.attribute) }}
                     </v-chip>
                   </v-col>
-                  <v-col cols="12" md="2">
+                  <v-col cols="12" md="3">
                     <v-select
                       v-if="stat.isCustom"
                       v-model="stat.secondary"
@@ -178,7 +180,7 @@
                       label="附加属性"
                       variant="outlined"
                     />
-                    <v-chip v-else color="teal" size="small" variant="flat">
+                    <v-chip v-else class="text-truncate" color="teal" size="small" style="max-width: 100%;" :title="getStatDisplayName(stat.secondary)" variant="flat">
                       {{ getStatDisplayName(stat.secondary) }}
                     </v-chip>
                   </v-col>
@@ -192,11 +194,11 @@
                       label="技能属性"
                       variant="outlined"
                     />
-                    <v-chip v-else color="blue" size="small" variant="flat">
+                    <v-chip v-else class="text-truncate" color="blue" size="small" style="max-width: 100%;" :title="getStatDisplayName(stat.skill)" variant="flat">
                       {{ getStatDisplayName(stat.skill) }}
                     </v-chip>
                   </v-col>
-                  <v-col cols="12" md="4">
+                  <v-col cols="12" md="2">
                     <div class="d-flex ga-1">
                       <v-btn :disabled="index === 0" icon="mdi-chevron-up" size="small" variant="text" @click="moveStatUp(index)" />
                       <v-btn
@@ -278,11 +280,13 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { useMatrixPlanner } from '@/composables/useMatrixPlanner'
 import { useStaticData } from '@/utils/gameData/staticData'
 
+const route = useRoute()
 const { weaponTypes, weaponsMap } = useStaticData()
 const {
   requiredEssenceStats,
@@ -332,6 +336,25 @@ function sortedWeaponIds(weaponIds: string[]): string[] {
     return 0
   })
 }
+
+/**
+ * 在页面加载时处理 URL 参数。
+ */
+onMounted(() => {
+  const weaponId = route.query.weapon as string
+  if (weaponId) {
+    addStatFromWeapon(weaponId)
+  }
+})
+
+/**
+ * 监听 URL 参数变化。
+ */
+watch(() => route.query.weapon, (weaponId) => {
+  if (weaponId && typeof weaponId === 'string') {
+    addStatFromWeapon(weaponId)
+  }
+})
 </script>
 
 <style scoped lang="scss">
@@ -378,6 +401,20 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   border-radius: 6px;
   &:hover {
     transform: scale(1.1);
+  }
+}
+
+.weapon-item-small {
+  width: 4rem !important;
+  height: 4rem !important;
+  display: inline-block;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.15s;
+  border-radius: 6px;
+  &:hover {
+    transform: scale(1.05);
   }
 }
 

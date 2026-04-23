@@ -188,11 +188,16 @@ function findMatchingWeapons(
 export function useMatrixPlanner() {
   const { weaponsMap } = useStaticData()
   const requiredEssenceStats = ref<PlannerEssenceStat[]>([])
+  const lastSelectedWeaponId = ref<string | null>(null)
 
   function addStatFromWeapon(weaponId: string) {
     const weapon = weaponsMap.value.get(weaponId)
     if (!weapon) return
-    // Check if already added — toggle off
+
+    // 记录最后选择的武器
+    lastSelectedWeaponId.value = weaponId
+
+    // 检查是否已添加 — 切换关闭
     const existing = requiredEssenceStats.value.findIndex(
       (s) => !s.isCustom && s.weaponId === weaponId,
     )
@@ -320,9 +325,21 @@ export function useMatrixPlanner() {
       ({ matchedSelectedIndices }) => matchedSelectedIndices.length > 0,
     )
     filtered.sort((a, b) => {
+      // 优先：包含最后选择的武器
+      if (lastSelectedWeaponId.value) {
+        const aHasLast = a.matchedWeaponIds.includes(lastSelectedWeaponId.value)
+        const bHasLast = b.matchedWeaponIds.includes(lastSelectedWeaponId.value)
+        if (aHasLast !== bHasLast) {
+          return bHasLast ? 1 : -1
+        }
+      }
+
+      // 其次：满足需求数
       if (b.matchedSelectedIndices.length !== a.matchedSelectedIndices.length) {
         return b.matchedSelectedIndices.length - a.matchedSelectedIndices.length
       }
+
+      // 最后：匹配武器数
       return b.matchedWeaponIds.length - a.matchedWeaponIds.length
     })
     return filtered.slice(0, 5)
@@ -330,6 +347,7 @@ export function useMatrixPlanner() {
 
   return {
     requiredEssenceStats,
+    lastSelectedWeaponId,
     allAttributeStats,
     allSecondaryStats,
     allSkillStats,

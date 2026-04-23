@@ -26,7 +26,7 @@
               <v-row align="center">
                 <v-col cols="12" md="3">
                   <div class="d-flex align-center">
-                    <item-icon class="me-2" :item-id="entry.weapon_id" />
+                    <item-icon class="me-2 weapon-icon-small" :item-id="entry.weapon_id" />
                     <div>
                       <div class="font-weight-bold">{{ entry.weapon_name || entry.weapon_id }}</div>
                       <div class="text-caption text-medium-emphasis">
@@ -46,11 +46,11 @@
                     @update:model-value="onEntryChange"
                   >
                     <template #selection="{ item }">
-                      <v-chip color="primary" size="x-small" variant="flat">+{{ item }}</v-chip>
+                      <v-chip color="primary" size="x-small" variant="flat">+{{ item.title }}</v-chip>
                     </template>
                     <template #item="{ item, props }">
                       <v-list-item v-bind="props">
-                        <template #title>+{{ item }}</template>
+                        <template #title>+{{ item.title }}</template>
                       </v-list-item>
                     </template>
                   </v-select>
@@ -66,11 +66,11 @@
                     @update:model-value="onEntryChange"
                   >
                     <template #selection="{ item }">
-                      <v-chip color="teal" size="x-small" variant="flat">+{{ item }}</v-chip>
+                      <v-chip color="teal" size="x-small" variant="flat">+{{ item.title }}</v-chip>
                     </template>
                     <template #item="{ item, props }">
                       <v-list-item v-bind="props">
-                        <template #title>+{{ item }}</template>
+                        <template #title>+{{ item.title }}</template>
                       </v-list-item>
                     </template>
                   </v-select>
@@ -86,11 +86,11 @@
                     @update:model-value="onEntryChange"
                   >
                     <template #selection="{ item }">
-                      <v-chip color="blue" size="x-small" variant="flat">+{{ item }}</v-chip>
+                      <v-chip color="blue" size="x-small" variant="flat">+{{ item.title }}</v-chip>
                     </template>
                     <template #item="{ item, props }">
                       <v-list-item v-bind="props">
-                        <template #title>+{{ item }}</template>
+                        <template #title>+{{ item.title }}</template>
                       </v-list-item>
                     </template>
                   </v-select>
@@ -161,10 +161,10 @@
                 label="目标基础属性"
                 variant="outlined"
               >
-                <template #selection="{ item }">+{{ item }}</template>
+                <template #selection="{ item }">+{{ item.title }}</template>
                 <template #item="{ item, props }">
                   <v-list-item v-bind="props">
-                    <template #title>+{{ item }}</template>
+                    <template #title>+{{ item.title }}</template>
                   </v-list-item>
                 </template>
               </v-select>
@@ -178,10 +178,10 @@
                 label="目标附加属性"
                 variant="outlined"
               >
-                <template #selection="{ item }">+{{ item }}</template>
+                <template #selection="{ item }">+{{ item.title }}</template>
                 <template #item="{ item, props }">
                   <v-list-item v-bind="props">
-                    <template #title>+{{ item }}</template>
+                    <template #title>+{{ item.title }}</template>
                   </v-list-item>
                 </template>
               </v-select>
@@ -195,10 +195,10 @@
                 label="目标技能属性"
                 variant="outlined"
               >
-                <template #selection="{ item }">+{{ item }}</template>
+                <template #selection="{ item }">+{{ item.title }}</template>
                 <template #item="{ item, props }">
                   <v-list-item v-bind="props">
-                    <template #title>+{{ item }}</template>
+                    <template #title>+{{ item.title }}</template>
                   </v-list-item>
                 </template>
               </v-select>
@@ -228,7 +228,7 @@
           >
             <v-card-item>
               <template #prepend>
-                <item-icon :item-id="rec.weapon_id" />
+                <item-icon class="weapon-icon-small" :item-id="rec.weapon_id" />
               </template>
               <v-card-title>{{ rec.weapon_name }}</v-card-title>
               <v-card-subtitle>
@@ -357,6 +357,17 @@
                 </div>
               </div>
             </v-card-text>
+            <v-card-actions>
+              <v-spacer />
+              <v-btn
+                color="primary"
+                prepend-icon="mdi-map-search"
+                variant="tonal"
+                @click="navigateToPlanner(rec.weapon_id)"
+              >
+                查看最优刷取方案
+              </v-btn>
+            </v-card-actions>
           </v-card>
         </v-expansion-panel-text>
       </v-expansion-panel>
@@ -412,10 +423,13 @@
 
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
+
+const router = useRouter()
 
 const {
   activeProfileName,
@@ -565,6 +579,16 @@ async function computeAll() {
   }
 }
 
+/**
+ * 跳转到基质规划页面并传递武器 ID。
+ */
+function navigateToPlanner(weaponId: string) {
+  router.push({
+    name: 'matrix-planner',
+    query: { weapon: weaponId },
+  })
+}
+
 onMounted(() => {
   fetchProfiles()
 })
@@ -612,5 +636,12 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
   &:hover {
     transform: scale(1.1);
   }
+}
+
+.weapon-icon-small {
+  width: 2.5rem !important;
+  height: 2.5rem !important;
+  display: inline-block;
+  flex-shrink: 0;
 }
 </style>

@@ -5,8 +5,6 @@ from pathlib import Path
 import pytest
 
 from endfield_essence_recognizer.schemas.profile import (
-    ProfileCollection,
-    ProfileData,
     TreasureMatrixEntry,
 )
 from endfield_essence_recognizer.services.profile_manager import ProfileManager
@@ -177,4 +175,3 @@ def test_persistence(temp_profiles_file: Path):
     manager2.load()
     assert manager2.get_active_profile_name() == "test"
     assert len(manager2.get_active_profile().treasure_matrix) == 1
-
