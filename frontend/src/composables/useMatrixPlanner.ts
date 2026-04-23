@@ -1,8 +1,7 @@
 /**
- * Matrix Planner composable.
+ * 基质规划器组合式函数。
  *
- * Adapts the essence calculator logic from ef-frontend-v1 to help users
- * find the best farming locations for their desired essences.
+ * 改编自 ef-frontend-v1 的基质计算器逻辑，帮助用户找到刷取所需基质的最佳位置。
  */
 
 import { computed, ref } from 'vue'
@@ -34,7 +33,7 @@ export interface EnergyAlluvium {
   skillStats: string[]
 }
 
-// Energy alluvium data (farming locations)
+// 能量淤积点数据（刷取位置）
 const energyAlluviums: Record<string, EnergyAlluvium> = {
   '重度能量淤积点·枢纽区': {
     battleId: '重度能量淤积点·枢纽区',
@@ -101,17 +100,17 @@ const energyAlluviums: Record<string, EnergyAlluvium> = {
   },
 }
 
-// All attribute stats
+// 所有属性词条
 const allAttributeStats = ['敏捷提升', '力量提升', '意志提升', '智识提升', '主能力提升']
 
-// All secondary stats
+// 所有副属性词条
 const allSecondaryStats = [
   '攻击提升', '生命提升', '物理伤害提升', '灼热伤害提升', '电磁伤害提升',
   '寒冷伤害提升', '自然伤害提升', '暴击率提升', '源石技艺提升',
   '终结技充能效率提升', '法术伤害提升', '治疗效率提升',
 ]
 
-// All skill stats
+// 所有技能词条
 const allSkillStats = [
   '强攻', '压制', '追袭', '粉碎', '昂扬', '巧技', '残暴',
   '附术', '医疗', '切骨', '迸发', '夜幕', '流转', '效益',
@@ -135,7 +134,7 @@ function getStatDisplayName(statId: string | null): string {
   return getGemTagName(statId)
 }
 
-/** Match a single requirement stat against a battle's available stats. */
+/** 将单个需求词条与战斗可用词条进行匹配。 */
 function requirementMatchesBattle(
   stat: PlannerEssenceStat,
   selectedAttributes: string[],
@@ -155,7 +154,7 @@ function requirementMatchesBattle(
   return false
 }
 
-/** Find all weapons matching a battle's stat combination. */
+/** 查找匹配战斗词条组合的所有武器。 */
 function findMatchingWeapons(
   weaponsMap: Map<string, { attributeStatId: string | null; secondaryStatId: string | null; skillStatId: string | null }>,
   selectedAttributes: string[],

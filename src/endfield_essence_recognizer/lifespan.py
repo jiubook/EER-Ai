@@ -49,7 +49,7 @@ def init_load_user_setting():
 
 
 def init_load_profiles():
-    """Load profiles at startup."""
+    """在启动时加载账号配置。"""
     profiles_file = get_root_dir() / "profiles.json"
     profile_manager = ProfileManager(profiles_file)
     profile_manager.load()
@@ -57,7 +57,7 @@ def init_load_profiles():
 
 
 def init_mount_frontend_build(app: FastAPI, server_config: ServerConfig):
-    """Mount the frontend build directory to serve static files."""
+    """挂载前端构建目录以提供静态文件服务。"""
     if server_config.dev_mode:
         return
 

@@ -182,9 +182,9 @@
           </v-row>
 
           <v-btn
-            :loading="computing"
             class="mb-4"
             color="primary"
+            :loading="computing"
             prepend-icon="mdi-calculator"
             @click="computeAll"
           >
@@ -323,12 +323,13 @@
         <v-card-text>
           <v-text-field
             v-model="weaponSearch"
+            class="mb-4"
+            clearable
             density="compact"
             hide-details
             label="搜索武器名称..."
             prepend-inner-icon="mdi-magnify"
             variant="outlined"
-            class="mb-4"
           />
           <template v-for="wType in weaponTypes" :key="wType.id">
             <h4 class="mt-4 mb-2">

@@ -216,8 +216,8 @@
               <h3 class="mb-3">从武器预设添加</h3>
               <v-text-field
                 v-model="weaponSearch"
-                density="compact"
                 class="mb-4"
+                density="compact"
                 hide-details
                 label="搜索武器名称..."
                 prepend-inner-icon="mdi-magnify"

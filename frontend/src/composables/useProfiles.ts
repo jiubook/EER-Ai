@@ -1,7 +1,7 @@
 /**
- * Profile management composable.
+ * 账号管理组合式函数。
  *
- * Manages multi-account profiles with their treasure matrix configurations.
+ * 管理多账号及其宝藏基质配置。
  */
 
 import { computed, ref } from 'vue'

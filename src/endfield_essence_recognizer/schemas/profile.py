@@ -1,70 +1,69 @@
 """
-Multi-account profile system.
+多账号系统。
 
-Each profile represents a separate game account with its own settings
-and treasure matrix configurations.
+每个账号代表一个独立的游戏账号，拥有自己的设置和宝藏基质配置。
 """
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from pydantic import BaseModel, Field
 
 
 class TreasureMatrixEntry(BaseModel):
-    """A single weapon's treasure matrix configuration with affix levels."""
+    """单个武器的宝藏基质配置及词条等级。"""
 
     weapon_id: str
-    """The weapon ID (e.g. wpn_funnel_0009)."""
+    """武器 ID（例如 wpn_funnel_0009）。"""
 
     weapon_name: str = ""
-    """The weapon's display name (cached for convenience)."""
+    """武器显示名称（缓存以便使用）。"""
 
     affix1_level: int = Field(default=1, ge=1, le=6)
-    """First affix (attribute) level: 1-6."""
+    """第一词条（属性）等级：1-6。"""
 
     affix2_level: int = Field(default=1, ge=1, le=6)
-    """Second affix (secondary) level: 1-6."""
+    """第二词条（副属性）等级：1-6。"""
 
     affix3_level: int = Field(default=1, ge=1, le=3)
-    """Third affix (skill) level: 1-3."""
+    """第三词条（技能）等级：1-3。"""
 
 
 class ProfileData(BaseModel):
-    """Data stored for a single profile."""
+    """单个账号存储的数据。"""
 
     _VERSION: ClassVar[int] = 1
 
     version: int = _VERSION
 
     name: str = "default"
-    """Profile display name."""
+    """账号显示名称。"""
 
     treasure_matrix: list[TreasureMatrixEntry] = []
-    """Saved treasure matrix configurations for this profile."""
+    """此账号保存的宝藏基质配置。"""
 
 
 class ProfileCollection(BaseModel):
-    """Collection of all profiles."""
+    """所有账号的集合。"""
 
     _VERSION: ClassVar[int] = 1
 
     version: int = _VERSION
 
     active_profile: str = "default"
-    """Name of the currently active profile."""
+    """当前激活的账号名称。"""
 
     profiles: dict[str, ProfileData] = Field(default_factory=dict)
-    """Map of profile name -> profile data."""
+    """账号名称 -> 账号数据的映射。"""
 
     def get_active(self) -> ProfileData:
-        """Get the active profile data, creating default if needed."""
+        """获取激活的账号数据，如果需要则创建默认账号。"""
         if self.active_profile not in self.profiles:
             self.profiles[self.active_profile] = ProfileData(name=self.active_profile)
         return self.profiles[self.active_profile]
 
     def ensure_default(self) -> None:
-        """Ensure the default profile exists."""
+        """确保默认账号存在。"""
         if "default" not in self.profiles:
             self.profiles["default"] = ProfileData(name="default")

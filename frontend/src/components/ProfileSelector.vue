@@ -43,7 +43,7 @@
       </v-list-item>
     </v-list>
 
-    <!-- New Profile Dialog -->
+    <!-- 新建账号对话框 -->
     <v-dialog v-model="showNewProfileDialog" max-width="400">
       <v-card>
         <v-card-title>新建账号</v-card-title>
@@ -66,7 +66,7 @@
       </v-card>
     </v-dialog>
 
-    <!-- Rename Dialog -->
+    <!-- 重命名对话框 -->
     <v-dialog v-model="showRenameDialog" max-width="400">
       <v-card>
         <v-card-title>重命名账号</v-card-title>
@@ -89,7 +89,7 @@
       </v-card>
     </v-dialog>
 
-    <!-- Delete Confirm Dialog -->
+    <!-- 删除确认对话框 -->
     <v-dialog v-model="showDeleteConfirm" max-width="400">
       <v-card>
         <v-card-title class="text-error">确认删除</v-card-title>
@@ -119,7 +119,9 @@ const {
   deleteProfile,
 } = useProfiles()
 
+// 账号名称最大长度
 const PROFILE_NAME_MAX_LEN = 32
+// 账号名称非法字符正则表达式
 const PROFILE_NAME_INVALID_RE = /[/\\\u0000\n\r\t]/
 
 const showNewProfileDialog = ref(false)
@@ -129,6 +131,11 @@ const newProfileName = ref('')
 const renameNewName = ref('')
 const renameOldName = ref('')
 
+/**
+ * 验证账号名称是否合法。
+ * @param name 账号名称
+ * @returns 错误信息，如果合法则返回 null
+ */
 function validateProfileName(name: string): string | null {
   const trimmed = name.trim()
   if (!trimmed) return '名称不能为空'
@@ -141,6 +148,9 @@ onMounted(() => {
   fetchProfiles()
 })
 
+/**
+ * 切换到指定账号。
+ */
 async function onSwitch(name: string) {
   try {
     await switchProfile(name)
@@ -149,6 +159,9 @@ async function onSwitch(name: string) {
   }
 }
 
+/**
+ * 创建新账号。
+ */
 async function onCreate() {
   const name = newProfileName.value.trim()
   const validationError = validateProfileName(name)
@@ -165,12 +178,18 @@ async function onCreate() {
   }
 }
 
+/**
+ * 开始重命名账号。
+ */
 function startRename(name: string) {
   renameOldName.value = name
   renameNewName.value = name
   showRenameDialog.value = true
 }
 
+/**
+ * 执行重命名操作。
+ */
 async function onRename() {
   const newName = renameNewName.value.trim()
   const validationError = validateProfileName(newName)
@@ -186,6 +205,9 @@ async function onRename() {
   }
 }
 
+/**
+ * 删除当前账号。
+ */
 async function onDelete() {
   try {
     await deleteProfile(activeProfileName.value)

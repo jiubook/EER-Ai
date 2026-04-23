@@ -1,8 +1,8 @@
 """
-Profile manager service.
+账号管理服务。
 
-Manages multi-account profiles with their treasure matrix configurations.
-Profiles are stored in a JSON file alongside the main config.
+管理多账号及其宝藏基质配置。
+账号存储在主配置文件旁的 JSON 文件中。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ __all__ = ["ProfileManager"]
 
 
 def _load_profiles_from_file(path: Path) -> ProfileCollection | None:
-    """Load profiles from a JSON file."""
+    """从 JSON 文件加载账号配置。"""
     if not path.is_file():
         return None
     try:
@@ -36,12 +36,16 @@ def _load_profiles_from_file(path: Path) -> ProfileCollection | None:
 
 
 def _save_profiles_to_file(collection: ProfileCollection, path: Path) -> bool:
-    """Save profiles to a JSON file."""
+    """原子性地保存账号配置到 JSON 文件。"""
     try:
-        path.write_text(
+        # 先写入临时文件
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
             collection.model_dump_json(indent=4, ensure_ascii=False),
             encoding="utf-8",
         )
+        # 原子替换
+        temp_path.replace(path)
         return True
     except Exception as e:
         logger.error("Failed to save profiles to {}: {}", path, e)
@@ -50,63 +54,64 @@ def _save_profiles_to_file(collection: ProfileCollection, path: Path) -> bool:
 
 class ProfileManager:
     """
-    Manages multi-account profiles.
+    管理多账号。
 
-    - Holds a ProfileCollection in memory.
-    - Provides CRUD operations for profiles.
-    - Persists to disk on changes.
+    - 在内存中保存 ProfileCollection。
+    - 提供账号的 CRUD 操作。
+    - 在更改时持久化到磁盘。
     """
 
     def __init__(self, profiles_file: Path) -> None:
-        """Initialize the profile manager.
+        """初始化账号管理器。
 
         Args:
-            profiles_file: Path to the JSON file where profiles are persisted.
+            profiles_file: 账号持久化的 JSON 文件路径。
         """
         self._profiles_file = profiles_file
         self._collection = ProfileCollection()
 
     def load(self) -> None:
-        """Load profiles from disk."""
+        """从磁盘加载账号配置。"""
         result = _load_profiles_from_file(self._profiles_file)
         if result is not None:
             self._collection = result
             self._collection.ensure_default()
-            logger.info("加载账号配置成功，当前账号: {}", self._collection.active_profile)
+            logger.info(
+                "加载账号配置成功，当前账号: {}", self._collection.active_profile
+            )
         else:
             logger.info("未找到账号配置文件，使用默认配置。")
             self._collection.ensure_default()
             self.save()
 
     def save(self) -> None:
-        """Save profiles to disk."""
+        """保存账号配置到磁盘。"""
         _save_profiles_to_file(self._collection, self._profiles_file)
 
     def get_collection(self) -> ProfileCollection:
-        """Get the current profile collection."""
+        """获取当前账号集合。"""
         return self._collection
 
     def get_active_profile(self) -> ProfileData:
-        """Get the active profile data."""
+        """获取激活的账号数据。"""
         return self._collection.get_active()
 
     def get_active_profile_name(self) -> str:
-        """Get the name of the active profile."""
+        """获取激活的账号名称。"""
         return self._collection.active_profile
 
     def switch_profile(self, name: str) -> ProfileData:
-        """Switch to a profile, creating it if it doesn't exist.
+        """切换到指定账号，如果不存在则创建。
 
         Args:
-            name: The profile name to switch to. Must be non-empty after
-                stripping whitespace, at most 32 characters, and must not
-                contain path separators or newlines.
+            name: 要切换到的账号名称。必须在去除空白后非空，
+                最多 32 个字符，且不能包含路径分隔符或换行符。
 
         Returns:
-            The ProfileData of the switched-to profile.
+            切换到的账号的 ProfileData。
 
         Raises:
-            ValueError: If the name is invalid.
+            ValueError: 如果名称无效。
         """
         name = self._validate_profile_name(name)
         if name not in self._collection.profiles:
@@ -118,28 +123,28 @@ class ProfileManager:
 
     @staticmethod
     def _validate_profile_name(name: str) -> str:
-        """Validate and normalize a profile name.
+        """验证并规范化账号名称。
 
-        Rules:
-        - Non-empty after stripping whitespace
-        - At most 32 characters
-        - Must not contain path separators, newlines, or null bytes
+        规则：
+        - 去除空白后非空
+        - 最多 32 个字符
+        - 不能包含路径分隔符、换行符或空字节
 
         Args:
-            name: The raw profile name.
+            name: 原始账号名称。
 
         Returns:
-            The stripped profile name.
+            去除空白后的账号名称。
 
         Raises:
-            ValueError: If the name violates any rule.
+            ValueError: 如果名称违反任何规则。
         """
         stripped = name.strip()
         if not stripped:
             raise ValueError("账号名称不能为空")
         if len(stripped) > 32:
             raise ValueError("账号名称不能超过 32 个字符")
-        forbidden = set('/\\\x00\n\r\t')
+        forbidden = set("/\\\x00\n\r\t")
         bad_chars = forbidden & set(stripped)
         if bad_chars:
             raise ValueError(
@@ -148,18 +153,17 @@ class ProfileManager:
         return stripped
 
     def rename_profile(self, old_name: str, new_name: str) -> ProfileData:
-        """Rename a profile.
+        """重命名账号。
 
         Args:
-            old_name: The current profile name. Must exist.
-            new_name: The new profile name. Must be valid and not already in use.
+            old_name: 当前账号名称。必须存在。
+            new_name: 新账号名称。必须有效且未被使用。
 
         Returns:
-            The renamed ProfileData.
+            重命名后的 ProfileData。
 
         Raises:
-            ValueError: If old_name does not exist, new_name is already taken,
-                or new_name is invalid.
+            ValueError: 如果 old_name 不存在、new_name 已被占用或 new_name 无效。
         """
         if old_name not in self._collection.profiles:
             raise ValueError(f"账号 '{old_name}' 不存在")
@@ -179,16 +183,15 @@ class ProfileManager:
         return profile
 
     def delete_profile(self, name: str) -> None:
-        """Delete a profile.
+        """删除账号。
 
-        The 'default' profile and the currently active profile cannot be deleted.
+        不能删除 'default' 账号和当前激活的账号。
 
         Args:
-            name: The profile name to delete.
+            name: 要删除的账号名称。
 
         Raises:
-            ValueError: If the profile is 'default', is the active profile,
-                or does not exist.
+            ValueError: 如果账号是 'default'、是激活账号或不存在。
         """
         if name == "default":
             raise ValueError("不能删除默认账号")
@@ -201,16 +204,14 @@ class ProfileManager:
         self.save()
         logger.info("删除账号: {}", name)
 
-    def update_treasure_matrix(
-        self, entries: list[TreasureMatrixEntry]
-    ) -> ProfileData:
-        """Replace the entire treasure matrix for the active profile.
+    def update_treasure_matrix(self, entries: list[TreasureMatrixEntry]) -> ProfileData:
+        """替换激活账号的完整宝藏基质配置。
 
         Args:
-            entries: The new list of treasure matrix entries.
+            entries: 新的宝藏基质条目列表。
 
         Returns:
-            The updated ProfileData.
+            更新后的 ProfileData。
         """
         profile = self.get_active_profile()
         profile.treasure_matrix = entries
@@ -218,15 +219,15 @@ class ProfileManager:
         return profile
 
     def add_treasure_matrix_entry(self, entry: TreasureMatrixEntry) -> ProfileData:
-        """Add or update a single treasure matrix entry.
+        """添加或更新单个宝藏基质条目。
 
-        If an entry for the same weapon_id already exists, it is replaced.
+        如果相同 weapon_id 的条目已存在，则替换它。
 
         Args:
-            entry: The treasure matrix entry to add or update.
+            entry: 要添加或更新的宝藏基质条目。
 
         Returns:
-            The updated ProfileData.
+            更新后的 ProfileData。
         """
         profile = self.get_active_profile()
         profile.treasure_matrix = [
@@ -237,13 +238,13 @@ class ProfileManager:
         return profile
 
     def remove_treasure_matrix_entry(self, weapon_id: str) -> ProfileData:
-        """Remove a treasure matrix entry by weapon ID.
+        """根据武器 ID 移除宝藏基质条目。
 
         Args:
-            weapon_id: The weapon ID of the entry to remove.
+            weapon_id: 要移除的条目的武器 ID。
 
         Returns:
-            The updated ProfileData.
+            更新后的 ProfileData。
         """
         profile = self.get_active_profile()
         profile.treasure_matrix = [

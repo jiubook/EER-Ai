@@ -1,35 +1,34 @@
 """
-Farming recommendation calculator.
+刷取建议计算器。
 
-Computes expected number of farming runs needed to upgrade treasure matrix
-affixes to target levels, based on the game's probability system.
+根据游戏的概率系统，计算将宝藏基质词条升级到目标等级所需的预期刷取次数。
 
-Key parameters:
-- With 刻写券 (engrave coupon): each run drops 3 flawless essences
-- 1/24 chance per drop to get the desired essence
-- Each affix upgrade attempt consumes 1 random flawless essence
-- Upgrade success rates:
-  - Affix 1&2 (attribute/secondary): 1→2(60%), 2→3(24%), 3→4(10.9%), 4→5(5%), 5→6(2.7%)
-  - Affix 3 (skill): 1→2(10.9%), 2→3(4.2%)
-- Failed upgrades give 10 冷却脂 (cooling grease)
-- Cooling grease can guarantee success at thresholds:
-  - Affix 1&2: 1→2(30), 2→3(60), 3→4(120), 4→5(250), 5→6(450)
-  - Affix 3: 1→2(120), 2→3(300)
+关键参数：
+- 使用刻写券：每次刷取掉落 3 个完美基质
+- 每个掉落有 1/24 的概率获得所需基质
+- 每次词条升级尝试消耗 1 个随机完美基质
+- 升级成功率：
+  - 词条 1&2（属性/副属性）：1→2(60%), 2→3(24%), 3→4(10.9%), 4→5(5%), 5→6(2.7%)
+  - 词条 3（技能）：1→2(10.9%), 2→3(4.2%)
+- 失败的升级给予 10 冷却脂
+- 冷却脂可以在达到阈值时保证成功：
+  - 词条 1&2：1→2(30), 2→3(60), 3→4(120), 4→5(250), 5→6(450)
+  - 词条 3：1→2(120), 2→3(300)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# --- Constants ---
+# --- 常量 ---
 
 DESIRED_ESSENCE_PROB = 1 / 24
-"""Probability of getting the desired essence per drop."""
+"""每次掉落获得所需基质的概率。"""
 
 ESSENCES_PER_RUN = 3
-"""Number of flawless essences dropped per run (with engrave coupon)."""
+"""每次刷取掉落的完美基质数量（使用刻写券）。"""
 
-# Upgrade success probabilities: level -> success prob for level→level+1
+# 升级成功概率：等级 -> 从该等级升级到下一等级的成功概率
 UPGRADE_PROBS_AFFIX_12: dict[int, float] = {
     1: 0.600,
     2: 0.240,
@@ -37,15 +36,15 @@ UPGRADE_PROBS_AFFIX_12: dict[int, float] = {
     4: 0.050,
     5: 0.027,
 }
-"""Affix 1&2 upgrade probabilities."""
+"""词条 1&2 的升级概率。"""
 
 UPGRADE_PROBS_AFFIX_3: dict[int, float] = {
     1: 0.109,
     2: 0.042,
 }
-"""Affix 3 upgrade probabilities."""
+"""词条 3 的升级概率。"""
 
-# Cooling grease thresholds: level -> grease needed to guarantee level→level+1
+# 冷却脂阈值：等级 -> 保证从该等级升级到下一等级所需的冷却脂
 GREASE_THRESHOLD_AFFIX_12: dict[int, int] = {
     1: 30,
     2: 60,
@@ -53,106 +52,106 @@ GREASE_THRESHOLD_AFFIX_12: dict[int, int] = {
     4: 250,
     5: 450,
 }
-"""Affix 1&2: grease thresholds per level."""
+"""词条 1&2：每个等级的冷却脂阈值。"""
 
 GREASE_THRESHOLD_AFFIX_3: dict[int, int] = {
     1: 120,
     2: 300,
 }
-"""Affix 3: grease thresholds per level."""
+"""词条 3：每个等级的冷却脂阈值。"""
 
 GREASE_PER_FAIL = 10
-"""Cooling grease gained per failed upgrade attempt."""
+"""每次失败的升级尝试获得的冷却脂。"""
 
 
 @dataclass
 class UpgradeStepDetail:
-    """Detail for upgrading one level step."""
+    """单个等级升级步骤的详细信息。"""
 
     from_level: int
-    """Starting level for this step."""
+    """此步骤的起始等级。"""
 
     to_level: int
-    """Target level for this step."""
+    """此步骤的目标等级。"""
 
     success_prob: float
-    """Probability of success per attempt."""
+    """每次尝试的成功概率。"""
 
     grease_threshold: int
-    """Cooling grease needed to guarantee success."""
+    """保证成功所需的冷却脂。"""
 
     expected_attempts: float
-    """Expected number of upgrade attempts for this step."""
+    """此步骤的预期升级尝试次数。"""
 
     expected_essences: float
-    """Expected essences consumed (equal to expected_attempts)."""
+    """预期消耗的基质数量（等于预期尝试次数）。"""
 
     expected_grease_gained: float
-    """Expected cooling grease gained from failures."""
+    """从失败中获得的预期冷却脂。"""
 
     expected_grease_used: float
-    """Expected cooling grease consumed (only when all attempts fail)."""
+    """预期消耗的冷却脂（仅当所有尝试都失败时）。"""
 
     use_grease_at: int | None = None
-    """If set, use grease guarantee after this many failures."""
+    """如果设置，在此次数的失败后使用冷却脂保证。"""
 
 
 @dataclass
 class AffixUpgradeResult:
-    """Result for upgrading a single affix from current to target level."""
+    """将单个词条从当前等级升级到目标等级的结果。"""
 
     affix_name: str
-    """Name of the affix (e.g. "基础属性", "附加属性", "技能属性")."""
+    """词条名称（例如"基础属性"、"附加属性"、"技能属性"）。"""
 
     current_level: int
-    """Current affix level."""
+    """当前词条等级。"""
 
     target_level: int
-    """Target affix level."""
+    """目标词条等级。"""
 
     expected_attempts: float = 0.0
-    """Total expected number of upgrade attempts."""
+    """预期的总升级尝试次数。"""
 
     expected_essences_consumed: float = 0.0
-    """Total expected essences consumed (each attempt costs 1)."""
+    """预期消耗的总基质数量（每次尝试消耗 1 个）。"""
 
     expected_grease_gained: float = 0.0
-    """Total expected cooling grease gained from failures."""
+    """从失败中获得的总预期冷却脂。"""
 
     expected_grease_used: float = 0.0
-    """Total expected cooling grease used (from guaranteed successes)."""
+    """使用的总预期冷却脂（来自保证成功）。"""
 
     steps: list[UpgradeStepDetail] = field(default_factory=list)
-    """Per-step breakdown."""
+    """每个步骤的详细分解。"""
 
 
 @dataclass
 class FarmingRecommendation:
-    """Complete farming recommendation."""
+    """完整的刷取建议。"""
 
     weapon_name: str
-    """Name of the weapon."""
+    """武器名称。"""
 
     weapon_id: str
-    """Weapon ID."""
+    """武器 ID。"""
 
     affix_results: list[AffixUpgradeResult] = field(default_factory=list)
-    """Results for each affix."""
+    """每个词条的结果。"""
 
     total_expected_essences: float = 0.0
-    """Total expected essences needed across all affixes."""
+    """所有词条所需的总预期基质数量。"""
 
     total_expected_desired_essences: float = 0.0
-    """Total expected desired essences (1/24 of total)."""
+    """总预期所需基质数量（总数的 1/24）。"""
 
     total_expected_runs: float = 0.0
-    """Total expected farming runs needed."""
+    """所需的总预期刷取次数。"""
 
     current_levels: tuple[int, int, int] = (1, 1, 1)
-    """Current affix levels (affix1, affix2, affix3)."""
+    """当前词条等级（词条1、词条2、词条3）。"""
 
     target_levels: tuple[int, int, int] = (6, 6, 3)
-    """Target affix levels (affix1, affix2, affix3)."""
+    """目标词条等级（词条1、词条2、词条3）。"""
 
 
 def _compute_single_step(
@@ -160,36 +159,35 @@ def _compute_single_step(
     grease_threshold: int,
 ) -> UpgradeStepDetail:
     """
-    Compute expected attempts and grease for a single level upgrade step.
+    计算单个等级升级步骤的预期尝试次数和冷却脂。
 
-    Strategy: attempt upgrades until success or until enough cooling grease
-    is accumulated to guarantee success.
+    策略：尝试升级直到成功或积累足够的冷却脂来保证成功。
 
-    The expected number of attempts when we cap at ``max_attempts`` is:
+    当我们限制在 ``max_attempts`` 次尝试时的预期尝试次数为：
         E[attempts] = (1 - fail_prob^max_attempts) / success_prob
-    where ``max_attempts = ceil(grease_threshold / GREASE_PER_FAIL)``.
+    其中 ``max_attempts = ceil(grease_threshold / GREASE_PER_FAIL)``。
 
     Args:
-        success_prob: Probability of success per attempt.
-        grease_threshold: Cooling grease needed to guarantee success.
+        success_prob: 每次尝试的成功概率。
+        grease_threshold: 保证成功所需的冷却脂。
 
     Returns:
-        An UpgradeStepDetail with computed values.
+        包含计算值的 UpgradeStepDetail。
     """
     fail_prob = 1 - success_prob
     max_attempts = (grease_threshold + GREASE_PER_FAIL - 1) // GREASE_PER_FAIL
     # ceil(grease_threshold / GREASE_PER_FAIL)
 
-    # Expected attempts = sum_{i=0}^{max_attempts-1} fail_prob^i
-    #                   = (1 - fail_prob^max_attempts) / success_prob
+    # 预期尝试次数 = sum_{i=0}^{max_attempts-1} fail_prob^i
+    #              = (1 - fail_prob^max_attempts) / success_prob
     if success_prob > 0:
         expected_attempts = (1 - fail_prob**max_attempts) / success_prob
     else:
         expected_attempts = max_attempts
 
-    # Expected failures: computed numerically as sum of
-    #   (i-1) * P(first success at attempt i) for i=1..max_attempts
-    #   + max_attempts * P(all fail)
+    # 预期失败次数：数值计算为
+    #   (i-1) * P(第 i 次尝试首次成功) 对 i=1..max_attempts 求和
+    #   + max_attempts * P(全部失败)
     expected_failures = 0.0
     for attempt_index in range(1, max_attempts + 1):
         prob_first_success = success_prob * fail_prob ** (attempt_index - 1)
@@ -201,8 +199,8 @@ def _compute_single_step(
     grease_used = prob_all_fail * grease_threshold
 
     return UpgradeStepDetail(
-        from_level=0,  # filled by caller
-        to_level=0,    # filled by caller
+        from_level=0,  # 由调用者填充
+        to_level=0,  # 由调用者填充
         success_prob=success_prob,
         grease_threshold=grease_threshold,
         expected_attempts=expected_attempts,
@@ -221,18 +219,17 @@ def _compute_upgrade_steps(
     affix_name: str,
 ) -> AffixUpgradeResult:
     """
-    Compute expected attempts and essences to upgrade an affix
-    from current to target level.
+    计算将词条从当前等级升级到目标等级的预期尝试次数和基质数量。
 
     Args:
-        current: Current affix level.
-        target: Target affix level.
-        upgrade_probs: Mapping from level to success probability.
-        grease_thresholds: Mapping from level to grease threshold.
-        affix_name: Display name of the affix.
+        current: 当前词条等级。
+        target: 目标词条等级。
+        upgrade_probs: 从等级到成功概率的映射。
+        grease_thresholds: 从等级到冷却脂阈值的映射。
+        affix_name: 词条的显示名称。
 
     Returns:
-        An AffixUpgradeResult with per-step breakdown.
+        包含每个步骤详细分解的 AffixUpgradeResult。
     """
     result = AffixUpgradeResult(
         affix_name=affix_name,
@@ -280,17 +277,50 @@ def compute_farming_recommendation(
     target_levels: tuple[int, int, int],
 ) -> FarmingRecommendation:
     """
-    Compute farming recommendation for upgrading a weapon's treasure matrix.
+    计算升级武器宝藏基质的刷取建议。
 
     Args:
-        weapon_id: The weapon ID.
-        weapon_name: The weapon display name.
-        current_levels: Current affix levels (affix1, affix2, affix3).
-        target_levels: Target affix levels (affix1, affix2, affix3).
+        weapon_id: 武器 ID。
+        weapon_name: 武器显示名称。
+        current_levels: 当前词条等级（词条1、词条2、词条3）。
+        target_levels: 目标词条等级（词条1、词条2、词条3）。
 
     Returns:
-        FarmingRecommendation with detailed breakdown.
+        包含详细分解的 FarmingRecommendation。
+
+    Raises:
+        ValueError: 如果等级值超出有效范围。
     """
+    # 验证 current_levels
+    if not (
+        1 <= current_levels[0] <= 6
+        and 1 <= current_levels[1] <= 6
+        and 1 <= current_levels[2] <= 3
+    ):
+        raise ValueError(
+            f"Invalid current_levels: {current_levels}. Expected (1-6, 1-6, 1-3)"
+        )
+
+    # 验证 target_levels
+    if not (
+        1 <= target_levels[0] <= 6
+        and 1 <= target_levels[1] <= 6
+        and 1 <= target_levels[2] <= 3
+    ):
+        raise ValueError(
+            f"Invalid target_levels: {target_levels}. Expected (1-6, 1-6, 1-3)"
+        )
+
+    # 验证 current <= target
+    if (
+        current_levels[0] > target_levels[0]
+        or current_levels[1] > target_levels[1]
+        or current_levels[2] > target_levels[2]
+    ):
+        raise ValueError(
+            f"current_levels {current_levels} must not exceed target_levels {target_levels}"
+        )
+
     recommendation = FarmingRecommendation(
         weapon_name=weapon_name,
         weapon_id=weapon_id,
@@ -298,7 +328,7 @@ def compute_farming_recommendation(
         target_levels=target_levels,
     )
 
-    # Affix 1 (attribute): levels 1-6
+    # 词条 1（属性）：等级 1-6
     recommendation.affix_results.append(
         _compute_upgrade_steps(
             current=current_levels[0],
@@ -309,7 +339,7 @@ def compute_farming_recommendation(
         )
     )
 
-    # Affix 2 (secondary): levels 1-6
+    # 词条 2（副属性）：等级 1-6
     recommendation.affix_results.append(
         _compute_upgrade_steps(
             current=current_levels[1],
@@ -320,7 +350,7 @@ def compute_farming_recommendation(
         )
     )
 
-    # Affix 3 (skill): levels 1-3
+    # 词条 3（技能）：等级 1-3
     recommendation.affix_results.append(
         _compute_upgrade_steps(
             current=current_levels[2],
@@ -331,7 +361,7 @@ def compute_farming_recommendation(
         )
     )
 
-    # Total essences: each upgrade attempt consumes 1 random flawless essence
+    # 总基质数：每次升级尝试消耗 1 个随机完美基质
     total_essences = sum(
         affix_result.expected_essences_consumed
         for affix_result in recommendation.affix_results
@@ -339,13 +369,11 @@ def compute_farming_recommendation(
     recommendation.total_expected_essences = total_essences
     recommendation.total_expected_desired_essences = total_essences
 
-    # Runs: each run drops ESSENCES_PER_RUN essences, each with
-    # DESIRED_ESSENCE_PROB chance of being the desired one.
+    # 刷取次数：每次刷取掉落 ESSENCES_PER_RUN 个基质，
+    # 每个基质有 DESIRED_ESSENCE_PROB 的概率是所需的基质。
     desired_essences_per_run = ESSENCES_PER_RUN * DESIRED_ESSENCE_PROB
     if desired_essences_per_run > 0:
-        recommendation.total_expected_runs = (
-            total_essences / desired_essences_per_run
-        )
+        recommendation.total_expected_runs = total_essences / desired_essences_per_run
     else:
         recommendation.total_expected_runs = float("inf")
 
