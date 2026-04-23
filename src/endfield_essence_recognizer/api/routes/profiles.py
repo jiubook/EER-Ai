@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from endfield_essence_recognizer.core.farming_calculator import (
@@ -76,7 +77,7 @@ async def switch_profile(
     """切换到不同的账号。"""
     try:
         return manager.switch_profile(request.name)
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
@@ -234,7 +235,9 @@ async def get_batch_farming_recommendations(
                         target_levels=item.target_levels,
                     )
                 )
-            except ValueError:
-                # 批量模式下跳过无效条目
+            except ValueError as e:
+                logger.warning(
+                    "Skipping invalid batch entry {}: {}", item.weapon_id, e
+                )
                 continue
     return results

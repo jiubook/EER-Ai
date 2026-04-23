@@ -157,6 +157,8 @@ class FarmingRecommendation:
 def _compute_single_step(
     success_prob: float,
     grease_threshold: int,
+    from_level: int = 0,
+    to_level: int = 0,
 ) -> UpgradeStepDetail:
     """
     计算单个等级升级步骤的预期尝试次数和冷却脂。
@@ -170,6 +172,8 @@ def _compute_single_step(
     Args:
         success_prob: 每次尝试的成功概率。
         grease_threshold: 保证成功所需的冷却脂。
+        from_level: 此步骤的起始等级。
+        to_level: 此步骤的目标等级。
 
     Returns:
         包含计算值的 UpgradeStepDetail。
@@ -199,8 +203,8 @@ def _compute_single_step(
     grease_used = prob_all_fail * grease_threshold
 
     return UpgradeStepDetail(
-        from_level=0,  # 由调用者填充
-        to_level=0,  # 由调用者填充
+        from_level=from_level,
+        to_level=to_level,
         success_prob=success_prob,
         grease_threshold=grease_threshold,
         expected_attempts=expected_attempts,
@@ -252,9 +256,9 @@ def _compute_upgrade_steps(
         if success_prob is None or grease_threshold is None:
             break
 
-        step = _compute_single_step(success_prob, grease_threshold)
-        step.from_level = level
-        step.to_level = level + 1
+        step = _compute_single_step(
+            success_prob, grease_threshold, from_level=level, to_level=level + 1
+        )
         result.steps.append(step)
 
         total_attempts += step.expected_attempts

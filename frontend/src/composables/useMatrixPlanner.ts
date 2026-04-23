@@ -4,11 +4,15 @@
  * 改编自 ef-frontend-v1 的基质计算器逻辑，帮助用户找到刷取所需基质的最佳位置。
  */
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
 
+let _nextId = 1
+
 export interface PlannerEssenceStat {
+  /** 唯一标识符，用于 v-for key 和稳定引用 */
+  id: number
   isCustom: boolean
   weaponId: string | null
   attribute: string | null
@@ -188,7 +192,7 @@ export function useMatrixPlanner() {
   function addStatFromWeapon(weaponId: string) {
     const weapon = weaponsMap.value.get(weaponId)
     if (!weapon) return
-    // Check if already added
+    // Check if already added — toggle off
     const existing = requiredEssenceStats.value.findIndex(
       (s) => !s.isCustom && s.weaponId === weaponId,
     )
@@ -196,17 +200,20 @@ export function useMatrixPlanner() {
       requiredEssenceStats.value.splice(existing, 1)
       return
     }
+    // 存储显示名（而非内部 ID），确保与 allAttributeStats 等匹配一致
     requiredEssenceStats.value.push({
+      id: _nextId++,
       isCustom: false,
       weaponId,
-      attribute: weapon.attributeStatId,
-      secondary: weapon.secondaryStatId,
-      skill: weapon.skillStatId,
+      attribute: getStatDisplayName(weapon.attributeStatId),
+      secondary: getStatDisplayName(weapon.secondaryStatId),
+      skill: getStatDisplayName(weapon.skillStatId),
     })
   }
 
   function addCustomStat() {
     requiredEssenceStats.value.push({
+      id: _nextId++,
       isCustom: true,
       weaponId: null,
       attribute: null,
@@ -276,26 +283,37 @@ export function useMatrixPlanner() {
     return { battleId, battleName, selectedAttribute, selectedSecondary: null, selectedSkill, matchedSelectedIndices, matchedWeaponIds }
   }
 
-  const battleChoices = computed(() => {
-    const result: BattleChoice[] = []
+  // 使用防抖的 battleChoices — 当需求列表变化时延迟计算，避免频繁重算
+  const _debouncedChoices = ref<BattleChoice[]>([])
+  let _choicesTimer: ReturnType<typeof setTimeout> | null = null
 
+  function _recomputeChoices() {
+    const result: BattleChoice[] = []
     for (const { battleId, battleName, secondaryStats, skillStats } of Object.values(energyAlluviums)) {
       for (const selectedAttribute of combinations(allAttributeStats, 3)) {
-        // Enumerate secondary stats
         for (const selectedSecondary of secondaryStats) {
           const choice = buildChoiceForSecondary(battleId, battleName, selectedAttribute, selectedSecondary, skillStats)
           if (choice) result.push(choice)
         }
-
-        // Enumerate skill stats
         for (const selectedSkill of skillStats) {
           const choice = buildChoiceForSkill(battleId, battleName, selectedAttribute, selectedSkill, secondaryStats)
           if (choice) result.push(choice)
         }
       }
     }
-    return result
-  })
+    _debouncedChoices.value = result
+  }
+
+  watch(
+    requiredEssenceStats,
+    () => {
+      if (_choicesTimer) clearTimeout(_choicesTimer)
+      _choicesTimer = setTimeout(_recomputeChoices, 150)
+    },
+    { deep: true, immediate: true },
+  )
+
+  const battleChoices = computed(() => _debouncedChoices.value)
 
   const bestChoices = computed(() => {
     const filtered = battleChoices.value.filter(

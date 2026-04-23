@@ -34,6 +34,17 @@ const collection = ref<ProfileCollection>({
 
 const isLoaded = ref(false)
 
+/** 最近一次操作错误信息（供 UI 展示） */
+const lastError = ref<string | null>(null)
+
+function _handleError(context: string, error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error)
+  const fullMessage = `${context}: ${message}`
+  // 生产环境使用统一的错误上报，而非 console.error
+  lastError.value = fullMessage
+  throw error instanceof Error ? error : new Error(fullMessage)
+}
+
 export function useProfiles() {
   const activeProfileName = computed(() => collection.value.active_profile)
   const activeProfile = computed(() => {
@@ -49,8 +60,9 @@ export function useProfiles() {
       const data = await res.json()
       collection.value = data
       isLoaded.value = true
+      lastError.value = null
     } catch (error) {
-      console.error('Failed to fetch profiles:', error)
+      _handleError('获取账号列表失败', error)
     }
   }
 
@@ -67,8 +79,7 @@ export function useProfiles() {
       }
       await fetchProfiles()
     } catch (error) {
-      console.error('Failed to switch profile:', error)
-      throw error
+      _handleError('切换账号失败', error)
     }
   }
 
@@ -85,8 +96,7 @@ export function useProfiles() {
       }
       await fetchProfiles()
     } catch (error) {
-      console.error('Failed to rename profile:', error)
-      throw error
+      _handleError('重命名账号失败', error)
     }
   }
 
@@ -103,8 +113,7 @@ export function useProfiles() {
       }
       await fetchProfiles()
     } catch (error) {
-      console.error('Failed to delete profile:', error)
-      throw error
+      _handleError('删除账号失败', error)
     }
   }
 
@@ -118,8 +127,7 @@ export function useProfiles() {
       if (!res.ok) throw new Error('Failed to update treasure matrix')
       await fetchProfiles()
     } catch (error) {
-      console.error('Failed to update treasure matrix:', error)
-      throw error
+      _handleError('更新宝藏基质失败', error)
     }
   }
 
@@ -133,8 +141,7 @@ export function useProfiles() {
       if (!res.ok) throw new Error('Failed to add treasure matrix entry')
       await fetchProfiles()
     } catch (error) {
-      console.error('Failed to add treasure matrix entry:', error)
-      throw error
+      _handleError('添加宝藏基质条目失败', error)
     }
   }
 
@@ -148,8 +155,7 @@ export function useProfiles() {
       if (!res.ok) throw new Error('Failed to remove treasure matrix entry')
       await fetchProfiles()
     } catch (error) {
-      console.error('Failed to remove treasure matrix entry:', error)
-      throw error
+      _handleError('移除宝藏基质条目失败', error)
     }
   }
 
@@ -169,10 +175,10 @@ export function useProfiles() {
         }),
       })
       if (!res.ok) throw new Error('Failed to get farming recommendation')
+      lastError.value = null
       return await res.json()
     } catch (error) {
-      console.error('Failed to get farming recommendation:', error)
-      throw error
+      _handleError('获取刷取建议失败', error)
     }
   }
 
@@ -190,16 +196,17 @@ export function useProfiles() {
         body: JSON.stringify({ items }),
       })
       if (!res.ok) throw new Error('Failed to get farming recommendations')
+      lastError.value = null
       return await res.json()
     } catch (error) {
-      console.error('Failed to get farming recommendations:', error)
-      throw error
+      _handleError('批量获取刷取建议失败', error)
     }
   }
 
   return {
     collection,
     isLoaded,
+    lastError,
     activeProfileName,
     activeProfile,
     profileNames,
