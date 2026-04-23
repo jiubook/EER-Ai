@@ -1,8 +1,11 @@
 <template>
   <v-container class="treasure-matrix-page">
-    <v-expansion-panels :model-value="[0, 1]" multiple>
+    <v-expansion-panels :model-value="[0, 1, 2]" multiple>
+      <!-- 武器总览 -->
+      <weapon-overview />
+
       <!-- Treasure Matrix Config -->
-      <v-expansion-panel :value="0">
+      <v-expansion-panel :value="1">
         <v-expansion-panel-title>
           <v-icon class="mr-2">mdi-diamond-stone</v-icon>
           宝藏基质配置
@@ -12,17 +15,29 @@
         </v-expansion-panel-title>
         <v-expansion-panel-text>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            保存你当前账号下每把武器的宝藏基质词条等级，用于计算建议刷取次数。
+            保存你当前账号下每把武器的宝藏基质词条等级，用于计算建议刷取次数。点击武器卡片可切换是否参与计算。
           </v-alert>
+
+          <!-- 显示满级武器开关 -->
+          <div class="d-flex align-center mb-3">
+            <v-switch
+              v-model="showMaxedWeapons"
+              color="primary"
+              density="compact"
+              hide-details
+              label="显示满级武器（6/6/3）"
+            />
+          </div>
 
           <!-- Existing entries -->
           <v-card
-            v-for="(entry, index) in matrixEntries"
+            v-for="(entry, index) in filteredMatrixEntries"
             :key="entry.weapon_id"
             class="mb-3 entry-card"
+            :class="{ 'entry-card--selected': entry.include_in_calculation !== false }"
             variant="outlined"
           >
-            <v-card-text>
+            <v-card-text class="clickable-card" @click="toggleIncludeInCalculation(entry)">
               <v-row align="center">
                 <v-col cols="12" md="3">
                   <div class="d-flex align-center">
@@ -35,7 +50,7 @@
                     </div>
                   </div>
                 </v-col>
-                <v-col cols="12" md="2">
+                <v-col cols="6" md="2">
                   <v-select
                     v-model="entry.affix1_level"
                     density="compact"
@@ -43,6 +58,7 @@
                     :items="[1, 2, 3, 4, 5, 6]"
                     label="基础属性"
                     variant="outlined"
+                    @click.stop
                     @update:model-value="onEntryChange"
                   >
                     <template #selection="{ item }">
@@ -55,7 +71,7 @@
                     </template>
                   </v-select>
                 </v-col>
-                <v-col cols="12" md="2">
+                <v-col cols="6" md="2">
                   <v-select
                     v-model="entry.affix2_level"
                     density="compact"
@@ -63,6 +79,7 @@
                     :items="[1, 2, 3, 4, 5, 6]"
                     label="附加属性"
                     variant="outlined"
+                    @click.stop
                     @update:model-value="onEntryChange"
                   >
                     <template #selection="{ item }">
@@ -75,7 +92,7 @@
                     </template>
                   </v-select>
                 </v-col>
-                <v-col cols="12" md="2">
+                <v-col cols="6" md="2">
                   <v-select
                     v-model="entry.affix3_level"
                     density="compact"
@@ -83,6 +100,7 @@
                     :items="[1, 2, 3]"
                     label="技能属性"
                     variant="outlined"
+                    @click.stop
                     @update:model-value="onEntryChange"
                   >
                     <template #selection="{ item }">
@@ -96,16 +114,16 @@
                   </v-select>
                 </v-col>
                 <v-col cols="12" md="3">
-                  <div class="d-flex ga-1">
+                  <div class="d-flex ga-2 justify-end">
                     <v-tooltip text="计算此武器的刷取建议">
                       <template #activator="{ props }">
                         <v-btn
                           v-bind="props"
                           color="primary"
                           icon="mdi-calculator"
-                          size="small"
-                          variant="text"
-                          @click="computeSingle(entry)"
+                          size="default"
+                          variant="tonal"
+                          @click.stop="computeSingle(entry)"
                         />
                       </template>
                     </v-tooltip>
@@ -115,9 +133,9 @@
                           v-bind="props"
                           color="error"
                           icon="mdi-delete"
-                          size="small"
-                          variant="text"
-                          @click="removeEntry(index)"
+                          size="default"
+                          variant="tonal"
+                          @click.stop="removeEntry(index)"
                         />
                       </template>
                     </v-tooltip>
@@ -127,7 +145,7 @@
             </v-card-text>
           </v-card>
 
-          <div v-if="matrixEntries.length === 0" class="text-center py-6">
+          <div v-if="filteredMatrixEntries.length === 0" class="text-center py-6">
             <v-icon class="mb-2" color="medium-emphasis" size="48">mdi-diamond-outline</v-icon>
             <div class="text-medium-emphasis">尚未添加任何武器，点击下方按钮开始配置</div>
           </div>
@@ -145,7 +163,7 @@
       </v-expansion-panel>
 
       <!-- Farming Recommendations -->
-      <v-expansion-panel :value="1">
+      <v-expansion-panel :value="2">
         <v-expansion-panel-title>
           <v-icon class="mr-2">mdi-calculator</v-icon>
           刷取建议
@@ -425,6 +443,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ItemIcon from '@/components/ItemIcon.vue'
+import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
@@ -481,11 +500,23 @@ interface Recommendation {
 
 const recommendations = ref<Recommendation[]>([])
 
+const showMaxedWeapons = ref(false)
+
 const matrixEntries = computed({
   get: () => treasureMatrix.value,
   set: (val) => {
     updateTreasureMatrix(val)
   },
+})
+
+const filteredMatrixEntries = computed(() => {
+  if (showMaxedWeapons.value) {
+    return matrixEntries.value
+  }
+  return matrixEntries.value.filter(
+    (entry) =>
+      !(entry.affix1_level === 6 && entry.affix2_level === 6 && entry.affix3_level === 3),
+  )
 })
 
 function getWeaponStats(weaponId: string): string {
@@ -523,20 +554,38 @@ async function onAddWeapon(weaponId: string) {
     affix1_level: 1,
     affix2_level: 1,
     affix3_level: 1,
+    include_in_calculation: true,
   })
   showAddWeaponDialog.value = false
 }
 
 async function removeEntry(index: number) {
-  const entry = matrixEntries.value[index]
+  const entry = filteredMatrixEntries.value[index]
   if (entry) {
     await removeTreasureMatrixEntry(entry.weapon_id)
   }
 }
 
+function toggleIncludeInCalculation(entry: TreasureMatrixEntry) {
+  entry.include_in_calculation = !entry.include_in_calculation
+  onEntryChange()
+}
+
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 function onEntryChange() {
+  // 检查是否有武器达到满级（6/6/3），自动取消勾选
+  for (const entry of matrixEntries.value) {
+    if (
+      entry.affix1_level === 6 &&
+      entry.affix2_level === 6 &&
+      entry.affix3_level === 3 &&
+      entry.include_in_calculation !== false
+    ) {
+      entry.include_in_calculation = false
+    }
+  }
+
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
     updateTreasureMatrix([...matrixEntries.value])
@@ -565,14 +614,27 @@ async function computeAll() {
   if (matrixEntries.value.length === 0) return
   computing.value = true
   try {
-    const items = matrixEntries.value.map((entry) => ({
-      weapon_id: entry.weapon_id,
-      current_levels: [entry.affix1_level, entry.affix2_level, entry.affix3_level] as [number, number, number],
-      target_levels: [targetAffix1.value, targetAffix2.value, targetAffix3.value] as [number, number, number],
-    }))
+    // 只计算勾选了"参与计算"的武器
+    const items = matrixEntries.value
+      .filter((entry) => entry.include_in_calculation !== false)
+      .map((entry) => ({
+        weapon_id: entry.weapon_id,
+        current_levels: [entry.affix1_level, entry.affix2_level, entry.affix3_level] as [
+          number,
+          number,
+          number,
+        ],
+        target_levels: [targetAffix1.value, targetAffix2.value, targetAffix3.value] as [
+          number,
+          number,
+          number,
+        ],
+      }))
     const results = await getBatchFarmingRecommendations(items)
     // Sort by expected runs (ascending - least runs first)
-    results.sort((a: Recommendation, b: Recommendation) => a.total_expected_runs - b.total_expected_runs)
+    results.sort(
+      (a: Recommendation, b: Recommendation) => a.total_expected_runs - b.total_expected_runs,
+    )
     recommendations.value = results
   } finally {
     computing.value = false
@@ -585,7 +647,7 @@ async function computeAll() {
 function navigateToPlanner(weaponId: string) {
   router.push({
     name: 'matrix-planner',
-    query: { weapon: weaponId },
+    query: { weapon: weaponId, clear: 'true' },
   })
 }
 
@@ -599,10 +661,35 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
 
 .treasure-matrix-page {
   .entry-card {
+    position: relative;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
+    overflow: hidden;
+
     &:hover {
       transform: translateY(-1px);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+    }
+
+    // 选中状态的左侧淡蓝色渐变
+    &.entry-card--selected::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 10px;
+      background: linear-gradient(
+        to right,
+        rgba(33, 150, 243, 0.8),
+        rgba(33, 150, 243, 0.4),
+        transparent
+      );
+      z-index: 1;
+    }
+
+    .clickable-card {
+      cursor: pointer;
+      user-select: none;
     }
   }
 

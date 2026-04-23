@@ -247,6 +247,7 @@ class ScannerEngine:
 
         # 以下两个字段是 ScannerEngine 维护的运行时状态
         self._weapon_essence_counts: dict[WeaponId, int] = {}
+        self._weapon_essence_levels: dict[WeaponId, tuple[int, int, int]] = {}
         self._total_essence_count: int = 0
 
         from endfield_essence_recognizer.utils.log import str_properties_and_attrs
@@ -272,6 +273,20 @@ class ScannerEngine:
             A dictionary mapping weapon IDs to essence counts.
         """
         return self._weapon_essence_counts.copy()
+
+    def get_weapon_essence_data(self):
+        """
+        获取完整的武器基质数据（包括等级）。
+
+        Returns:
+            WeaponEssenceData 对象，包含计数和等级信息。
+        """
+        from endfield_essence_recognizer.schemas.scanner import WeaponEssenceData
+
+        return WeaponEssenceData(
+            counts=self._weapon_essence_counts.copy(),
+            levels=self._weapon_essence_levels.copy(),
+        )
 
     def _execute_grid_scan(self, stop_event: threading.Event) -> None:
         """
@@ -302,6 +317,7 @@ class ScannerEngine:
 
         # 重置武器基质数量统计
         self._weapon_essence_counts = {}
+        self._weapon_essence_levels = {}
         self._total_essence_count = 0
 
         icon_x_list = self._profile.essence_icon_x_list
@@ -355,6 +371,28 @@ class ScannerEngine:
                     self._weapon_essence_counts[weapon_id] = (
                         self._weapon_essence_counts.get(weapon_id, 0) + 1
                     )
+
+                    # 更新最高等级
+                    try:
+                        current_levels = (
+                            data.levels[0] or 1,
+                            data.levels[1] or 1,
+                            data.levels[2] or 1,
+                        )
+
+                        logger.debug(f"武器 {weapon_id} 的等级: {current_levels}, 原始数据: {data.levels}")
+
+                        if weapon_id in self._weapon_essence_levels:
+                            existing = self._weapon_essence_levels[weapon_id]
+                            self._weapon_essence_levels[weapon_id] = (
+                                max(existing[0], current_levels[0]),
+                                max(existing[1], current_levels[1]),
+                                max(existing[2], current_levels[2]),
+                            )
+                        else:
+                            self._weapon_essence_levels[weapon_id] = current_levels
+                    except Exception as e:
+                        logger.error(f"更新武器 {weapon_id} 等级失败: {e}, data.levels={data.levels}", exc_info=True)
 
             # Log the result
             if (
@@ -646,6 +684,26 @@ class DraggableScannerEngine(ScannerEngine):
                         self._weapon_essence_counts[weapon_id] = (
                             self._weapon_essence_counts.get(weapon_id, 0) + 1
                         )
+
+                        # 更新最高等级
+                        try:
+                            current_levels = (
+                                data.levels[0] or 1,
+                                data.levels[1] or 1,
+                                data.levels[2] or 1,
+                            )
+
+                            if weapon_id in self._weapon_essence_levels:
+                                existing = self._weapon_essence_levels[weapon_id]
+                                self._weapon_essence_levels[weapon_id] = (
+                                    max(existing[0], current_levels[0]),
+                                    max(existing[1], current_levels[1]),
+                                    max(existing[2], current_levels[2]),
+                                )
+                            else:
+                                self._weapon_essence_levels[weapon_id] = current_levels
+                        except Exception as e:
+                            logger.error(f"更新武器 {weapon_id} 等级失败: {e}, data.levels={data.levels}", exc_info=True)
 
                 if (
                     evaluation.quality == EssenceQuality.TRASH

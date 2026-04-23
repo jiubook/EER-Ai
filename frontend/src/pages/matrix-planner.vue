@@ -3,8 +3,8 @@
     <v-row>
       <!-- 左侧：最优刷取方案 -->
       <v-col cols="12" lg="6">
-        <v-expansion-panels model-value="计算结果">
-          <v-expansion-panel value="计算结果">
+        <v-expansion-panels :model-value="[0]">
+          <v-expansion-panel :value="0">
             <v-expansion-panel-title>
               <v-icon class="mr-2">mdi-map-search</v-icon>
               最优刷取方案
@@ -13,7 +13,7 @@
               <template v-if="bestChoices.length > 0">
                 <v-card
                   v-for="(choice, i) in bestChoices"
-                  :key="choice.battleId + '-' + choice.selectedSecondary + '-' + choice.selectedSkill"
+                  :key="`${choice.battleId}-${choice.selectedAttribute.join(',')}-${choice.selectedSecondary ?? 'none'}-${choice.selectedSkill ?? 'none'}`"
                   class="mb-4 choice-card"
                   :class="{ 'choice-card--top': i === 0 }"
                   elevation="2"
@@ -26,11 +26,8 @@
                       方案 {{ i + 1 }}
                     </v-card-title>
                     <template #append>
-                      <v-chip class="font-weight-bold mr-2" color="white" size="small" variant="flat">
-                        {{ choice.matchedSelectedIndices.length }} 项需求满足
-                      </v-chip>
                       <v-chip class="font-weight-bold" color="white" size="small" variant="flat">
-                        {{ choice.matchedWeaponIds.length }} 把武器匹配
+                        匹配 {{ getSelectedWeaponMatchCount(choice) }}/{{ getSelectedWeaponCount() }} 把已选武器
                       </v-chip>
                     </template>
                   </v-card-item>
@@ -78,12 +75,6 @@
                       <v-divider class="hidden-sm-and-down" vertical />
                       <v-divider class="hidden-md-and-up my-4" />
                       <v-col cols="12" md="7">
-                        <div class="d-flex align-center mb-3">
-                          <v-icon class="mr-2" color="success" icon="mdi-check-circle-outline" size="small" />
-                          <span class="text-subtitle-1 font-weight-bold">
-                            满足 {{ choice.matchedSelectedIndices.length }} 项需求，匹配 {{ choice.matchedWeaponIds.length }} 把武器
-                          </span>
-                        </div>
                         <div class="pl-1">
                           <div class="mb-3">
                             <div class="text-medium-emphasis mb-1">满足的需求</div>
@@ -104,8 +95,13 @@
                           <div>
                             <div class="text-medium-emphasis mb-1">匹配的武器</div>
                             <div class="d-flex flex-wrap ga-2">
-                              <div v-for="weaponId in sortedWeaponIds(choice.matchedWeaponIds)" :key="weaponId">
-                                <item-icon class="weapon-item-small" :item-id="weaponId" show-item-name />
+                              <div
+                                v-for="weaponId in sortedWeaponIds(choice.matchedWeaponIds)"
+                                :key="weaponId"
+                                class="weapon-item-small"
+                                :class="{ 'weapon-matched': isRequiredWeapon(weaponId) }"
+                              >
+                                <item-icon :item-id="weaponId" show-item-name />
                               </div>
                             </div>
                           </div>
@@ -283,7 +279,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ItemIcon from '@/components/ItemIcon.vue'
-import { useMatrixPlanner } from '@/composables/useMatrixPlanner'
+import { type BattleChoice, useMatrixPlanner } from '@/composables/useMatrixPlanner'
 import { useStaticData } from '@/utils/gameData/staticData'
 
 const route = useRoute()
@@ -301,6 +297,7 @@ const {
   getEssenceStatDescription,
   getStatDisplayName,
   bestChoices,
+  clearAllStats,
 } = useMatrixPlanner()
 
 const weaponSearch = ref('')
@@ -338,23 +335,69 @@ function sortedWeaponIds(weaponIds: string[]): string[] {
 }
 
 /**
+ * 判断某个武器是否是用户选择的需求武器
+ */
+function isRequiredWeapon(weaponId: string): boolean {
+  return requiredEssenceStats.value.some((s) => !s.isCustom && s.weaponId === weaponId)
+}
+
+/**
+ * 获取已选择的武器总数
+ */
+function getSelectedWeaponCount(): number {
+  return requiredEssenceStats.value.filter(s => !s.isCustom && s.weaponId).length
+}
+
+/**
+ * 获取方案匹配的已选择武器数量
+ */
+function getSelectedWeaponMatchCount(choice: BattleChoice): number {
+  const selectedWeaponIds = new Set(
+    requiredEssenceStats.value
+      .filter(s => !s.isCustom && s.weaponId)
+      .map(s => s.weaponId!)
+  )
+  return choice.matchedWeaponIds.filter((id: string) => selectedWeaponIds.has(id)).length
+}
+
+/**
  * 在页面加载时处理 URL 参数。
  */
 onMounted(() => {
   const weaponId = route.query.weapon as string
+  const shouldClear = route.query.clear === 'true'
+
+  if (shouldClear) {
+    // 从宝藏基质跳转过来，清空之前的选择
+    clearAllStats()
+  }
+
   if (weaponId) {
     addStatFromWeapon(weaponId)
+    // 滚动到页面顶部
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 })
 
 /**
  * 监听 URL 参数变化。
  */
-watch(() => route.query.weapon, (weaponId) => {
-  if (weaponId && typeof weaponId === 'string') {
-    addStatFromWeapon(weaponId)
-  }
-})
+watch(
+  () => route.query,
+  (query) => {
+    const weaponId = query.weapon as string
+    const shouldClear = query.clear === 'true'
+
+    if (shouldClear) {
+      clearAllStats()
+    }
+
+    if (weaponId && typeof weaponId === 'string') {
+      addStatFromWeapon(weaponId)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  },
+)
 </script>
 
 <style scoped lang="scss">
@@ -415,6 +458,22 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   border-radius: 6px;
   &:hover {
     transform: scale(1.05);
+  }
+
+  // 匹配武器的红黄渐变呼吸边框
+  &.weapon-matched {
+    animation: matched-glow 2s ease-in-out infinite;
+    box-shadow: 0 0 15px rgba(255, 165, 0, 0.8);
+  }
+}
+
+@keyframes matched-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 15px rgba(255, 0, 0, 0.8);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 165, 0, 0.9);
   }
 }
 

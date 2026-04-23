@@ -12,12 +12,19 @@ export interface TreasureMatrixEntry {
   affix1_level: number
   affix2_level: number
   affix3_level: number
+  include_in_calculation?: boolean
 }
 
 export interface ProfileData {
   version: number
   name: string
   treasure_matrix: TreasureMatrixEntry[]
+  weapon_overview_filters?: {
+    '3star': boolean
+    '4star': boolean
+    '5star': boolean
+    '6star': boolean
+  }
 }
 
 export interface ProfileCollection {
@@ -203,6 +210,25 @@ export function useProfiles() {
     }
   }
 
+  async function updateWeaponOverviewFilters(filters: {
+    '3star': boolean
+    '4star': boolean
+    '5star': boolean
+    '6star': boolean
+  }) {
+    try {
+      const res = await fetch('/api/profiles/weapon_overview_filters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filters }),
+      })
+      if (!res.ok) throw new Error('Failed to update weapon overview filters')
+      await fetchProfiles()
+    } catch (error) {
+      _handleError('更新武器总览过滤器失败', error)
+    }
+  }
+
   return {
     collection,
     isLoaded,
@@ -220,5 +246,6 @@ export function useProfiles() {
     removeTreasureMatrixEntry,
     getFarmingRecommendation,
     getBatchFarmingRecommendations,
+    updateWeaponOverviewFilters,
   }
 }

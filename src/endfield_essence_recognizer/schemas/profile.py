@@ -29,6 +29,9 @@ class TreasureMatrixEntry(BaseModel):
     affix3_level: int = Field(default=1, ge=1, le=3)
     """第三词条（技能）等级：1-3。"""
 
+    include_in_calculation: bool = True
+    """是否参与刷取建议计算，满级（6/6/3）默认为False。"""
+
 
 class ProfileData(BaseModel):
     """单个账号存储的数据。"""
@@ -42,6 +45,16 @@ class ProfileData(BaseModel):
 
     treasure_matrix: list[TreasureMatrixEntry] = []
     """此账号保存的宝藏基质配置。"""
+
+    weapon_overview_filters: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "3star": True,
+            "4star": True,
+            "5star": True,
+            "6star": True,
+        }
+    )
+    """武器总览的星级过滤器配置。"""
 
 
 class ProfileCollection(BaseModel):
