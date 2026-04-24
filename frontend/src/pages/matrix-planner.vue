@@ -99,9 +99,21 @@
                                 v-for="weaponId in sortedWeaponIds(choice.matchedWeaponIds)"
                                 :key="weaponId"
                                 class="weapon-item-small"
-                                :class="{ 'weapon-matched': isRequiredWeapon(weaponId) }"
+                                :class="{
+                                  'weapon-matched': isRequiredWeapon(weaponId),
+                                  'weapon-obtained': isWeaponObtained(weaponId)
+                                }"
                               >
                                 <item-icon :item-id="weaponId" show-item-name />
+                                <v-chip
+                                  v-if="isWeaponObtained(weaponId)"
+                                  class="obtained-badge"
+                                  color="success"
+                                  size="x-small"
+                                  variant="flat"
+                                >
+                                  已获得
+                                </v-chip>
                               </div>
                             </div>
                           </div>
@@ -257,13 +269,25 @@
                     v-for="weaponId in filteredWeaponIds(wType.weaponIds)"
                     :key="weaponId"
                     class="weapon-item"
-                    :class="{ 'weapon-selected': isWeaponSelected(weaponId) }"
+                    :class="{
+                      'weapon-selected': isWeaponSelected(weaponId),
+                      'weapon-obtained': isWeaponObtained(weaponId)
+                    }"
                     @click="addStatFromWeapon(weaponId)"
                   >
                     <item-icon :item-id="weaponId" show-item-name />
                     <div v-if="isWeaponSelected(weaponId)" class="weapon-selected-overlay">
                       <v-icon color="white" size="small">mdi-check-circle</v-icon>
                     </div>
+                    <v-chip
+                      v-if="isWeaponObtained(weaponId)"
+                      class="obtained-badge"
+                      color="success"
+                      size="x-small"
+                      variant="flat"
+                    >
+                      已获得
+                    </v-chip>
                   </div>
                 </div>
               </template>
@@ -280,10 +304,12 @@ import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type BattleChoice, useMatrixPlanner } from '@/composables/useMatrixPlanner'
+import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 
 const route = useRoute()
 const { weaponTypes, weaponsMap } = useStaticData()
+const { treasureMatrix } = useProfiles()
 const {
   requiredEssenceStats,
   allAttributeStats,
@@ -301,6 +327,13 @@ const {
 } = useMatrixPlanner()
 
 const weaponSearch = ref('')
+
+/**
+ * 判断武器是否已在宝藏基质配置中
+ */
+function isWeaponObtained(weaponId: string): boolean {
+  return treasureMatrix.value.some((entry) => entry.weapon_id === weaponId)
+}
 
 function filteredWeaponIds(weaponIds: string[]): string[] {
   if (!weaponSearch.value.trim()) return weaponIds
@@ -440,10 +473,34 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   height: $weapon-icon-size;
   cursor: pointer;
   position: relative;
-  transition: transform 0.15s;
+  transition: transform 0.15s, opacity 0.15s, filter 0.15s;
   border-radius: 6px;
   &:hover {
     transform: scale(1.1);
+  }
+
+  // 已获得武器的样式
+  &.weapon-obtained {
+    opacity: 0.6;
+    filter: grayscale(0.3);
+
+    // 确保子元素也应用样式
+    :deep(.item-icon-img) {
+      opacity: 0.6;
+      filter: grayscale(0.3);
+    }
+  }
+
+  .obtained-badge {
+    position: absolute;
+    bottom: -4px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.65rem;
+    padding: 0 4px;
+    height: 16px;
+    min-width: auto;
+    z-index: 10;
   }
 }
 
@@ -454,7 +511,7 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   flex-shrink: 0;
   cursor: pointer;
   position: relative;
-  transition: transform 0.15s;
+  transition: transform 0.15s, opacity 0.15s, filter 0.15s;
   border-radius: 6px;
   &:hover {
     transform: scale(1.05);
@@ -464,6 +521,30 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   &.weapon-matched {
     animation: matched-glow 2s ease-in-out infinite;
     box-shadow: 0 0 15px rgba(255, 165, 0, 0.8);
+  }
+
+  // 已获得武器的样式
+  &.weapon-obtained {
+    opacity: 0.6;
+    filter: grayscale(0.3);
+
+    // 确保子元素也应用样式
+    :deep(.item-icon-img) {
+      opacity: 0.6;
+      filter: grayscale(0.3);
+    }
+  }
+
+  .obtained-badge {
+    position: absolute;
+    bottom: -4px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.65rem;
+    padding: 0 4px;
+    height: 16px;
+    min-width: auto;
+    z-index: 10;
   }
 }
 

@@ -199,7 +199,8 @@ def _compute_single_step(
     expected_failures += max_attempts * prob_all_fail
 
     grease_gained = expected_failures * GREASE_PER_FAIL
-    grease_used = prob_all_fail * grease_threshold
+    # 正常升级时不自动使用冷却脂，只有用户主动选择时才使用
+    grease_used = 0
 
     return UpgradeStepDetail(
         from_level=from_level,
@@ -234,6 +235,8 @@ def _compute_upgrade_steps(
     Returns:
         包含每个步骤详细分解的 AffixUpgradeResult。
     """
+    import math
+
     result = AffixUpgradeResult(
         affix_name=affix_name,
         current_level=current,
@@ -261,9 +264,11 @@ def _compute_upgrade_steps(
         result.steps.append(step)
 
         total_attempts += step.expected_attempts
-        total_essences += step.expected_essences
-        total_grease_gained += step.expected_grease_gained
-        total_grease_used += step.expected_grease_used
+        # 每个步骤的基质消耗向上取整（不能消耗0.6个基质，必须是1个）
+        total_essences += math.ceil(step.expected_essences)
+        # 冷却脂获得/消耗取最接近的10的倍数
+        total_grease_gained += round(step.expected_grease_gained / 10) * 10
+        total_grease_used += round(step.expected_grease_used / 10) * 10
 
     result.expected_attempts = total_attempts
     result.expected_essences_consumed = total_essences

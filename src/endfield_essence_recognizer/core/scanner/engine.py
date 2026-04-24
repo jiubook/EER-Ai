@@ -380,7 +380,9 @@ class ScannerEngine:
                             data.levels[2] or 1,
                         )
 
-                        logger.debug(f"武器 {weapon_id} 的等级: {current_levels}, 原始数据: {data.levels}")
+                        logger.debug(
+                            f"武器 {weapon_id} 的等级: {current_levels}, 原始数据: {data.levels}"
+                        )
 
                         if weapon_id in self._weapon_essence_levels:
                             existing = self._weapon_essence_levels[weapon_id]
@@ -392,7 +394,10 @@ class ScannerEngine:
                         else:
                             self._weapon_essence_levels[weapon_id] = current_levels
                     except Exception as e:
-                        logger.error(f"更新武器 {weapon_id} 等级失败: {e}, data.levels={data.levels}", exc_info=True)
+                        logger.error(
+                            f"更新武器 {weapon_id} 等级失败: {e}, data.levels={data.levels}",
+                            exc_info=True,
+                        )
 
             # Log the result
             if (
@@ -703,7 +708,10 @@ class DraggableScannerEngine(ScannerEngine):
                             else:
                                 self._weapon_essence_levels[weapon_id] = current_levels
                         except Exception as e:
-                            logger.error(f"更新武器 {weapon_id} 等级失败: {e}, data.levels={data.levels}", exc_info=True)
+                            logger.error(
+                                f"更新武器 {weapon_id} 等级失败: {e}, data.levels={data.levels}",
+                                exc_info=True,
+                            )
 
                 if (
                     evaluation.quality == EssenceQuality.TRASH

@@ -239,7 +239,7 @@
           </v-alert>
 
           <v-card
-            v-for="rec in recommendations"
+            v-for="rec in sortedRecommendations"
             :key="rec.weapon_id"
             class="mb-4 rec-card"
             variant="outlined"
@@ -256,7 +256,7 @@
               <template #append>
                 <v-chip color="warning" size="large" variant="flat">
                   <v-icon start>mdi-sword</v-icon>
-                  约 {{ Math.ceil(rec.total_expected_runs) }} 次刷取
+                  约 {{ Math.ceil(getAdjustedStats(rec).totalRuns) }} 次刷取
                 </v-chip>
               </template>
             </v-card-item>
@@ -272,17 +272,24 @@
                     <v-list-item
                       v-for="step in rec.affix_results[0]?.steps"
                       :key="'a1-' + step.from_level"
+                      :class="{ 'bg-success-lighten-5': isUsingGrease(rec.weapon_id, 0, step.from_level) }"
                       density="compact"
+                      style="cursor: pointer"
+                      @click="toggleUseGrease(rec.weapon_id, 0, step.from_level)"
                     >
                       <v-list-item-title>
                         +{{ step.from_level }} → +{{ step.to_level }}
                       </v-list-item-title>
                       <template #append>
-                        <v-chip size="x-small" variant="tonal">
-                          {{ (step.success_prob * 100).toFixed(1) }}%
+                        <v-chip
+                          :color="isUsingGrease(rec.weapon_id, 0, step.from_level) ? 'success' : undefined"
+                          size="x-small"
+                          :variant="isUsingGrease(rec.weapon_id, 0, step.from_level) ? 'flat' : 'tonal'"
+                        >
+                          {{ isUsingGrease(rec.weapon_id, 0, step.from_level) ? '100%' : (step.success_prob * 100).toFixed(1) + '%' }}
                         </v-chip>
                         <span class="text-caption ml-2">
-                          期望 {{ step.expected_attempts.toFixed(1) }} 次
+                          {{ isUsingGrease(rec.weapon_id, 0, step.from_level) ? `冷却脂 ${step.grease_threshold}` : `期望 ${step.expected_attempts.toFixed(1)} 次` }}
                         </span>
                       </template>
                     </v-list-item>
@@ -303,17 +310,24 @@
                     <v-list-item
                       v-for="step in rec.affix_results[1]?.steps"
                       :key="'a2-' + step.from_level"
+                      :class="{ 'bg-success-lighten-5': isUsingGrease(rec.weapon_id, 1, step.from_level) }"
                       density="compact"
+                      style="cursor: pointer"
+                      @click="toggleUseGrease(rec.weapon_id, 1, step.from_level)"
                     >
                       <v-list-item-title>
                         +{{ step.from_level }} → +{{ step.to_level }}
                       </v-list-item-title>
                       <template #append>
-                        <v-chip size="x-small" variant="tonal">
-                          {{ (step.success_prob * 100).toFixed(1) }}%
+                        <v-chip
+                          :color="isUsingGrease(rec.weapon_id, 1, step.from_level) ? 'success' : undefined"
+                          size="x-small"
+                          :variant="isUsingGrease(rec.weapon_id, 1, step.from_level) ? 'flat' : 'tonal'"
+                        >
+                          {{ isUsingGrease(rec.weapon_id, 1, step.from_level) ? '100%' : (step.success_prob * 100).toFixed(1) + '%' }}
                         </v-chip>
                         <span class="text-caption ml-2">
-                          期望 {{ step.expected_attempts.toFixed(1) }} 次
+                          {{ isUsingGrease(rec.weapon_id, 1, step.from_level) ? `冷却脂 ${step.grease_threshold}` : `期望 ${step.expected_attempts.toFixed(1)} 次` }}
                         </span>
                       </template>
                     </v-list-item>
@@ -334,17 +348,24 @@
                     <v-list-item
                       v-for="step in rec.affix_results[2]?.steps"
                       :key="'a3-' + step.from_level"
+                      :class="{ 'bg-success-lighten-5': isUsingGrease(rec.weapon_id, 2, step.from_level) }"
                       density="compact"
+                      style="cursor: pointer"
+                      @click="toggleUseGrease(rec.weapon_id, 2, step.from_level)"
                     >
                       <v-list-item-title>
                         +{{ step.from_level }} → +{{ step.to_level }}
                       </v-list-item-title>
                       <template #append>
-                        <v-chip size="x-small" variant="tonal">
-                          {{ (step.success_prob * 100).toFixed(1) }}%
+                        <v-chip
+                          :color="isUsingGrease(rec.weapon_id, 2, step.from_level) ? 'success' : undefined"
+                          size="x-small"
+                          :variant="isUsingGrease(rec.weapon_id, 2, step.from_level) ? 'flat' : 'tonal'"
+                        >
+                          {{ isUsingGrease(rec.weapon_id, 2, step.from_level) ? '100%' : (step.success_prob * 100).toFixed(1) + '%' }}
                         </v-chip>
                         <span class="text-caption ml-2">
-                          期望 {{ step.expected_attempts.toFixed(1) }} 次
+                          {{ isUsingGrease(rec.weapon_id, 2, step.from_level) ? `冷却脂 ${step.grease_threshold}` : `期望 ${step.expected_attempts.toFixed(1)} 次` }}
                         </span>
                       </template>
                     </v-list-item>
@@ -358,34 +379,34 @@
                 </v-col>
               </v-row>
               <v-divider class="my-2" />
-              <div class="d-flex flex-wrap ga-4 text-caption">
-                <div class="d-flex align-center">
-                  <v-icon class="mr-1" color="primary" size="small">mdi-diamond-stone</v-icon>
-                  <strong>期望消耗无暇基质:</strong>&nbsp;{{ rec.total_expected_essences.toFixed(1) }} 个
+              <div class="d-flex flex-wrap align-center justify-space-between ga-2">
+                <div class="d-flex flex-wrap ga-4 text-caption">
+                  <div class="d-flex align-center">
+                    <v-icon class="mr-1" color="primary" size="small">mdi-diamond-stone</v-icon>
+                    <strong>期望消耗无暇基质:</strong>&nbsp;{{ getAdjustedStats(rec).totalEssences }} 个
+                  </div>
+                  <div class="d-flex align-center">
+                    <v-icon class="mr-1" color="success" size="small">mdi-arrow-up-bold</v-icon>
+                    <strong>期望获得冷却脂:</strong>&nbsp;
+                    {{ getAdjustedStats(rec).totalGreaseGained }} 点
+                  </div>
+                  <div class="d-flex align-center">
+                    <v-icon class="mr-1" color="warning" size="small">mdi-arrow-down-bold</v-icon>
+                    <strong>消耗冷却脂:</strong>&nbsp;
+                    {{ getAdjustedStats(rec).totalGreaseUsed }} 点
+                  </div>
                 </div>
-                <div class="d-flex align-center">
-                  <v-icon class="mr-1" color="success" size="small">mdi-arrow-up-bold</v-icon>
-                  <strong>期望获得冷却脂:</strong>&nbsp;
-                  {{ rec.affix_results.reduce((sum, r) => sum + r.expected_grease_gained, 0).toFixed(0) }} 点
-                </div>
-                <div class="d-flex align-center">
-                  <v-icon class="mr-1" color="warning" size="small">mdi-arrow-down-bold</v-icon>
-                  <strong>期望消耗冷却脂:</strong>&nbsp;
-                  {{ rec.affix_results.reduce((sum, r) => sum + r.expected_grease_used, 0).toFixed(0) }} 点
-                </div>
+                <v-btn
+                  color="primary"
+                  prepend-icon="mdi-map-search"
+                  size="small"
+                  variant="tonal"
+                  @click="navigateToPlanner(rec.weapon_id)"
+                >
+                  查看最优刷取方案
+                </v-btn>
               </div>
             </v-card-text>
-            <v-card-actions>
-              <v-spacer />
-              <v-btn
-                color="primary"
-                prepend-icon="mdi-map-search"
-                variant="tonal"
-                @click="navigateToPlanner(rec.weapon_id)"
-              >
-                查看最优刷取方案
-              </v-btn>
-            </v-card-actions>
           </v-card>
         </v-expansion-panel-text>
       </v-expansion-panel>
@@ -500,6 +521,32 @@ interface Recommendation {
 
 const recommendations = ref<Recommendation[]>([])
 
+// 跟踪每个武器的每个步骤是否使用冷却脂
+// 格式: { weaponId: { 'affixIndex-fromLevel': boolean } }
+const useGreaseForSteps = ref<Record<string, Record<string, boolean>>>({})
+
+// 排序后的推荐列表：只有本身不需要刷取的武器才置底
+const sortedRecommendations = computed(() => {
+  return recommendations.value.toSorted((a, b) => {
+    const aStats = getAdjustedStats(a)
+    const bStats = getAdjustedStats(b)
+    const aRuns = Math.ceil(aStats.totalRuns)
+    const bRuns = Math.ceil(bStats.totalRuns)
+
+    // 判断是否本身就不需要刷取（原始数据就是0次）
+    const aOriginalRuns = Math.ceil(a.total_expected_runs)
+    const bOriginalRuns = Math.ceil(b.total_expected_runs)
+
+    // 只有原始就是0次刷取的才置底（已达到目标）
+    // 通过使用冷却脂导致0次刷取的不置底
+    if (aOriginalRuns === 0 && bOriginalRuns !== 0) return 1
+    if (aOriginalRuns !== 0 && bOriginalRuns === 0) return -1
+
+    // 其他按调整后的刷取次数升序排序（需要刷取次数少的优先）
+    return aRuns - bRuns
+  })
+})
+
 const showMaxedWeapons = ref(false)
 
 const matrixEntries = computed({
@@ -566,9 +613,56 @@ async function removeEntry(index: number) {
   }
 }
 
+function toggleUseGrease(weaponId: string, affixIndex: number, fromLevel: number) {
+  const key = `${affixIndex}-${fromLevel}`
+  if (!useGreaseForSteps.value[weaponId]) {
+    useGreaseForSteps.value[weaponId] = {}
+  }
+  useGreaseForSteps.value[weaponId][key] = !useGreaseForSteps.value[weaponId][key]
+}
+
+function isUsingGrease(weaponId: string, affixIndex: number, fromLevel: number): boolean {
+  return useGreaseForSteps.value[weaponId]?.[`${affixIndex}-${fromLevel}`] || false
+}
+
+function getAdjustedStats(rec: Recommendation) {
+  let totalEssences = 0
+  let totalGreaseGained = 0
+  let totalGreaseUsed = 0
+
+  for (const [affixIndex, affixResult] of rec.affix_results.entries()) {
+    for (const step of affixResult.steps) {
+      const usingGrease = isUsingGrease(rec.weapon_id, affixIndex, step.from_level)
+      if (usingGrease) {
+        // 使用冷却脂：不消耗基质，不获得冷却脂，但要消耗固定冷却脂
+        totalGreaseUsed += step.grease_threshold
+      } else {
+        // 不使用冷却脂：正常计算
+        // 每个步骤的基质消耗向上取整
+        totalEssences += Math.ceil(step.expected_essences)
+        // 冷却脂获得取最接近的10的倍数
+        totalGreaseGained += Math.round(step.expected_grease_gained / 10) * 10
+        // 冷却脂消耗（正常升级时为0）
+        totalGreaseUsed += Math.round(step.expected_grease_used / 10) * 10
+      }
+    }
+  }
+
+  // 计算刷取次数：每次刷取掉落 3 个无暇基质
+  const ESSENCES_PER_RUN = 3
+  const totalRuns = totalEssences / ESSENCES_PER_RUN
+
+  return {
+    totalEssences,
+    totalGreaseGained,
+    totalGreaseUsed,
+    totalRuns,
+  }
+}
+
 function toggleIncludeInCalculation(entry: TreasureMatrixEntry) {
   entry.include_in_calculation = !entry.include_in_calculation
-  onEntryChange()
+  updateTreasureMatrix(matrixEntries.value)
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -649,6 +743,8 @@ function navigateToPlanner(weaponId: string) {
     name: 'matrix-planner',
     query: { weapon: weaponId, clear: 'true' },
   })
+  // 滚动到页面顶部
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 onMounted(() => {

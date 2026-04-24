@@ -107,7 +107,9 @@ class ScannerService:
         # 且此时扫描已完成，引擎内部数据不会再被修改
         try:
             data = engine.get_weapon_essence_data()
-            logger.debug(f"从引擎获取的数据 - counts: {len(data.counts)}, levels: {len(data.levels)}")
+            logger.debug(
+                f"从引擎获取的数据 - counts: {len(data.counts)}, levels: {len(data.levels)}"
+            )
             logger.debug(f"counts 内容: {data.counts}")
             logger.debug(f"levels 内容: {data.levels}")
         except Exception as e:
