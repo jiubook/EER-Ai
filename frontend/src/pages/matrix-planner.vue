@@ -42,7 +42,7 @@
                         <div class="pl-1 mb-4">
                           <v-chip color="info" label variant="flat">
                             <v-icon size="small" start>mdi-sword-cross</v-icon>
-                            {{ choice.battleName }}
+                            {{ getDisplayName(choice.battleName) }}
                           </v-chip>
                         </div>
                         <div class="d-flex align-center mb-3">
@@ -303,7 +303,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ItemIcon from '@/components/ItemIcon.vue'
-import { type BattleChoice, useMatrixPlanner } from '@/composables/useMatrixPlanner'
+import { type BattleChoice, getDisplayName, useMatrixPlanner } from '@/composables/useMatrixPlanner'
 import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 
