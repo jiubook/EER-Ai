@@ -19,13 +19,23 @@
         </template>
         <v-list-item-title>{{ name }}</v-list-item-title>
         <template #append>
-          <v-btn
-            v-if="name !== 'default'"
-            icon="mdi-pencil"
-            size="x-small"
-            variant="text"
-            @click.stop="startRename(name)"
-          />
+          <div class="d-flex ga-1">
+            <v-btn
+              v-if="name !== 'default'"
+              icon="mdi-pencil"
+              size="x-small"
+              variant="text"
+              @click.stop="startRename(name)"
+            />
+            <v-btn
+              v-if="name !== 'default'"
+              color="error"
+              icon="mdi-delete"
+              size="x-small"
+              variant="text"
+              @click.stop="startDelete(name)"
+            />
+          </div>
         </template>
       </v-list-item>
       <v-divider />
@@ -35,75 +45,69 @@
         </template>
         <v-list-item-title>新建账号</v-list-item-title>
       </v-list-item>
-      <v-list-item v-if="activeProfileName !== 'default'" @click="showDeleteConfirm = true">
-        <template #prepend>
-          <v-icon color="error" icon="mdi-delete" />
-        </template>
-        <v-list-item-title class="text-error">删除当前账号</v-list-item-title>
-      </v-list-item>
     </v-list>
-
-    <!-- 新建账号对话框 -->
-    <v-dialog v-model="showNewProfileDialog" max-width="400">
-      <v-card>
-        <v-card-title>新建账号</v-card-title>
-        <v-card-text>
-          <v-text-field
-            v-model="newProfileName"
-            label="账号名称"
-            :rules="[(v) => !!v.trim() || '名称不能为空']"
-            variant="outlined"
-            @keyup.enter="onCreate"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn @click="showNewProfileDialog = false">取消</v-btn>
-          <v-btn color="primary" :disabled="!newProfileName.trim()" @click="onCreate">
-            创建
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- 重命名对话框 -->
-    <v-dialog v-model="showRenameDialog" max-width="400">
-      <v-card>
-        <v-card-title>重命名账号</v-card-title>
-        <v-card-text>
-          <v-text-field
-            v-model="renameNewName"
-            label="新名称"
-            :rules="[(v) => !!v.trim() || '名称不能为空']"
-            variant="outlined"
-            @keyup.enter="onRename"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn @click="showRenameDialog = false">取消</v-btn>
-          <v-btn color="primary" :disabled="!renameNewName.trim()" @click="onRename">
-            确认
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- 删除确认对话框 -->
-    <v-dialog v-model="showDeleteConfirm" max-width="400">
-      <v-card>
-        <v-card-title class="text-error">确认删除</v-card-title>
-        <v-card-text>
-          确定要删除账号「{{ activeProfileName }}」吗？此操作不可撤销。
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn @click="showDeleteConfirm = false">取消</v-btn>
-          <v-btn color="error" @click="onDelete">删除</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </v-menu>
+
+  <!-- 新建账号对话框 -->
+  <v-dialog v-model="showNewProfileDialog" max-width="400">
+    <v-card>
+      <v-card-title>新建账号</v-card-title>
+      <v-card-text>
+        <v-text-field
+          v-model="newProfileName"
+          label="账号名称"
+          :rules="[(v) => !!v.trim() || '名称不能为空']"
+          variant="outlined"
+          @keyup.enter="onCreate"
+        />
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn @click="showNewProfileDialog = false">取消</v-btn>
+        <v-btn color="primary" :disabled="!newProfileName.trim()" @click="onCreate">
+          创建
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <!-- 重命名对话框 -->
+  <v-dialog v-model="showRenameDialog" max-width="400">
+    <v-card>
+      <v-card-title>重命名账号</v-card-title>
+      <v-card-text>
+        <v-text-field
+          v-model="renameNewName"
+          label="新名称"
+          :rules="[(v) => !!v.trim() || '名称不能为空']"
+          variant="outlined"
+          @keyup.enter="onRename"
+        />
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn @click="showRenameDialog = false">取消</v-btn>
+        <v-btn color="primary" :disabled="!renameNewName.trim()" @click="onRename">
+          确认
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <!-- 删除确认对话框 -->
+  <v-dialog v-model="showDeleteConfirm" max-width="400">
+    <v-card>
+      <v-card-title class="text-error">确认删除</v-card-title>
+      <v-card-text>
+        确定要删除账号「{{ deleteTargetName }}」吗？此操作不可撤销。
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn @click="showDeleteConfirm = false">取消</v-btn>
+        <v-btn color="error" @click="onDelete">删除</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script lang="ts" setup>
@@ -130,6 +134,7 @@ const showDeleteConfirm = ref(false)
 const newProfileName = ref('')
 const renameNewName = ref('')
 const renameOldName = ref('')
+const deleteTargetName = ref('')
 
 /**
  * 验证账号名称是否合法。
@@ -206,11 +211,19 @@ async function onRename() {
 }
 
 /**
- * 删除当前账号。
+ * 开始删除账号。
+ */
+function startDelete(name: string) {
+  deleteTargetName.value = name
+  showDeleteConfirm.value = true
+}
+
+/**
+ * 执行删除操作。
  */
 async function onDelete() {
   try {
-    await deleteProfile(activeProfileName.value)
+    await deleteProfile(deleteTargetName.value)
     showDeleteConfirm.value = false
   } catch (error: any) {
     alert(error.message || '删除失败')
