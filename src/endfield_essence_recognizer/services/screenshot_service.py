@@ -45,7 +45,8 @@ class ScreenshotService:
         Returns:
             A data URI string or None if the window is not active.
         """
-        if not self._window_manager.target_is_active:
+        # 只检查窗口是否存在
+        if not self._window_manager.target_exists:
             return None
 
         # Capture screenshot
