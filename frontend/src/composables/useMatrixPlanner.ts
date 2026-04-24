@@ -33,69 +33,99 @@ export interface BattleChoice {
 export interface EnergyAlluvium {
   battleId: string
   battleName: string
+  imageUrl?: string
   secondaryStats: string[]
   skillStats: string[]
 }
 
+/** 淤积点名称前缀，显示时裁掉 */
+const ALLUVIUM_PREFIX = '重度能量淤积点·'
+
+/**
+ * 将完整淤积点名称裁剪为短显示名。
+ * 例如 "重度能量淤积点·枢纽区" → "枢纽区"
+ */
+export function getDisplayName(battleName: string): string {
+  return battleName.startsWith(ALLUVIUM_PREFIX)
+    ? battleName.slice(ALLUVIUM_PREFIX.length)
+    : battleName
+}
+
 // 能量淤积点数据（刷取位置）
+// 格式与 ef-frontend-v1 的 custom/core/weaponEssence.ts 保持一致，便于手动同步。
+// 更新时直接从 weaponEssence.ts 的 energyAlluviums 复制即可。
 const energyAlluviums: Record<string, EnergyAlluvium> = {
-  枢纽区: {
-    battleId: '枢纽区',
-    battleName: '枢纽区',
+  '重度能量淤积点·枢纽区': {
+    battleId: '重度能量淤积点·枢纽区',
+    battleName: '重度能量淤积点·枢纽区',
+    imageUrl:
+      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map01_lv001_1.webp',
     secondaryStats: [
       '攻击提升', '灼热伤害提升', '电磁伤害提升', '寒冷伤害提升',
       '自然伤害提升', '源石技艺提升', '终结技充能效率提升', '法术伤害提升',
     ],
     skillStats: ['强攻', '压制', '追袭', '粉碎', '巧技', '迸发', '流转', '效益'],
   },
-  源石研究园: {
-    battleId: '源石研究园',
-    battleName: '源石研究园',
+  '重度能量淤积点·源石研究园': {
+    battleId: '重度能量淤积点·源石研究园',
+    battleName: '重度能量淤积点·源石研究园',
+    imageUrl:
+      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map01_lv005_1.webp',
     secondaryStats: [
       '攻击提升', '物理伤害提升', '电磁伤害提升', '寒冷伤害提升',
       '自然伤害提升', '暴击率提升', '终结技充能效率提升', '法术伤害提升',
     ],
     skillStats: ['压制', '追袭', '昂扬', '巧技', '附术', '医疗', '切骨', '效益'],
   },
-  矿脉源区: {
-    battleId: '矿脉源区',
-    battleName: '矿脉源区',
+  '重度能量淤积点·矿脉源区': {
+    battleId: '重度能量淤积点·矿脉源区',
+    battleName: '重度能量淤积点·矿脉源区',
+    imageUrl:
+      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map01_lv006_1.webp',
     secondaryStats: [
       '生命提升', '物理伤害提升', '灼热伤害提升', '寒冷伤害提升',
       '自然伤害提升', '暴击率提升', '源石技艺提升', '治疗效率提升',
     ],
     skillStats: ['强攻', '压制', '巧技', '残暴', '附术', '迸发', '夜幕', '效益'],
   },
-  供能高地: {
-    battleId: '供能高地',
-    battleName: '供能高地',
+  '重度能量淤积点·供能高地': {
+    battleId: '重度能量淤积点·供能高地',
+    battleName: '重度能量淤积点·供能高地',
+    imageUrl:
+      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map01_lv007_1.webp',
     secondaryStats: [
       '攻击提升', '生命提升', '物理伤害提升', '灼热伤害提升',
       '自然伤害提升', '暴击率提升', '源石技艺提升', '治疗效率提升',
     ],
     skillStats: ['追袭', '粉碎', '昂扬', '残暴', '附术', '医疗', '切骨', '流转'],
   },
-  武陵城: {
-    battleId: '武陵城',
-    battleName: '武陵城',
+  '重度能量淤积点·武陵城': {
+    battleId: '重度能量淤积点·武陵城',
+    battleName: '重度能量淤积点·武陵城',
+    imageUrl:
+      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map02_lv002_1.webp',
     secondaryStats: [
       '攻击提升', '生命提升', '电磁伤害提升', '寒冷伤害提升',
       '暴击率提升', '终结技充能效率提升', '法术伤害提升', '治疗效率提升',
     ],
     skillStats: ['强攻', '粉碎', '残暴', '医疗', '切骨', '迸发', '夜幕', '流转'],
   },
-  清波寨: {
-    battleId: '清波寨',
-    battleName: '清波寨',
+  '重度能量淤积点·清波寨': {
+    battleId: '重度能量淤积点·清波寨',
+    battleName: '重度能量淤积点·清波寨',
+    imageUrl:
+      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map02_lv003_1.webp',
     secondaryStats: [
       '生命提升', '物理伤害提升', '电磁伤害提升', '寒冷伤害提升',
       '源石技艺提升', '终结技充能效率提升', '法术伤害提升', '治疗效率提升',
     ],
     skillStats: ['压制', '粉碎', '昂扬', '巧技', '医疗', '切骨', '迸发', '夜幕'],
   },
-  首墩: {
-    battleId: '首墩',
-    battleName: '首墩',
+  '重度能量淤积点·首墩': {
+    battleId: '重度能量淤积点·首墩',
+    battleName: '重度能量淤积点·首墩',
+    imageUrl:
+      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map02_lv003_1.webp',
     secondaryStats: [
       '攻击提升', '物理伤害提升', '灼热伤害提升', '电磁伤害提升',
       '自然伤害提升', '暴击率提升', '终结技充能效率提升', '法术伤害提升',
