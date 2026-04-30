@@ -525,25 +525,35 @@ const recommendations = ref<Recommendation[]>([])
 // 格式: { weaponId: { 'affixIndex-fromLevel': boolean } }
 const useGreaseForSteps = ref<Record<string, Record<string, boolean>>>({})
 
-// 排序后的推荐列表：只有本身不需要刷取的武器才置底
+// 排序后的推荐列表：初始排序后保持稳定，用户切换冷却脂时不重新排序
+const frozenSortOrder = ref<string[] | null>(null)
+
 const sortedRecommendations = computed(() => {
-  return recommendations.value.toSorted((a, b) => {
-    const aStats = getAdjustedStats(a)
-    const bStats = getAdjustedStats(b)
-    const aRuns = Math.ceil(aStats.totalRuns)
-    const bRuns = Math.ceil(bStats.totalRuns)
+  // 计算初始排序（基于未使用冷却脂的原始数据）
+  const sorted = recommendations.value.toSorted((a, b) => {
+    const aRuns = Math.ceil(a.total_expected_runs)
+    const bRuns = Math.ceil(b.total_expected_runs)
 
-    // 判断是否本身就不需要刷取（原始数据就是0次）
-    const aOriginalRuns = Math.ceil(a.total_expected_runs)
-    const bOriginalRuns = Math.ceil(b.total_expected_runs)
+    // 本身不需要刷取的武器置底
+    if (aRuns === 0 && bRuns !== 0) return 1
+    if (aRuns !== 0 && bRuns === 0) return -1
 
-    // 只有原始就是0次刷取的才置底（已达到目标）
-    // 通过使用冷却脂导致0次刷取的不置底
-    if (aOriginalRuns === 0 && bOriginalRuns !== 0) return 1
-    if (aOriginalRuns !== 0 && bOriginalRuns === 0) return -1
-
-    // 其他按调整后的刷取次数升序排序（需要刷取次数少的优先）
+    // 按原始刷取次数升序排序
     return aRuns - bRuns
+  })
+
+  const currentIds = sorted.map(r => r.weapon_id).join(',')
+
+  // 如果还没有冻结顺序，或者是全新的推荐列表，则冻结
+  if (frozenSortOrder.value === null || frozenSortOrder.value.join(',') !== currentIds) {
+    frozenSortOrder.value = sorted.map(r => r.weapon_id)
+    return sorted
+  }
+
+  // 使用冻结的顺序
+  const orderMap = new Map(frozenSortOrder.value.map((id, idx) => [id, idx]))
+  return [...recommendations.value].sort((a, b) => {
+    return (orderMap.get(a.weapon_id) ?? 0) - (orderMap.get(b.weapon_id) ?? 0)
   })
 })
 
@@ -697,6 +707,7 @@ async function computeSingle(entry: TreasureMatrixEntry) {
       },
     ])
     if (results.length > 0) {
+      frozenSortOrder.value = null
       recommendations.value = results
     }
   } finally {
@@ -729,6 +740,7 @@ async function computeAll() {
     results.sort(
       (a: Recommendation, b: Recommendation) => a.total_expected_runs - b.total_expected_runs,
     )
+    frozenSortOrder.value = null
     recommendations.value = results
   } finally {
     computing.value = false
@@ -736,12 +748,12 @@ async function computeAll() {
 }
 
 /**
- * 跳转到基质规划页面并传递武器 ID。
+ * 跳转到基质规划页面并传递武器 ID，开启不使用预刻券模式。
  */
 function navigateToPlanner(weaponId: string) {
   router.push({
     name: 'matrix-planner',
-    query: { weapon: weaponId, clear: 'true' },
+    query: { weapon: weaponId, clear: 'true', noPrecraft: 'true' },
   })
   // 滚动到页面顶部
   window.scrollTo({ top: 0, behavior: 'smooth' })

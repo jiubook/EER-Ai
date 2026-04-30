@@ -10,9 +10,24 @@
               最优刷取方案
             </v-expansion-panel-title>
             <v-expansion-panel-text>
-              <template v-if="bestChoices.length > 0">
+              <!-- 不使用预刻券开关 -->
+              <div v-if="requiredEssenceStats.length > 0" class="d-flex align-center mb-3">
+                <v-switch
+                  v-model="noPrecraftMode"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  label="不使用预刻券"
+                />
+                <v-tooltip text="显示所有刷取地点，而非仅最优方案">
+                  <template #activator="{ props }">
+                    <v-icon v-bind="props" class="ml-1" color="medium-emphasis" size="small">mdi-information-outline</v-icon>
+                  </template>
+                </v-tooltip>
+              </div>
+              <template v-if="displayedChoices.length > 0">
                 <v-card
-                  v-for="(choice, i) in bestChoices"
+                  v-for="(choice, i) in displayedChoices"
                   :key="`${choice.battleId}-${choice.selectedAttribute.join(',')}-${choice.selectedSecondary ?? 'none'}-${choice.selectedSkill ?? 'none'}`"
                   class="mb-4 choice-card"
                   :class="{ 'choice-card--top': i === 0 }"
@@ -300,7 +315,7 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type BattleChoice, getDisplayName, useMatrixPlanner } from '@/composables/useMatrixPlanner'
@@ -323,8 +338,17 @@ const {
   getEssenceStatDescription,
   getStatDisplayName,
   bestChoices,
+  allChoices,
   clearAllStats,
 } = useMatrixPlanner()
+
+/** 不使用预刻券模式：显示所有刷取地点 */
+const noPrecraftMode = ref(false)
+
+/** 当前显示的刷取方案列表 */
+const displayedChoices = computed(() => {
+  return noPrecraftMode.value ? allChoices.value : bestChoices.value
+})
 
 const weaponSearch = ref('')
 
@@ -399,14 +423,22 @@ function getSelectedWeaponMatchCount(choice: BattleChoice): number {
 onMounted(() => {
   const weaponId = route.query.weapon as string
   const shouldClear = route.query.clear === 'true'
+  const noPrecraft = route.query.noPrecraft === 'true'
 
   if (shouldClear) {
     // 从宝藏基质跳转过来，清空之前的选择
     clearAllStats()
   }
 
+  if (noPrecraft) {
+    // 从宝藏基质跳转过来，开启不使用预刻券模式
+    noPrecraftMode.value = true
+  }
+
   if (weaponId) {
     addStatFromWeapon(weaponId)
+    // 跳转过来时自动开启不使用预刻券模式
+    noPrecraftMode.value = true
     // 滚动到页面顶部
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -420,14 +452,33 @@ watch(
   (query) => {
     const weaponId = query.weapon as string
     const shouldClear = query.clear === 'true'
+    const noPrecraft = query.noPrecraft === 'true'
 
     if (shouldClear) {
       clearAllStats()
     }
 
+    if (noPrecraft) {
+      noPrecraftMode.value = true
+    }
+
     if (weaponId && typeof weaponId === 'string') {
       addStatFromWeapon(weaponId)
+      noPrecraftMode.value = true
       window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  },
+)
+
+/**
+ * 监听需求列表变化，当用户添加需求时自动开启不使用预刻券模式。
+ */
+watch(
+  requiredEssenceStats,
+  (newStats, oldStats) => {
+    // 仅在新增需求时自动开启（新长度 > 旧长度）
+    if (newStats.length > (oldStats?.length ?? 0) && newStats.length > 0) {
+      noPrecraftMode.value = true
     }
   },
 )
