@@ -1,6 +1,6 @@
 <template>
   <v-container class="treasure-matrix-page">
-    <v-expansion-panels :model-value="[0, 1, 2]" multiple>
+    <v-expansion-panels v-model="openedPanels" multiple>
       <!-- 武器总览 -->
       <weapon-overview />
 
@@ -17,6 +17,49 @@
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
             保存你当前账号下每把武器的宝藏基质词条等级，用于计算建议刷取次数。点击武器卡片可切换是否参与计算。
           </v-alert>
+
+          <!-- 星级过滤开关 -->
+          <div class="d-flex align-center gap-2 mb-3">
+            <span class="text-body-2 text-medium-emphasis">显示星级：</span>
+            <v-chip-group v-model="selectedRarities" column multiple>
+              <v-chip
+                color="primary"
+                filter
+                size="small"
+                value="3"
+                variant="outlined"
+              >
+                3★
+              </v-chip>
+              <v-chip
+                color="primary"
+                filter
+                size="small"
+                value="4"
+                variant="outlined"
+              >
+                4★
+              </v-chip>
+              <v-chip
+                color="primary"
+                filter
+                size="small"
+                value="5"
+                variant="outlined"
+              >
+                5★
+              </v-chip>
+              <v-chip
+                color="primary"
+                filter
+                size="small"
+                value="6"
+                variant="outlined"
+              >
+                6★
+              </v-chip>
+            </v-chip-group>
+          </div>
 
           <!-- 显示满级武器开关 -->
           <div class="d-flex align-center mb-3">
@@ -234,6 +277,17 @@
             计算所有武器的刷取建议
           </v-btn>
 
+          <v-btn
+            v-if="recommendations.length > 0"
+            class="mb-4 ml-2"
+            color="success"
+            prepend-icon="mdi-map-search"
+            variant="flat"
+            @click="navigateToPlanner()"
+          >
+            查看最优刷取方案
+          </v-btn>
+
           <v-alert v-if="recommendations.length === 0" border="start" type="info" variant="tonal">
             请先添加武器到宝藏基质配置，然后点击「计算所有武器的刷取建议」。
           </v-alert>
@@ -401,7 +455,7 @@
                   prepend-icon="mdi-map-search"
                   size="small"
                   variant="tonal"
-                  @click="navigateToPlanner(rec.weapon_id)"
+                  @click="navigateToPlanner()"
                 >
                   查看最优刷取方案
                 </v-btn>
@@ -457,12 +511,16 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 回到顶部按钮 -->
+    <back-to-top />
   </v-container>
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import BackToTop from '@/components/BackToTop.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
@@ -473,15 +531,20 @@ const router = useRouter()
 
 const {
   activeProfileName,
+  activeProfile,
   treasureMatrix,
   fetchProfiles,
   updateTreasureMatrix,
   addTreasureMatrixEntry,
   removeTreasureMatrixEntry,
   getBatchFarmingRecommendations,
+  updateWeaponOverviewFilters,
 } = useProfiles()
 
 const { weaponsMap, weaponTypes } = useStaticData()
+
+// 控制面板展开状态
+const openedPanels = ref<number[]>([0, 1, 2])
 
 const showAddWeaponDialog = ref(false)
 const weaponSearch = ref('')
@@ -490,6 +553,53 @@ const computing = ref(false)
 const targetAffix1 = ref(6)
 const targetAffix2 = ref(6)
 const targetAffix3 = ref(3)
+
+// 星级过滤器
+const selectedRarities = ref<string[]>(['3', '4', '5', '6'])
+
+// 从profile加载过滤器设置
+watch(
+  () => activeProfile.value.weapon_overview_filters,
+  (filters) => {
+    if (filters) {
+      const newRarities: string[] = []
+      if (filters['3star']) newRarities.push('3')
+      if (filters['4star']) newRarities.push('4')
+      if (filters['5star']) newRarities.push('5')
+      if (filters['6star']) newRarities.push('6')
+
+      // 只有在实际不同时才更新，避免循环
+      const current = selectedRarities.value.toSorted().join(',')
+      const updated = newRarities.toSorted().join(',')
+      if (current !== updated) {
+        selectedRarities.value = newRarities
+      }
+    }
+  },
+  { immediate: true },
+)
+
+// 保存过滤器设置
+watch(
+  selectedRarities,
+  async (newValue, oldValue) => {
+    // 避免初始化时触发
+    if (!oldValue) return
+
+    // 检查是否真的有变化
+    const oldSorted = oldValue.toSorted().join(',')
+    const newSorted = newValue.toSorted().join(',')
+    if (oldSorted === newSorted) return
+
+    await updateWeaponOverviewFilters({
+      '3star': newValue.includes('3'),
+      '4star': newValue.includes('4'),
+      '5star': newValue.includes('5'),
+      '6star': newValue.includes('6'),
+    })
+  },
+  { deep: true },
+)
 
 interface Recommendation {
   weapon_id: string
@@ -519,31 +629,76 @@ interface Recommendation {
   }>
 }
 
-const recommendations = ref<Recommendation[]>([])
+// 从 localStorage 加载保存的推荐结果
+const savedRecommendations = localStorage.getItem('treasureMatrixRecommendations')
+const recommendations = ref<Recommendation[]>(
+  savedRecommendations ? JSON.parse(savedRecommendations) : []
+)
+
+// 监听 recommendations 变化，保存到 localStorage
+watch(
+  recommendations,
+  (newValue) => {
+    if (newValue.length > 0) {
+      localStorage.setItem('treasureMatrixRecommendations', JSON.stringify(newValue))
+    }
+  },
+  { deep: true }
+)
 
 // 跟踪每个武器的每个步骤是否使用冷却脂
 // 格式: { weaponId: { 'affixIndex-fromLevel': boolean } }
 const useGreaseForSteps = ref<Record<string, Record<string, boolean>>>({})
 
-// 排序后的推荐列表：只有本身不需要刷取的武器才置底
-const sortedRecommendations = computed(() => {
-  return recommendations.value.toSorted((a, b) => {
-    const aStats = getAdjustedStats(a)
-    const bStats = getAdjustedStats(b)
-    const aRuns = Math.ceil(aStats.totalRuns)
-    const bRuns = Math.ceil(bStats.totalRuns)
+// 排序后的推荐列表：初始排序后保持稳定，用户切换冷却脂时不重新排序
+// 从 localStorage 加载保存的排序顺序
+const savedFrozenOrder = localStorage.getItem('treasureMatrixFrozenOrder')
+const frozenSortOrder = ref<string[] | null>(
+  savedFrozenOrder ? JSON.parse(savedFrozenOrder) : null
+)
 
-    // 判断是否本身就不需要刷取（原始数据就是0次）
-    const aOriginalRuns = Math.ceil(a.total_expected_runs)
-    const bOriginalRuns = Math.ceil(b.total_expected_runs)
+// 保存冻结的排序顺序到 localStorage
+watch(
+  frozenSortOrder,
+  (newValue) => {
+    if (newValue) {
+      localStorage.setItem('treasureMatrixFrozenOrder', JSON.stringify(newValue))
+    }
+  },
+  { deep: true }
+)
 
-    // 只有原始就是0次刷取的才置底（已达到目标）
-    // 通过使用冷却脂导致0次刷取的不置底
-    if (aOriginalRuns === 0 && bOriginalRuns !== 0) return 1
-    if (aOriginalRuns !== 0 && bOriginalRuns === 0) return -1
+// 监听 recommendations 变化，更新冻结顺序
+watch(recommendations, (newRecommendations: Recommendation[]) => {
+  const sorted = newRecommendations.toSorted((a: Recommendation, b: Recommendation) => {
+    const aRuns = Math.ceil(a.total_expected_runs)
+    const bRuns = Math.ceil(b.total_expected_runs)
 
-    // 其他按调整后的刷取次数升序排序（需要刷取次数少的优先）
+    // 本身不需要刷取的武器置底
+    if (aRuns === 0 && bRuns !== 0) return 1
+    if (aRuns !== 0 && bRuns === 0) return -1
+
+    // 按原始刷取次数升序排序
     return aRuns - bRuns
+  })
+
+  const currentIds = sorted.map((r: Recommendation) => r.weapon_id).join(',')
+
+  // 如果还没有冻结顺序，或者是全新的推荐列表，则冻结
+  if (frozenSortOrder.value === null || frozenSortOrder.value.join(',') !== currentIds) {
+    frozenSortOrder.value = sorted.map((r: Recommendation) => r.weapon_id)
+  }
+}, { deep: true })
+
+const sortedRecommendations = computed(() => {
+  if (!frozenSortOrder.value) {
+    return recommendations.value
+  }
+
+  // 使用冻结的顺序
+  const orderMap = new Map(frozenSortOrder.value.map((id, idx) => [id, idx]))
+  return [...recommendations.value].toSorted((a, b) => {
+    return (orderMap.get(a.weapon_id) ?? 0) - (orderMap.get(b.weapon_id) ?? 0)
   })
 })
 
@@ -557,13 +712,30 @@ const matrixEntries = computed({
 })
 
 const filteredMatrixEntries = computed(() => {
-  if (showMaxedWeapons.value) {
-    return matrixEntries.value
+  let entries = matrixEntries.value
+
+  // 过滤稀有度
+  entries = entries.filter((entry) => {
+    const weapon = weaponsMap.value.get(entry.weapon_id)
+    if (!weapon) return false
+    return selectedRarities.value.includes(String(weapon.rarity))
+  })
+
+  // 过滤满级武器
+  if (!showMaxedWeapons.value) {
+    entries = entries.filter(
+      (entry) =>
+        !(entry.affix1_level === 6 && entry.affix2_level === 6 && entry.affix3_level === 3),
+    )
   }
-  return matrixEntries.value.filter(
-    (entry) =>
-      !(entry.affix1_level === 6 && entry.affix2_level === 6 && entry.affix3_level === 3),
-  )
+
+  // 按稀有度降序排序（6★ -> 3★）
+  return entries.toSorted((a, b) => {
+    const wa = weaponsMap.value.get(a.weapon_id)
+    const wb = weaponsMap.value.get(b.weapon_id)
+    if (wa && wb) return wb.rarity - wa.rarity
+    return 0
+  })
 })
 
 function getWeaponStats(weaponId: string): string {
@@ -697,7 +869,12 @@ async function computeSingle(entry: TreasureMatrixEntry) {
       },
     ])
     if (results.length > 0) {
+      frozenSortOrder.value = null
       recommendations.value = results
+
+      // 计算完成后，折叠武器总览（value=0）和宝藏基质配置面板（value=1）
+      // 只保留刷取建议（value=2）展开
+      openedPanels.value = [2]
     }
   } finally {
     computing.value = false
@@ -708,9 +885,17 @@ async function computeAll() {
   if (matrixEntries.value.length === 0) return
   computing.value = true
   try {
-    // 只计算勾选了"参与计算"的武器
+    // 只计算勾选了"参与计算"的武器，并且在选中的稀有度范围内
     const items = matrixEntries.value
-      .filter((entry) => entry.include_in_calculation !== false)
+      .filter((entry) => {
+        // 必须勾选了"参与计算"
+        if (entry.include_in_calculation === false) return false
+
+        // 必须在选中的稀有度范围内
+        const weapon = weaponsMap.value.get(entry.weapon_id)
+        if (!weapon) return false
+        return selectedRarities.value.includes(String(weapon.rarity))
+      })
       .map((entry) => ({
         weapon_id: entry.weapon_id,
         current_levels: [entry.affix1_level, entry.affix2_level, entry.affix3_level] as [
@@ -729,19 +914,25 @@ async function computeAll() {
     results.sort(
       (a: Recommendation, b: Recommendation) => a.total_expected_runs - b.total_expected_runs,
     )
+    frozenSortOrder.value = null
     recommendations.value = results
+
+    // 计算完成后，折叠武器总览（value=0）和宝藏基质配置面板（value=1）
+    // 只保留刷取建议（value=2）展开
+    openedPanels.value = [2]
   } finally {
     computing.value = false
   }
 }
 
 /**
- * 跳转到基质规划页面并传递武器 ID。
+ * 跳转到基质规划页面，开启不使用预刻券模式。
+ * 不传递特定武器，让用户根据未获得数量排序后的方案自行选择。
  */
-function navigateToPlanner(weaponId: string) {
+function navigateToPlanner() {
   router.push({
     name: 'matrix-planner',
-    query: { weapon: weaponId, clear: 'true' },
+    query: { clear: 'true', noPrecraft: 'true' },
   })
   // 滚动到页面顶部
   window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -749,6 +940,11 @@ function navigateToPlanner(weaponId: string) {
 
 onMounted(() => {
   fetchProfiles()
+
+  // 如果有保存的推荐结果，自动折叠武器总览和宝藏基质配置面板
+  if (recommendations.value.length > 0) {
+    openedPanels.value = [2]
+  }
 })
 </script>
 

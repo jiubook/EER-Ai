@@ -337,9 +337,7 @@ export function useMatrixPlanner() {
     return { battleId, battleName, selectedAttribute, selectedSecondary: null, selectedSkill, matchedSelectedIndices, matchedWeaponIds }
   }
 
-  // 使用防抖的 battleChoices — 当需求列表变化时延迟计算，避免频繁重算
-  const _debouncedChoices = ref<BattleChoice[]>([])
-  let _choicesTimer: ReturnType<typeof setTimeout> | null = null
+  const battleChoices = ref<BattleChoice[]>([])
 
   function _recomputeChoices() {
     const result: BattleChoice[] = []
@@ -355,19 +353,14 @@ export function useMatrixPlanner() {
         }
       }
     }
-    _debouncedChoices.value = result
+    battleChoices.value = result
   }
 
   watch(
     requiredEssenceStats,
-    () => {
-      if (_choicesTimer) clearTimeout(_choicesTimer)
-      _choicesTimer = setTimeout(_recomputeChoices, 150)
-    },
+    () => _recomputeChoices(),
     { deep: true, immediate: true },
   )
-
-  const battleChoices = computed(() => _debouncedChoices.value)
 
   const bestChoices = computed(() => {
     const filtered = battleChoices.value.filter(
@@ -400,6 +393,35 @@ export function useMatrixPlanner() {
     return filtered.slice(0, 5)
   })
 
+  /**
+   * 所有有匹配的刷取地点（不使用预刻券模式）。
+   * 返回所有 battleChoices 中有匹配的项，按匹配需求数降序排列。
+   */
+  const allChoices = computed(() => {
+    const filtered = battleChoices.value.filter(
+      ({ matchedSelectedIndices }) => matchedSelectedIndices.length > 0,
+    )
+
+    const selectedWeaponIds = new Set(
+      requiredEssenceStats.value
+        .filter(s => !s.isCustom && s.weaponId)
+        .map(s => s.weaponId!)
+    )
+
+    filtered.sort((a, b) => {
+      if (b.matchedSelectedIndices.length !== a.matchedSelectedIndices.length) {
+        return b.matchedSelectedIndices.length - a.matchedSelectedIndices.length
+      }
+      const aMatchedSelected = a.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
+      const bMatchedSelected = b.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
+      if (aMatchedSelected !== bMatchedSelected) {
+        return bMatchedSelected - aMatchedSelected
+      }
+      return b.matchedWeaponIds.length - a.matchedWeaponIds.length
+    })
+    return filtered
+  })
+
   return {
     requiredEssenceStats,
     lastSelectedWeaponId,
@@ -416,6 +438,7 @@ export function useMatrixPlanner() {
     getStatDisplayName,
     battleChoices,
     bestChoices,
+    allChoices,
     clearAllStats: () => clearAllStats(requiredEssenceStats, lastSelectedWeaponId),
   }
 }
