@@ -10,137 +10,202 @@
               最优刷取方案
             </v-expansion-panel-title>
             <v-expansion-panel-text>
-              <!-- 不使用预刻券开关 -->
-              <div v-if="requiredEssenceStats.length > 0" class="d-flex align-center mb-3">
-                <v-switch
-                  v-model="noPrecraftMode"
-                  color="primary"
-                  density="compact"
-                  hide-details
-                  label="不使用预刻券"
-                />
-                <v-tooltip text="显示所有刷取地点，而非仅最优方案">
-                  <template #activator="{ props }">
-                    <v-icon v-bind="props" class="ml-1" color="medium-emphasis" size="small">mdi-information-outline</v-icon>
-                  </template>
-                </v-tooltip>
-              </div>
-              <template v-if="displayedChoices.length > 0">
-                <v-card
-                  v-for="(choice, i) in displayedChoices"
-                  :key="`${choice.battleId}-${choice.selectedAttribute.join(',')}-${choice.selectedSecondary ?? 'none'}-${choice.selectedSkill ?? 'none'}`"
-                  class="mb-4 choice-card"
-                  :class="{ 'choice-card--top': i === 0 }"
-                  elevation="2"
-                  rounded="lg"
-                  variant="outlined"
-                >
-                  <v-card-item class="py-3" :class="i === 0 ? 'bg-primary' : 'bg-info'">
-                    <v-card-title class="text-h6 font-weight-bold d-flex align-center">
-                      <v-icon v-if="i === 0" class="mr-2" size="small">mdi-trophy</v-icon>
-                      方案 {{ i + 1 }}
-                    </v-card-title>
-                    <template #append>
-                      <v-chip class="font-weight-bold" color="white" size="small" variant="flat">
-                        匹配 {{ getSelectedWeaponMatchCount(choice) }}/{{ getSelectedWeaponCount() }} 把已选武器
-                      </v-chip>
-                    </template>
-                  </v-card-item>
-                  <v-divider />
-                  <v-card-text class="pt-4">
-                    <v-row>
-                      <v-col cols="12" md="5">
+              <!-- 不使用预刻券模式：上下布局 -->
+              <template v-if="noPrecraftMode">
+                <div v-if="displayedLocationChoices.length > 0">
+                  <v-card
+                    v-for="(choice, i) in displayedLocationChoices"
+                    :key="`loc-${i}`"
+                    class="mb-4 choice-card"
+                    :class="{ 'choice-card--top': i === 0 }"
+                    elevation="2"
+                    rounded="lg"
+                    variant="outlined"
+                  >
+                    <v-card-item class="py-3" :class="i === 0 ? 'bg-primary' : 'bg-info'">
+                      <v-card-title class="text-h6 font-weight-bold d-flex align-center">
+                        <v-icon v-if="i === 0" class="mr-2" size="small">mdi-trophy</v-icon>
+                        方案 {{ i + 1 }}
+                      </v-card-title>
+                      <template #append>
+                        <v-chip class="font-weight-bold" color="white" size="small" variant="flat">
+                          {{ choice.unobtainedCount }} 把未获得武器
+                        </v-chip>
+                      </template>
+                    </v-card-item>
+                    <v-divider />
+                    <v-card-text class="pt-4">
+                      <!-- 刷取地点 -->
+                      <div class="mb-4">
                         <div class="d-flex align-center mb-3">
                           <v-icon class="mr-2" color="primary" icon="mdi-map-marker" size="small" />
                           <span class="text-subtitle-1 font-weight-bold">刷取地点</span>
                         </div>
-                        <div class="pl-1 mb-4">
-                          <v-chip color="info" label variant="flat">
+                        <div class="pl-1">
+                          <v-chip color="info" label size="large" variant="flat">
                             <v-icon size="small" start>mdi-sword-cross</v-icon>
                             {{ getDisplayName(choice.battleName) }}
                           </v-chip>
                         </div>
+                      </div>
+                      <v-divider class="my-4" />
+                      <!-- 可刷取的武器 -->
+                      <div>
                         <div class="d-flex align-center mb-3">
-                          <v-icon class="mr-2" color="primary" icon="mdi-tune" size="small" />
-                          <span class="text-subtitle-1 font-weight-bold">预刻属性</span>
+                          <v-icon class="mr-2" color="primary" icon="mdi-sword" size="small" />
+                          <span class="text-subtitle-1 font-weight-bold">可刷取的武器</span>
                         </div>
                         <div class="pl-1">
-                          <div class="mb-3">
-                            <div class="text-medium-emphasis mb-1">基础属性</div>
-                            <div class="d-flex flex-wrap ga-2">
-                              <v-chip v-for="attr in choice.selectedAttribute" :key="attr" color="primary" label size="small" variant="flat">
-                                {{ attr }}
+                          <div class="d-flex flex-wrap ga-2">
+                            <div
+                              v-for="weaponId in sortedWeaponIdsByObtained(choice.matchedWeaponIds)"
+                              :key="weaponId"
+                              class="weapon-item-small"
+                              :class="{
+                                'weapon-obtained': isWeaponObtained(weaponId),
+                                'weapon-matched': selectedWeaponForLocation === weaponId
+                              }"
+                            >
+                              <item-icon :item-id="weaponId" show-item-name />
+                              <v-chip
+                                v-if="isWeaponObtained(weaponId)"
+                                class="obtained-badge"
+                                color="success"
+                                size="x-small"
+                                variant="flat"
+                              >
+                                已获得
                               </v-chip>
                             </div>
                           </div>
-                          <div v-if="choice.selectedSecondary" class="mb-3">
-                            <div class="text-medium-emphasis mb-1">附加属性</div>
-                            <v-chip color="teal" label size="small" variant="flat">
-                              {{ choice.selectedSecondary }}
-                            </v-chip>
-                          </div>
-                          <div v-if="choice.selectedSkill" class="mb-3">
-                            <div class="text-medium-emphasis mb-1">技能属性</div>
-                            <v-chip color="blue" label size="small" variant="flat">
-                              {{ choice.selectedSkill }}
-                            </v-chip>
-                          </div>
                         </div>
-                      </v-col>
-                      <v-divider class="hidden-sm-and-down" vertical />
-                      <v-divider class="hidden-md-and-up my-4" />
-                      <v-col cols="12" md="7">
-                        <div class="pl-1">
-                          <div class="mb-3">
-                            <div class="text-medium-emphasis mb-1">满足的需求</div>
-                            <div class="d-flex flex-wrap ga-2">
-                              <div v-for="index in choice.matchedSelectedIndices" :key="index">
-                                <v-tooltip activator="parent" location="bottom">
-                                  {{ getRequirementTooltip(index) }}
-                                </v-tooltip>
-                                <v-card class="pa-2" variant="tonal">
-                                  <div class="text-center font-weight-bold text-caption">
-                                    #{{ index + 1 }}
-                                    {{ getEssenceStatDescription(requiredEssenceStats[index]!) }}
-                                  </div>
-                                </v-card>
-                              </div>
-                            </div>
+                      </div>
+                    </v-card-text>
+                  </v-card>
+                </div>
+                <v-alert v-else border="start" type="info" variant="tonal">
+                  开启「不使用预刻券」模式后，将显示所有刷取地点。
+                </v-alert>
+              </template>
+              <!-- 使用预刻券模式：左右布局 -->
+              <template v-else>
+                <div v-if="displayedBattleChoices.length > 0">
+                  <v-card
+                    v-for="(choice, i) in displayedBattleChoices"
+                    :key="`battle-${i}`"
+                    class="mb-4 choice-card"
+                    :class="{ 'choice-card--top': i === 0 }"
+                    elevation="2"
+                    rounded="lg"
+                    variant="outlined"
+                  >
+                    <v-card-item class="py-3" :class="i === 0 ? 'bg-primary' : 'bg-info'">
+                      <v-card-title class="text-h6 font-weight-bold d-flex align-center">
+                        <v-icon v-if="i === 0" class="mr-2" size="small">mdi-trophy</v-icon>
+                        方案 {{ i + 1 }}
+                      </v-card-title>
+                      <template #append>
+                        <v-chip class="font-weight-bold" color="white" size="small" variant="flat">
+                          匹配 {{ getSelectedWeaponMatchCount(choice) }}/{{ getSelectedWeaponCount() }} 把已选武器
+                        </v-chip>
+                      </template>
+                    </v-card-item>
+                    <v-divider />
+                    <v-card-text class="pt-4">
+                      <v-row>
+                        <v-col cols="12" md="5">
+                          <div class="d-flex align-center mb-3">
+                            <v-icon class="mr-2" color="primary" icon="mdi-map-marker" size="small" />
+                            <span class="text-subtitle-1 font-weight-bold">刷取地点</span>
                           </div>
-                          <div>
-                            <div class="text-medium-emphasis mb-1">匹配的武器</div>
-                            <div class="d-flex flex-wrap ga-2">
-                              <div
-                                v-for="weaponId in sortedWeaponIds(choice.matchedWeaponIds)"
-                                :key="weaponId"
-                                class="weapon-item-small"
-                                :class="{
-                                  'weapon-matched': isRequiredWeapon(weaponId),
-                                  'weapon-obtained': isWeaponObtained(weaponId)
-                                }"
-                              >
-                                <item-icon :item-id="weaponId" show-item-name />
-                                <v-chip
-                                  v-if="isWeaponObtained(weaponId)"
-                                  class="obtained-badge"
-                                  color="success"
-                                  size="x-small"
-                                  variant="flat"
-                                >
-                                  已获得
+                          <div class="pl-1 mb-4">
+                            <v-chip color="info" label size="large" variant="flat">
+                              <v-icon size="small" start>mdi-sword-cross</v-icon>
+                              {{ getDisplayName(choice.battleName) }}
+                            </v-chip>
+                          </div>
+                          <div class="d-flex align-center mb-3">
+                            <v-icon class="mr-2" color="primary" icon="mdi-tune" size="small" />
+                            <span class="text-subtitle-1 font-weight-bold">预刻属性</span>
+                          </div>
+                          <div class="pl-1">
+                            <div class="mb-3">
+                              <div class="text-medium-emphasis mb-1">基础属性</div>
+                              <div class="d-flex flex-wrap ga-2">
+                                <v-chip v-for="attr in choice.selectedAttribute" :key="attr" color="primary" label size="small" variant="flat">
+                                  {{ attr }}
                                 </v-chip>
                               </div>
                             </div>
+                            <div v-if="choice.selectedSecondary" class="mb-3">
+                              <div class="text-medium-emphasis mb-1">附加属性</div>
+                              <v-chip color="teal" label size="small" variant="flat">
+                                {{ choice.selectedSecondary }}
+                              </v-chip>
+                            </div>
+                            <div v-if="choice.selectedSkill" class="mb-3">
+                              <div class="text-medium-emphasis mb-1">技能属性</div>
+                              <v-chip color="blue" label size="small" variant="flat">
+                                {{ choice.selectedSkill }}
+                              </v-chip>
+                            </div>
                           </div>
-                        </div>
-                      </v-col>
-                    </v-row>
-                  </v-card-text>
-                </v-card>
+                        </v-col>
+                        <v-divider class="hidden-sm-and-down" vertical />
+                        <v-divider class="hidden-md-and-up my-4" />
+                        <v-col cols="12" md="7">
+                          <div class="pl-1">
+                            <div class="mb-3">
+                              <div class="text-medium-emphasis mb-1">满足的需求</div>
+                              <div class="d-flex flex-wrap ga-2">
+                                <div v-for="index in choice.matchedSelectedIndices" :key="index">
+                                  <v-tooltip activator="parent" location="bottom">
+                                    {{ getRequirementTooltip(index) }}
+                                  </v-tooltip>
+                                  <v-card class="pa-2" variant="tonal">
+                                    <div class="text-center font-weight-bold text-caption">
+                                      #{{ index + 1 }}
+                                      {{ getEssenceStatDescription(requiredEssenceStats[index]!) }}
+                                    </div>
+                                  </v-card>
+                                </div>
+                              </div>
+                            </div>
+                            <div>
+                              <div class="text-medium-emphasis mb-1">匹配的武器</div>
+                              <div class="d-flex flex-wrap ga-2">
+                                <div
+                                  v-for="weaponId in sortedWeaponIds(choice.matchedWeaponIds)"
+                                  :key="weaponId"
+                                  class="weapon-item-small"
+                                  :class="{
+                                    'weapon-matched': isRequiredWeapon(weaponId),
+                                    'weapon-obtained': isWeaponObtained(weaponId)
+                                  }"
+                                >
+                                  <item-icon :item-id="weaponId" show-item-name />
+                                  <v-chip
+                                    v-if="isWeaponObtained(weaponId)"
+                                    class="obtained-badge"
+                                    color="success"
+                                    size="x-small"
+                                    variant="flat"
+                                  >
+                                    已获得
+                                  </v-chip>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </v-col>
+                      </v-row>
+                    </v-card-text>
+                  </v-card>
+                </div>
+                <v-alert v-else border="start" type="info" variant="tonal">
+                  请在右侧添加需求的基质属性，系统会自动计算最优刷取方案。
+                </v-alert>
               </template>
-              <v-alert v-else border="start" type="info" variant="tonal">
-                请在右侧添加需求的基质属性，系统会自动计算最优刷取方案。
-              </v-alert>
             </v-expansion-panel-text>
           </v-expansion-panel>
         </v-expansion-panels>
@@ -155,13 +220,35 @@
               需求设定
             </v-expansion-panel-title>
             <v-expansion-panel-text>
+              <!-- 不使用预刻券开关 -->
+              <div class="d-flex align-center mb-4">
+                <v-switch
+                  v-model="noPrecraftMode"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  label="不使用预刻券"
+                />
+                <v-tooltip text="直接显示所有刷取地点及其可刷取的武器，无需选择特定武器">
+                  <template #activator="{ props }">
+                    <v-icon v-bind="props" class="ml-1" color="medium-emphasis" size="small">mdi-information-outline</v-icon>
+                  </template>
+                </v-tooltip>
+              </div>
+
               <p class="mb-4 text-medium-emphasis">
-                选择你需要的基质属性组合，系统会自动找到最佳的能量淤积点刷取方案。
-                你可以从武器预设中选择，也可以自定义属性组合。
+                <template v-if="noPrecraftMode">
+                  开启「不使用预刻券」模式后，左侧将显示所有刷取地点及其可刷取的武器。点击武器可将包含该武器的地点置顶。
+                </template>
+                <template v-else>
+                  选择你需要的基质属性组合，系统会自动找到最佳的能量淤积点刷取方案。
+                  你可以从武器预设中选择，也可以自定义属性组合。
+                </template>
               </p>
 
-              <!-- Selected requirements -->
-              <v-card
+              <template v-if="!noPrecraftMode">
+                <!-- Selected requirements -->
+                <v-card
                 v-for="(stat, index) in requiredEssenceStats"
                 :key="stat.id"
                 class="pa-2 my-2 stat-card"
@@ -237,10 +324,17 @@
                 </v-row>
               </v-card>
 
-              <div v-if="requiredEssenceStats.length === 0" class="text-center py-6">
-                <v-icon class="mb-2" color="medium-emphasis" size="48">mdi-plus-circle-outline</v-icon>
-                <div class="text-medium-emphasis">尚未添加任何需求，点击下方按钮开始</div>
-              </div>
+              <v-card
+                v-if="requiredEssenceStats.length === 0"
+                class="pa-2 my-2 d-flex align-center justify-center"
+                elevation="1"
+                variant="outlined"
+              >
+                <div class="text-center">
+                  <v-icon class="mr-2" color="medium-emphasis" size="small">mdi-plus-circle-outline</v-icon>
+                  <span class="text-medium-emphasis text-caption">尚未添加任何需求，点击下方按钮开始</span>
+                </div>
+              </v-card>
 
               <!-- Add buttons -->
               <div class="mt-4 mb-4">
@@ -254,6 +348,7 @@
                   自定义属性
                 </v-btn>
               </div>
+              </template>
 
               <!-- Weapon presets -->
               <v-divider class="my-4" />
@@ -261,6 +356,50 @@
                 <v-icon class="mr-2" size="small">mdi-sword</v-icon>
                 从武器预设添加
               </h3>
+
+              <!-- 星级过滤开关 -->
+              <div class="d-flex align-center gap-2 mb-3">
+                <span class="text-body-2 text-medium-emphasis">显示星级：</span>
+                <v-chip-group v-model="selectedRarities" column multiple>
+                  <v-chip
+                    color="primary"
+                    filter
+                    size="small"
+                    value="3"
+                    variant="outlined"
+                  >
+                    3★
+                  </v-chip>
+                  <v-chip
+                    color="primary"
+                    filter
+                    size="small"
+                    value="4"
+                    variant="outlined"
+                  >
+                    4★
+                  </v-chip>
+                  <v-chip
+                    color="primary"
+                    filter
+                    size="small"
+                    value="5"
+                    variant="outlined"
+                  >
+                    5★
+                  </v-chip>
+                  <v-chip
+                    color="primary"
+                    filter
+                    size="small"
+                    value="6"
+                    variant="outlined"
+                  >
+                    6★
+                  </v-chip>
+                </v-chip-group>
+              </div>
+
               <v-text-field
                 v-model="weaponSearch"
                 class="mb-4"
@@ -285,13 +424,14 @@
                     :key="weaponId"
                     class="weapon-item"
                     :class="{
-                      'weapon-selected': isWeaponSelected(weaponId),
-                      'weapon-obtained': isWeaponObtained(weaponId)
+                      'weapon-selected': noPrecraftMode ? (selectedWeaponForLocation === weaponId) : isWeaponSelected(weaponId),
+                      'weapon-obtained': isWeaponObtained(weaponId),
+                      'weapon-matched': isWeaponMatchedInPlans(weaponId)
                     }"
-                    @click="addStatFromWeapon(weaponId)"
+                    @click="handleWeaponClick(weaponId)"
                   >
                     <item-icon :item-id="weaponId" show-item-name />
-                    <div v-if="isWeaponSelected(weaponId)" class="weapon-selected-overlay">
+                    <div v-if="noPrecraftMode ? (selectedWeaponForLocation === weaponId) : isWeaponSelected(weaponId)" class="weapon-selected-overlay">
                       <v-icon color="white" size="small">mdi-check-circle</v-icon>
                     </div>
                     <v-chip
@@ -311,12 +451,16 @@
         </v-expansion-panels>
       </v-col>
     </v-row>
+
+    <!-- 回到顶部按钮 -->
+    <back-to-top />
   </v-container>
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import BackToTop from '@/components/BackToTop.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type BattleChoice, getDisplayName, useMatrixPlanner } from '@/composables/useMatrixPlanner'
 import { useProfiles } from '@/composables/useProfiles'
@@ -324,12 +468,13 @@ import { useStaticData } from '@/utils/gameData/staticData'
 
 const route = useRoute()
 const { weaponTypes, weaponsMap } = useStaticData()
-const { treasureMatrix } = useProfiles()
+const { activeProfile, treasureMatrix, updateWeaponOverviewFilters } = useProfiles()
 const {
   requiredEssenceStats,
   allAttributeStats,
   allSecondaryStats,
   allSkillStats,
+  energyAlluviums,
   addStatFromWeapon,
   addCustomStat,
   removeStat,
@@ -345,10 +490,147 @@ const {
 /** 不使用预刻券模式：显示所有刷取地点 */
 const noPrecraftMode = ref(false)
 
-/** 当前显示的刷取方案列表 */
-const displayedChoices = computed(() => {
-  return noPrecraftMode.value ? allChoices.value : bestChoices.value
+/** 不使用预刻券模式下选中的武器ID，用于置顶包含该武器的地点 */
+const selectedWeaponForLocation = ref<string | null>(null)
+
+// 星级过滤器
+const selectedRarities = ref<string[]>(['3', '4', '5', '6'])
+
+// 从profile加载过滤器设置
+watch(
+  () => activeProfile.value.weapon_overview_filters,
+  (filters) => {
+    if (filters) {
+      const newRarities: string[] = []
+      if (filters['3star']) newRarities.push('3')
+      if (filters['4star']) newRarities.push('4')
+      if (filters['5star']) newRarities.push('5')
+      if (filters['6star']) newRarities.push('6')
+
+      // 只有在实际不同时才更新，避免循环
+      const current = selectedRarities.value.toSorted().join(',')
+      const updated = newRarities.toSorted().join(',')
+      if (current !== updated) {
+        selectedRarities.value = newRarities
+      }
+    }
+  },
+  { immediate: true },
+)
+
+// 保存过滤器设置
+watch(
+  selectedRarities,
+  async (newValue, oldValue) => {
+    // 避免初始化时触发
+    if (!oldValue) return
+
+    // 检查是否真的有变化
+    const oldSorted = oldValue.toSorted().join(',')
+    const newSorted = newValue.toSorted().join(',')
+    if (oldSorted === newSorted) return
+
+    await updateWeaponOverviewFilters({
+      '3star': newValue.includes('3'),
+      '4star': newValue.includes('4'),
+      '5star': newValue.includes('5'),
+      '6star': newValue.includes('6'),
+    })
+  },
+  { deep: true },
+)
+
+/**
+ * 生成所有刷取地点的列表（不使用预刻券模式）
+ */
+interface LocationChoice {
+  battleId: string
+  battleName: string
+  matchedWeaponIds: string[]
+  unobtainedCount: number
+}
+
+const allLocationChoices = computed<LocationChoice[]>(() => {
+  const locations: LocationChoice[] = []
+
+  // 遍历所有能量淤积点
+  for (const [battleName, alluvium] of Object.entries(energyAlluviums)) {
+    // 获取该地点能刷取的所有武器
+    const matchedWeaponIds: string[] = []
+
+    for (const [weaponId, weapon] of weaponsMap.value.entries()) {
+      // 检查武器的属性是否匹配该地点
+      // 基础属性总是匹配（所有地点都能刷基础属性）
+      // 检查附加属性和技能属性
+      const secondaryMatch = alluvium.secondaryStats.includes(getStatDisplayName(weapon.secondaryStatId))
+      const skillMatch = alluvium.skillStats.includes(getStatDisplayName(weapon.skillStatId))
+
+      if (secondaryMatch && skillMatch) {
+        matchedWeaponIds.push(weaponId)
+      }
+    }
+
+    // 计算未获得的武器数量
+    const unobtainedCount = matchedWeaponIds.filter(id => !isWeaponObtained(id)).length
+
+    locations.push({
+      battleId: alluvium.battleId,
+      battleName: alluvium.battleName,
+      matchedWeaponIds,
+      unobtainedCount,
+    })
+  }
+
+  return locations
 })
+
+/**
+ * 不使用预刻券模式下显示的地点列表
+ */
+const displayedLocationChoices = computed<LocationChoice[]>(() => {
+  let locations = [...allLocationChoices.value]
+
+  // 如果选中了武器，将包含该武器的地点置顶
+  if (selectedWeaponForLocation.value) {
+    locations = locations.toSorted((a, b) => {
+      const aHasWeapon = a.matchedWeaponIds.includes(selectedWeaponForLocation.value!)
+      const bHasWeapon = b.matchedWeaponIds.includes(selectedWeaponForLocation.value!)
+
+      if (aHasWeapon && !bHasWeapon) return -1
+      if (!aHasWeapon && bHasWeapon) return 1
+
+      // 都包含或都不包含时，按未获得数量排序
+      return b.unobtainedCount - a.unobtainedCount
+    })
+  } else {
+    // 没有选中武器时，按未获得数量排序
+    locations = locations.toSorted((a, b) => b.unobtainedCount - a.unobtainedCount)
+  }
+
+  return locations
+})
+
+/**
+ * 使用预刻券模式下显示的方案列表
+ */
+const displayedBattleChoices = computed<BattleChoice[]>(() => {
+  return bestChoices.value
+})
+
+// 方案更新时在方案一上播放高亮脉冲
+watch(
+  [displayedLocationChoices, displayedBattleChoices],
+  (_, oldVals) => {
+    if (!oldVals || (oldVals[0].length === 0 && oldVals[1].length === 0)) return
+    nextTick(() => {
+      const el = document.querySelector<HTMLElement>('.choice-card')
+      if (!el) return
+      el.classList.remove('card-pulse')
+      void el.offsetWidth // 强制回流，重启动画
+      el.classList.add('card-pulse')
+    })
+  },
+)
 
 const weaponSearch = ref('')
 
@@ -360,16 +642,53 @@ function isWeaponObtained(weaponId: string): boolean {
 }
 
 function filteredWeaponIds(weaponIds: string[]): string[] {
-  if (!weaponSearch.value.trim()) return weaponIds
-  const search = weaponSearch.value.trim().toLowerCase()
-  return weaponIds.filter((id) => {
+  let filtered = weaponIds
+
+  // 过滤稀有度
+  filtered = filtered.filter((id) => {
     const weapon = weaponsMap.value.get(id)
-    return weapon && weapon.name.toLowerCase().includes(search)
+    if (!weapon) return false
+    return selectedRarities.value.includes(String(weapon.rarity))
+  })
+
+  // 如果有搜索条件，再过滤
+  if (weaponSearch.value.trim()) {
+    const search = weaponSearch.value.trim().toLowerCase()
+    filtered = filtered.filter((id) => {
+      const weapon = weaponsMap.value.get(id)
+      return weapon && weapon.name.toLowerCase().includes(search)
+    })
+  }
+
+  // 按稀有度降序排序（6★ -> 3★）
+  return filtered.toSorted((a, b) => {
+    const wa = weaponsMap.value.get(a)
+    const wb = weaponsMap.value.get(b)
+    if (wa && wb) return wb.rarity - wa.rarity
+    return 0
   })
 }
 
 function isWeaponSelected(weaponId: string): boolean {
   return requiredEssenceStats.value.some((s) => !s.isCustom && s.weaponId === weaponId)
+}
+
+/**
+ * 处理武器点击事件
+ */
+function handleWeaponClick(weaponId: string) {
+  if (noPrecraftMode.value) {
+    // 不使用预刻券模式：选中武器以置顶包含该武器的地点
+    if (selectedWeaponForLocation.value === weaponId) {
+      // 再次点击取消选中
+      selectedWeaponForLocation.value = null
+    } else {
+      selectedWeaponForLocation.value = weaponId
+    }
+  } else {
+    // 使用预刻券模式：添加到需求列表
+    addStatFromWeapon(weaponId)
+  }
 }
 
 function getRequirementTooltip(index: number): string {
@@ -392,10 +711,46 @@ function sortedWeaponIds(weaponIds: string[]): string[] {
 }
 
 /**
+ * 按照已获得/未获得排序武器ID（未获得的排在前面）
+ */
+function sortedWeaponIdsByObtained(weaponIds: string[]): string[] {
+  return weaponIds.toSorted((a, b) => {
+    const aObtained = isWeaponObtained(a)
+    const bObtained = isWeaponObtained(b)
+
+    // 未获得的排在前面
+    if (!aObtained && bObtained) return -1
+    if (aObtained && !bObtained) return 1
+
+    // 同样状态下按稀有度排序
+    const wa = weaponsMap.value.get(a)
+    const wb = weaponsMap.value.get(b)
+    if (wa && wb) return wb.rarity - wa.rarity
+    return 0
+  })
+}
+
+/**
  * 判断某个武器是否是用户选择的需求武器
  */
 function isRequiredWeapon(weaponId: string): boolean {
   return requiredEssenceStats.value.some((s) => !s.isCustom && s.weaponId === weaponId)
+}
+
+/**
+ * 判断武器是否在左侧方案中被匹配（用于显示橙黄脉冲）
+ * 仅在使用预刻券模式下有效
+ */
+function isWeaponMatchedInPlans(weaponId: string): boolean {
+  // 只在使用预刻券模式下显示橙黄脉冲
+  if (noPrecraftMode.value) {
+    return false
+  }
+
+  // 检查是否在最优方案中
+  return displayedBattleChoices.value.some(choice =>
+    choice.matchedWeaponIds.includes(weaponId)
+  )
 }
 
 /**
@@ -421,7 +776,6 @@ function getSelectedWeaponMatchCount(choice: BattleChoice): number {
  * 在页面加载时处理 URL 参数。
  */
 onMounted(() => {
-  const weaponId = route.query.weapon as string
   const shouldClear = route.query.clear === 'true'
   const noPrecraft = route.query.noPrecraft === 'true'
 
@@ -432,12 +786,6 @@ onMounted(() => {
 
   if (noPrecraft) {
     // 从宝藏基质跳转过来，开启不使用预刻券模式
-    noPrecraftMode.value = true
-  }
-
-  if (weaponId) {
-    addStatFromWeapon(weaponId)
-    // 跳转过来时自动开启不使用预刻券模式
     noPrecraftMode.value = true
     // 滚动到页面顶部
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -450,7 +798,6 @@ onMounted(() => {
 watch(
   () => route.query,
   (query) => {
-    const weaponId = query.weapon as string
     const shouldClear = query.clear === 'true'
     const noPrecraft = query.noPrecraft === 'true'
 
@@ -460,28 +807,36 @@ watch(
 
     if (noPrecraft) {
       noPrecraftMode.value = true
-    }
-
-    if (weaponId && typeof weaponId === 'string') {
-      addStatFromWeapon(weaponId)
-      noPrecraftMode.value = true
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   },
 )
 
 /**
- * 监听需求列表变化，当用户添加需求时自动开启不使用预刻券模式。
+ * 监听模式切换，同步选中的武器状态
  */
-watch(
-  requiredEssenceStats,
-  (newStats, oldStats) => {
-    // 仅在新增需求时自动开启（新长度 > 旧长度）
-    if (newStats.length > (oldStats?.length ?? 0) && newStats.length > 0) {
-      noPrecraftMode.value = true
+watch(noPrecraftMode, (newMode, oldMode) => {
+  if (newMode === false && oldMode === true) {
+    // 从不使用预刻券模式切换到使用预刻券模式
+    // 清除原有的需求列表
+    clearAllStats()
+
+    // 如果有选中的武器，添加到需求列表
+    if (selectedWeaponForLocation.value) {
+      const weaponId = selectedWeaponForLocation.value
+      addStatFromWeapon(weaponId)
+      // 清除 selectedWeaponForLocation（因为现在使用 requiredEssenceStats）
+      selectedWeaponForLocation.value = null
     }
-  },
-)
+  } else if (newMode === true && oldMode === false) {
+    // 从使用预刻券模式切换到不使用预刻券模式
+    // 如果需求列表中有武器，选中第一个
+    const firstWeapon = requiredEssenceStats.value.find(s => !s.isCustom && s.weaponId)
+    if (firstWeapon && firstWeapon.weaponId) {
+      selectedWeaponForLocation.value = firstWeapon.weaponId
+    }
+  }
+})
 </script>
 
 <style scoped lang="scss">
@@ -524,10 +879,16 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   height: $weapon-icon-size;
   cursor: pointer;
   position: relative;
-  transition: transform 0.15s, opacity 0.15s, filter 0.15s;
+  transition: transform 0.15s, opacity 0.15s, filter 0.15s, box-shadow 0.3s ease;
   border-radius: 6px;
   &:hover {
     transform: scale(1.1);
+  }
+
+  // 匹配武器的橙黄脉冲效果
+  &.weapon-matched {
+    animation: matched-glow 2s ease-in-out infinite;
+    box-shadow: 0 0 15px rgba(255, 165, 0, 0.8);
   }
 
   // 已获得武器的样式
@@ -562,13 +923,13 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   flex-shrink: 0;
   cursor: pointer;
   position: relative;
-  transition: transform 0.15s, opacity 0.15s, filter 0.15s;
+  transition: transform 0.15s, opacity 0.15s, filter 0.15s, box-shadow 0.3s ease;
   border-radius: 6px;
   &:hover {
     transform: scale(1.05);
   }
 
-  // 匹配武器的红黄渐变呼吸边框
+  // 匹配武器的橙黄脉冲效果
   &.weapon-matched {
     animation: matched-glow 2s ease-in-out infinite;
     box-shadow: 0 0 15px rgba(255, 165, 0, 0.8);
@@ -618,5 +979,21 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   background: rgba(0, 0, 0, 0.45);
   border-radius: 6px;
   pointer-events: none;
+}
+
+// 方案更新时的高亮脉冲
+.card-pulse {
+  animation: card-update-pulse 0.6s ease;
+}
+
+@keyframes card-update-pulse {
+  0%,
+  100% {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(var(--v-theme-primary), 0.35),
+      0 4px 16px rgba(var(--v-theme-primary), 0.15);
+  }
 }
 </style>

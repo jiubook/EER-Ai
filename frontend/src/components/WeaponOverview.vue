@@ -9,7 +9,7 @@
     </v-expansion-panel-title>
     <v-expansion-panel-text>
       <v-alert border="start" class="mb-4" type="info" variant="tonal">
-        点击武器图标可切换是否拥有该武器的基质。已满级（6/6/3）的武器会显示彩虹边框。
+        左键点击武器图标查看基质属性，右键点击切换是否拥有该武器的基质。已满级（6/6/3）的武器会显示彩虹边框。
       </v-alert>
 
       <!-- 星级过滤开关 -->
@@ -69,16 +69,28 @@
             v-for="weaponId in wType.weaponIds"
             :key="weaponId"
             class="weapon-overview-item"
-            :class="{
-              'weapon-not-owned': !isWeaponOwned(weaponId),
-              'weapon-maxed': isWeaponMaxed(weaponId),
-            }"
-            @click="toggleWeaponOwnership(weaponId)"
+            @click="showWeaponStats(weaponId)"
+            @contextmenu.prevent="toggleWeaponOwnership(weaponId)"
           >
-            <item-icon :item-id="weaponId" show-item-name />
+            <div
+              class="weapon-icon-wrapper"
+              :class="{
+                'weapon-not-owned': !isWeaponOwned(weaponId),
+                'weapon-maxed': isWeaponMaxed(weaponId),
+              }"
+            >
+              <item-icon :item-id="weaponId" show-item-name />
 
-            <!-- 满级的彩虹边框 -->
-            <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
+              <!-- 满级的彩虹边框 -->
+              <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
+            </div>
+
+            <!-- 武器属性提示 -->
+            <v-fade-transition>
+              <div v-if="activeWeaponId === weaponId" class="weapon-stats-tooltip">
+                {{ getWeaponStatsText(weaponId) }}
+              </div>
+            </v-fade-transition>
           </div>
         </div>
       </template>
@@ -91,6 +103,7 @@ import { computed, ref, watch } from 'vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
+import { getGemTagName } from '@/utils/gameData/weapon'
 
 const { weaponTypes, weaponsMap } = useStaticData()
 const {
@@ -100,6 +113,11 @@ const {
   removeTreasureMatrixEntry,
   updateWeaponOverviewFilters,
 } = useProfiles()
+
+// 当前激活的武器ID（用于显示弹出提示）
+const activeWeaponId = ref<string | null>(null)
+// 定时器，用于自动关闭弹出提示
+let hideTimer: ReturnType<typeof setTimeout> | null = null
 
 const ownedWeaponIds = computed(() => treasureMatrix.value.map((e) => e.weapon_id))
 
@@ -161,11 +179,19 @@ const filteredWeaponTypes = computed(() => {
   return weaponTypes.value
     .map((wType) => ({
       ...wType,
-      weaponIds: wType.weaponIds.filter((weaponId) => {
-        const weapon = weaponsMap.value.get(weaponId)
-        if (!weapon) return false
-        return selectedRarities.value.includes(String(weapon.rarity))
-      }),
+      weaponIds: wType.weaponIds
+        .filter((weaponId) => {
+          const weapon = weaponsMap.value.get(weaponId)
+          if (!weapon) return false
+          return selectedRarities.value.includes(String(weapon.rarity))
+        })
+        .toSorted((a, b) => {
+          // 按稀有度降序排序（6★ -> 3★）
+          const wa = weaponsMap.value.get(a)
+          const wb = weaponsMap.value.get(b)
+          if (wa && wb) return wb.rarity - wa.rarity
+          return 0
+        }),
     }))
     .filter((wType) => wType.weaponIds.length > 0)
 })
@@ -199,6 +225,47 @@ async function toggleWeaponOwnership(weaponId: string) {
     })
   }
 }
+
+/**
+ * 显示武器属性（左键点击）
+ */
+function showWeaponStats(weaponId: string) {
+  // 清除之前的定时器
+  if (hideTimer) {
+    clearTimeout(hideTimer)
+    hideTimer = null
+  }
+
+  // 显示当前武器的属性
+  activeWeaponId.value = weaponId
+
+  // 2秒后自动隐藏
+  hideTimer = setTimeout(() => {
+    activeWeaponId.value = null
+    hideTimer = null
+  }, 2000)
+}
+
+/**
+ * 获取武器属性文本
+ */
+function getWeaponStatsText(weaponId: string): string {
+  const weapon = weaponsMap.value.get(weaponId)
+  if (!weapon) return '未知武器'
+
+  const parts: string[] = []
+  if (weapon.attributeStatId) {
+    parts.push(getGemTagName(weapon.attributeStatId))
+  }
+  if (weapon.secondaryStatId) {
+    parts.push(getGemTagName(weapon.secondaryStatId))
+  }
+  if (weapon.skillStatId) {
+    parts.push(getGemTagName(weapon.skillStatId))
+  }
+
+  return parts.join('、') || '无属性'
+}
 </script>
 
 <style scoped lang="scss">
@@ -219,16 +286,22 @@ async function toggleWeaponOwnership(weaponId: string) {
   height: 3.5rem;
   cursor: pointer;
   position: relative;
+
+  &:hover .weapon-icon-wrapper {
+    transform: scale(1.05);
+  }
+}
+
+.weapon-icon-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
   transition:
     transform 0.15s,
     opacity 0.15s;
   border-radius: 6px;
 
-  &:hover {
-    transform: scale(1.05);
-  }
-
-  // 未拥有：半透明灰色层
+  // 未拥有：半透明灰色层（只作用于图标，不影响 tooltip）
   &.weapon-not-owned {
     opacity: 0.4;
     filter: grayscale(0.8);
@@ -237,6 +310,36 @@ async function toggleWeaponOwnership(weaponId: string) {
   // 已满级：彩虹边框动画
   &.weapon-maxed {
     animation: rainbow-glow 3s linear infinite;
+  }
+}
+
+// 武器属性提示框
+.weapon-stats-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background: rgb(var(--v-theme-surface));
+  border: 2px solid rgb(var(--v-theme-primary));
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 9999;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+
+  // 小三角形
+  &::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgb(var(--v-theme-surface));
   }
 }
 

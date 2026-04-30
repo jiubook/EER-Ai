@@ -337,9 +337,7 @@ export function useMatrixPlanner() {
     return { battleId, battleName, selectedAttribute, selectedSecondary: null, selectedSkill, matchedSelectedIndices, matchedWeaponIds }
   }
 
-  // 使用防抖的 battleChoices — 当需求列表变化时延迟计算，避免频繁重算
-  const _debouncedChoices = ref<BattleChoice[]>([])
-  let _choicesTimer: ReturnType<typeof setTimeout> | null = null
+  const battleChoices = ref<BattleChoice[]>([])
 
   function _recomputeChoices() {
     const result: BattleChoice[] = []
@@ -355,19 +353,14 @@ export function useMatrixPlanner() {
         }
       }
     }
-    _debouncedChoices.value = result
+    battleChoices.value = result
   }
 
   watch(
     requiredEssenceStats,
-    () => {
-      if (_choicesTimer) clearTimeout(_choicesTimer)
-      _choicesTimer = setTimeout(_recomputeChoices, 150)
-    },
+    () => _recomputeChoices(),
     { deep: true, immediate: true },
   )
-
-  const battleChoices = computed(() => _debouncedChoices.value)
 
   const bestChoices = computed(() => {
     const filtered = battleChoices.value.filter(
