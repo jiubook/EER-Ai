@@ -859,7 +859,7 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
 
   .obtained-badge {
     position: absolute;
-    bottom: -4px;
+    top: -4px;
     left: 50%;
     transform: translateX(-50%);
     font-size: 0.65rem;
@@ -903,7 +903,7 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
 
   .obtained-badge {
     position: absolute;
-    bottom: -4px;
+    top: -4px;
     left: 50%;
     transform: translateX(-50%);
     font-size: 0.65rem;
