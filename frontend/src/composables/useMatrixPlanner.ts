@@ -339,6 +339,11 @@ export function useMatrixPlanner() {
 
   const battleChoices = ref<BattleChoice[]>([])
 
+  /**
+   * 重新计算所有可能的刷取方案。
+   * 遍历每个能量淤积点，对每个地点生成所有 3 属性组合（共 C(5,3)=10 种），
+   * 再分别与该地点的附加属性、技能属性配对，筛选出至少满足一项需求的方案。
+   */
   function _recomputeChoices() {
     const result: BattleChoice[] = []
     for (const { battleId, battleName, secondaryStats, skillStats } of Object.values(energyAlluviums)) {
@@ -362,16 +367,16 @@ export function useMatrixPlanner() {
     { deep: true, immediate: true },
   )
 
-  const bestChoices = computed(() => {
+  /** 按优先级排序后的所有有效方案：满足需求数 > 匹配已选武器数 > 匹配武器总数 */
+  const _sortedChoices = computed(() => {
     const filtered = battleChoices.value.filter(
       ({ matchedSelectedIndices }) => matchedSelectedIndices.length > 0,
     )
 
-    // 获取所有已选择的武器ID
     const selectedWeaponIds = new Set(
       requiredEssenceStats.value
-        .filter(s => !s.isCustom && s.weaponId)
-        .map(s => s.weaponId!)
+        .filter(stat => !stat.isCustom && stat.weaponId)
+        .map(stat => stat.weaponId!)
     )
 
     filtered.sort((a, b) => {
@@ -390,37 +395,14 @@ export function useMatrixPlanner() {
       // 最后：匹配武器总数
       return b.matchedWeaponIds.length - a.matchedWeaponIds.length
     })
-    return filtered.slice(0, 5)
-  })
-
-  /**
-   * 所有有匹配的刷取地点（不使用预刻券模式）。
-   * 返回所有 battleChoices 中有匹配的项，按匹配需求数降序排列。
-   */
-  const allChoices = computed(() => {
-    const filtered = battleChoices.value.filter(
-      ({ matchedSelectedIndices }) => matchedSelectedIndices.length > 0,
-    )
-
-    const selectedWeaponIds = new Set(
-      requiredEssenceStats.value
-        .filter(s => !s.isCustom && s.weaponId)
-        .map(s => s.weaponId!)
-    )
-
-    filtered.sort((a, b) => {
-      if (b.matchedSelectedIndices.length !== a.matchedSelectedIndices.length) {
-        return b.matchedSelectedIndices.length - a.matchedSelectedIndices.length
-      }
-      const aMatchedSelected = a.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
-      const bMatchedSelected = b.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
-      if (aMatchedSelected !== bMatchedSelected) {
-        return bMatchedSelected - aMatchedSelected
-      }
-      return b.matchedWeaponIds.length - a.matchedWeaponIds.length
-    })
     return filtered
   })
+
+  /** 最优的前 5 个方案（使用预刻券模式） */
+  const bestChoices = computed(() => _sortedChoices.value.slice(0, 5))
+
+  /** 所有有效方案（不使用预刻券模式） */
+  const allChoices = computed(() => _sortedChoices.value)
 
   return {
     requiredEssenceStats,

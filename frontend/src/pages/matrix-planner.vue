@@ -464,11 +464,13 @@ import BackToTop from '@/components/BackToTop.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type BattleChoice, getDisplayName, useMatrixPlanner } from '@/composables/useMatrixPlanner'
 import { useProfiles } from '@/composables/useProfiles'
+import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 
 const route = useRoute()
 const { weaponTypes, weaponsMap } = useStaticData()
-const { activeProfile, treasureMatrix, updateWeaponOverviewFilters } = useProfiles()
+const { treasureMatrix } = useProfiles()
+const { selectedRarities } = useRarityFilters()
 const {
   requiredEssenceStats,
   allAttributeStats,
@@ -483,7 +485,6 @@ const {
   getEssenceStatDescription,
   getStatDisplayName,
   bestChoices,
-  allChoices,
   clearAllStats,
 } = useMatrixPlanner()
 
@@ -492,53 +493,6 @@ const noPrecraftMode = ref(false)
 
 /** 不使用预刻券模式下选中的武器ID，用于置顶包含该武器的地点 */
 const selectedWeaponForLocation = ref<string | null>(null)
-
-// 星级过滤器
-const selectedRarities = ref<string[]>(['3', '4', '5', '6'])
-
-// 从profile加载过滤器设置
-watch(
-  () => activeProfile.value.weapon_overview_filters,
-  (filters) => {
-    if (filters) {
-      const newRarities: string[] = []
-      if (filters['3star']) newRarities.push('3')
-      if (filters['4star']) newRarities.push('4')
-      if (filters['5star']) newRarities.push('5')
-      if (filters['6star']) newRarities.push('6')
-
-      // 只有在实际不同时才更新，避免循环
-      const current = selectedRarities.value.toSorted().join(',')
-      const updated = newRarities.toSorted().join(',')
-      if (current !== updated) {
-        selectedRarities.value = newRarities
-      }
-    }
-  },
-  { immediate: true },
-)
-
-// 保存过滤器设置
-watch(
-  selectedRarities,
-  async (newValue, oldValue) => {
-    // 避免初始化时触发
-    if (!oldValue) return
-
-    // 检查是否真的有变化
-    const oldSorted = oldValue.toSorted().join(',')
-    const newSorted = newValue.toSorted().join(',')
-    if (oldSorted === newSorted) return
-
-    await updateWeaponOverviewFilters({
-      '3star': newValue.includes('3'),
-      '4star': newValue.includes('4'),
-      '5star': newValue.includes('5'),
-      '6star': newValue.includes('6'),
-    })
-  },
-  { deep: true },
-)
 
 /**
  * 生成所有刷取地点的列表（不使用预刻券模式）
@@ -554,7 +508,7 @@ const allLocationChoices = computed<LocationChoice[]>(() => {
   const locations: LocationChoice[] = []
 
   // 遍历所有能量淤积点
-  for (const [battleName, alluvium] of Object.entries(energyAlluviums)) {
+  for (const [_battleName, alluvium] of Object.entries(energyAlluviums)) {
     // 获取该地点能刷取的所有武器
     const matchedWeaponIds: string[] = []
 
@@ -757,7 +711,7 @@ function isWeaponMatchedInPlans(weaponId: string): boolean {
  * 获取已选择的武器总数
  */
 function getSelectedWeaponCount(): number {
-  return requiredEssenceStats.value.filter(s => !s.isCustom && s.weaponId).length
+  return requiredEssenceStats.value.filter(stat => !stat.isCustom && stat.weaponId).length
 }
 
 /**
@@ -766,8 +720,8 @@ function getSelectedWeaponCount(): number {
 function getSelectedWeaponMatchCount(choice: BattleChoice): number {
   const selectedWeaponIds = new Set(
     requiredEssenceStats.value
-      .filter(s => !s.isCustom && s.weaponId)
-      .map(s => s.weaponId!)
+      .filter(stat => !stat.isCustom && stat.weaponId)
+      .map(stat => stat.weaponId!)
   )
   return choice.matchedWeaponIds.filter((id: string) => selectedWeaponIds.has(id)).length
 }

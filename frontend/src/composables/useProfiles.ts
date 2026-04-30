@@ -166,29 +166,6 @@ export function useProfiles() {
     }
   }
 
-  async function getFarmingRecommendation(
-    weaponId: string,
-    currentLevels: [number, number, number],
-    targetLevels: [number, number, number],
-  ) {
-    try {
-      const res = await fetch('/api/profiles/farming_recommendation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          weapon_id: weaponId,
-          current_levels: currentLevels,
-          target_levels: targetLevels,
-        }),
-      })
-      if (!res.ok) throw new Error('Failed to get farming recommendation')
-      lastError.value = null
-      return await res.json()
-    } catch (error) {
-      _handleError('获取刷取建议失败', error)
-    }
-  }
-
   async function getBatchFarmingRecommendations(
     items: Array<{
       weapon_id: string
@@ -244,7 +221,6 @@ export function useProfiles() {
     updateTreasureMatrix,
     addTreasureMatrixEntry,
     removeTreasureMatrixEntry,
-    getFarmingRecommendation,
     getBatchFarmingRecommendations,
     updateWeaponOverviewFilters,
   }

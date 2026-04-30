@@ -524,6 +524,7 @@ import BackToTop from '@/components/BackToTop.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
+import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
 
@@ -531,15 +532,14 @@ const router = useRouter()
 
 const {
   activeProfileName,
-  activeProfile,
   treasureMatrix,
   fetchProfiles,
   updateTreasureMatrix,
   addTreasureMatrixEntry,
   removeTreasureMatrixEntry,
   getBatchFarmingRecommendations,
-  updateWeaponOverviewFilters,
 } = useProfiles()
+const { selectedRarities } = useRarityFilters()
 
 const { weaponsMap, weaponTypes } = useStaticData()
 
@@ -553,53 +553,6 @@ const computing = ref(false)
 const targetAffix1 = ref(6)
 const targetAffix2 = ref(6)
 const targetAffix3 = ref(3)
-
-// 星级过滤器
-const selectedRarities = ref<string[]>(['3', '4', '5', '6'])
-
-// 从profile加载过滤器设置
-watch(
-  () => activeProfile.value.weapon_overview_filters,
-  (filters) => {
-    if (filters) {
-      const newRarities: string[] = []
-      if (filters['3star']) newRarities.push('3')
-      if (filters['4star']) newRarities.push('4')
-      if (filters['5star']) newRarities.push('5')
-      if (filters['6star']) newRarities.push('6')
-
-      // 只有在实际不同时才更新，避免循环
-      const current = selectedRarities.value.toSorted().join(',')
-      const updated = newRarities.toSorted().join(',')
-      if (current !== updated) {
-        selectedRarities.value = newRarities
-      }
-    }
-  },
-  { immediate: true },
-)
-
-// 保存过滤器设置
-watch(
-  selectedRarities,
-  async (newValue, oldValue) => {
-    // 避免初始化时触发
-    if (!oldValue) return
-
-    // 检查是否真的有变化
-    const oldSorted = oldValue.toSorted().join(',')
-    const newSorted = newValue.toSorted().join(',')
-    if (oldSorted === newSorted) return
-
-    await updateWeaponOverviewFilters({
-      '3star': newValue.includes('3'),
-      '4star': newValue.includes('4'),
-      '5star': newValue.includes('5'),
-      '6star': newValue.includes('6'),
-    })
-  },
-  { deep: true },
-)
 
 interface Recommendation {
   weapon_id: string
@@ -682,11 +635,11 @@ watch(recommendations, (newRecommendations: Recommendation[]) => {
     return aRuns - bRuns
   })
 
-  const currentIds = sorted.map((r: Recommendation) => r.weapon_id).join(',')
+  const currentIds = sorted.map((rec: Recommendation) => rec.weapon_id).join(',')
 
   // 如果还没有冻结顺序，或者是全新的推荐列表，则冻结
   if (frozenSortOrder.value === null || frozenSortOrder.value.join(',') !== currentIds) {
-    frozenSortOrder.value = sorted.map((r: Recommendation) => r.weapon_id)
+    frozenSortOrder.value = sorted.map((rec: Recommendation) => rec.weapon_id)
   }
 }, { deep: true })
 
