@@ -32,6 +32,9 @@ class TreasureMatrixEntry(BaseModel):
     include_in_calculation: bool = True
     """是否参与刷取建议计算，满级（6/6/3）默认为False。"""
 
+    priority: int = Field(default=0, ge=0)
+    """武器优先级，数值越大优先级越高。默认值0表示使用稀有度作为默认优先级。"""
+
 
 class ProfileData(BaseModel):
     """单个账号存储的数据。"""

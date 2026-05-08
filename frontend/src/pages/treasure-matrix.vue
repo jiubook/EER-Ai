@@ -682,8 +682,11 @@ const filteredMatrixEntries = computed(() => {
     )
   }
 
-  // 按稀有度降序排序（6★ -> 3★）
+  // 按优先级降序排序，优先级相同时按稀有度降序排序（6★ -> 3★）
   return entries.toSorted((a, b) => {
+    const pa = a.priority || 0
+    const pb = b.priority || 0
+    if (pa !== pb) return pb - pa
     const wa = weaponsMap.value.get(a.weapon_id)
     const wb = weaponsMap.value.get(b.weapon_id)
     if (wa && wb) return wb.rarity - wa.rarity

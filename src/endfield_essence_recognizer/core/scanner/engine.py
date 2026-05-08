@@ -288,6 +288,111 @@ class ScannerEngine:
             levels=self._weapon_essence_levels.copy(),
         )
 
+    def _sort_weapons_by_priority(self, weapon_ids: set[str]) -> list[str]:
+        """按优先级排序武器ID（高优先级在前）。
+
+        排序规则：
+        1. 用户设置的 priority（正数）优先于默认值
+        2. 默认值按稀有度降序排列
+        """
+        priority_map: dict[str, int] = {}
+        try:
+            from endfield_essence_recognizer.api.routes.profiles import (
+                get_profile_manager,
+            )
+
+            profile_manager = get_profile_manager()
+            profile = profile_manager.get_active_profile()
+            for entry in profile.treasure_matrix:
+                if entry.weapon_id in weapon_ids:
+                    priority_map[entry.weapon_id] = entry.priority or 0
+        except Exception:
+            pass
+
+        def get_priority(weapon_id: str) -> int:
+            user_priority = priority_map.get(weapon_id, 0)
+            if user_priority > 0:
+                return user_priority
+            weapon = self.ctx.static_game_data.get_weapon(weapon_id)
+            return weapon.rarity if weapon else 0
+
+        return sorted(weapon_ids, key=lambda wid: -get_priority(wid))
+
+    def _assign_essence_to_weapon(
+        self,
+        matched_weapon_ids: set[str],
+        levels: list[int | None],
+    ) -> None:
+        """将一个基质按优先级分配给单把武器。
+
+        规则：
+        1. 只分配给一把武器（优先级最高的、未满 6/6/3 的）
+        2. 扫描到的等级取历史最高值更新
+        """
+        if not matched_weapon_ids:
+            return
+
+        sorted_weapons = self._sort_weapons_by_priority(matched_weapon_ids)
+
+        current_levels = (
+            levels[0] or 1,
+            levels[1] or 1,
+            levels[2] or 1,
+        )
+
+        # 找到第一个未满级的高优先级武器
+        for weapon_id in sorted_weapons:
+            existing_levels = self._weapon_essence_levels.get(weapon_id)
+
+            # 如果武器已满级(6/6/3)，跳过
+            if existing_levels and existing_levels == (6, 6, 3):
+                continue
+
+            # 分配基质
+            self._weapon_essence_counts[weapon_id] = (
+                self._weapon_essence_counts.get(weapon_id, 0) + 1
+            )
+
+            # 更新等级（取最高等级）
+            try:
+                if existing_levels:
+                    self._weapon_essence_levels[weapon_id] = (
+                        max(existing_levels[0], current_levels[0]),
+                        max(existing_levels[1], current_levels[1]),
+                        max(existing_levels[2], current_levels[2]),
+                    )
+                else:
+                    self._weapon_essence_levels[weapon_id] = current_levels
+            except Exception as e:
+                logger.error(
+                    f"更新武器 {weapon_id} 等级失败: {e}, levels={levels}",
+                    exc_info=True,
+                )
+
+            return  # 只分配给一把武器
+
+        # 如果所有武器都满了，分配给最高优先级的
+        if sorted_weapons:
+            weapon_id = sorted_weapons[0]
+            self._weapon_essence_counts[weapon_id] = (
+                self._weapon_essence_counts.get(weapon_id, 0) + 1
+            )
+            try:
+                existing_levels = self._weapon_essence_levels.get(weapon_id)
+                if existing_levels:
+                    self._weapon_essence_levels[weapon_id] = (
+                        max(existing_levels[0], current_levels[0]),
+                        max(existing_levels[1], current_levels[1]),
+                        max(existing_levels[2], current_levels[2]),
+                    )
+                else:
+                    self._weapon_essence_levels[weapon_id] = current_levels
+            except Exception as e:
+                logger.error(
+                    f"更新武器 {weapon_id} 等级失败: {e}, levels={levels}",
+                    exc_info=True,
+                )
+
     def _execute_grid_scan(self, stop_event: threading.Event) -> None:
         """
         Actual execution logic for a 9*5 grid pass.
@@ -362,42 +467,12 @@ class ScannerEngine:
             if evaluation.quality != EssenceQuality.SKIP:
                 self._total_essence_count += 1
 
-            # 为匹配的非垃圾武器的基质数量自增
+            # 按优先级将基质分配给单把武器
             if (
                 evaluation.matched_weapons
                 and not evaluation.matched_weapons_all_blocked
             ):
-                for weapon_id in evaluation.matched_weapons:
-                    self._weapon_essence_counts[weapon_id] = (
-                        self._weapon_essence_counts.get(weapon_id, 0) + 1
-                    )
-
-                    # 更新最高等级
-                    try:
-                        current_levels = (
-                            data.levels[0] or 1,
-                            data.levels[1] or 1,
-                            data.levels[2] or 1,
-                        )
-
-                        logger.debug(
-                            f"武器 {weapon_id} 的等级: {current_levels}, 原始数据: {data.levels}"
-                        )
-
-                        if weapon_id in self._weapon_essence_levels:
-                            existing = self._weapon_essence_levels[weapon_id]
-                            self._weapon_essence_levels[weapon_id] = (
-                                max(existing[0], current_levels[0]),
-                                max(existing[1], current_levels[1]),
-                                max(existing[2], current_levels[2]),
-                            )
-                        else:
-                            self._weapon_essence_levels[weapon_id] = current_levels
-                    except Exception as e:
-                        logger.error(
-                            f"更新武器 {weapon_id} 等级失败: {e}, data.levels={data.levels}",
-                            exc_info=True,
-                        )
+                self._assign_essence_to_weapon(evaluation.matched_weapons, data.levels)
 
             # Log the result
             if (
@@ -503,6 +578,7 @@ class DraggableScannerEngine(ScannerEngine):
 
         # 重置武器基质数量统计
         self._weapon_essence_counts = {}
+        self._weapon_essence_levels = {}
         self._total_essence_count = 0
 
         # 检查是否启用自动翻页
@@ -680,38 +756,14 @@ class DraggableScannerEngine(ScannerEngine):
                 if evaluation.quality != EssenceQuality.SKIP:
                     self._total_essence_count += 1
 
-                # 为匹配的非垃圾武器的基质数量自增
+                # 按优先级将基质分配给单把武器
                 if (
                     evaluation.matched_weapons
                     and not evaluation.matched_weapons_all_blocked
                 ):
-                    for weapon_id in evaluation.matched_weapons:
-                        self._weapon_essence_counts[weapon_id] = (
-                            self._weapon_essence_counts.get(weapon_id, 0) + 1
-                        )
-
-                        # 更新最高等级
-                        try:
-                            current_levels = (
-                                data.levels[0] or 1,
-                                data.levels[1] or 1,
-                                data.levels[2] or 1,
-                            )
-
-                            if weapon_id in self._weapon_essence_levels:
-                                existing = self._weapon_essence_levels[weapon_id]
-                                self._weapon_essence_levels[weapon_id] = (
-                                    max(existing[0], current_levels[0]),
-                                    max(existing[1], current_levels[1]),
-                                    max(existing[2], current_levels[2]),
-                                )
-                            else:
-                                self._weapon_essence_levels[weapon_id] = current_levels
-                        except Exception as e:
-                            logger.error(
-                                f"更新武器 {weapon_id} 等级失败: {e}, data.levels={data.levels}",
-                                exc_info=True,
-                            )
+                    self._assign_essence_to_weapon(
+                        evaluation.matched_weapons, data.levels
+                    )
 
                 if (
                     evaluation.quality == EssenceQuality.TRASH

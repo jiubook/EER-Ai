@@ -69,7 +69,7 @@
             v-for="weaponId in wType.weaponIds"
             :key="weaponId"
             class="weapon-overview-item"
-            @click="showWeaponStats(weaponId)"
+            @click="showWeaponDetail(weaponId)"
             @contextmenu.prevent="toggleWeaponOwnership(weaponId)"
           >
             <div
@@ -85,17 +85,108 @@
               <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
             </div>
 
-            <!-- 武器属性提示 -->
-            <v-fade-transition>
-              <div v-if="activeWeaponId === weaponId" class="weapon-stats-tooltip">
-                {{ getWeaponStatsText(weaponId) }}
-              </div>
-            </v-fade-transition>
           </div>
         </div>
       </template>
     </v-expansion-panel-text>
   </v-expansion-panel>
+
+  <!-- 武器详情弹窗 -->
+  <v-dialog v-model="detailDialog" max-width="600">
+    <v-card v-if="detailWeaponId">
+      <v-card-item>
+        <template #prepend>
+          <item-icon class="weapon-icon-detail" :item-id="detailWeaponId" />
+        </template>
+        <v-card-title>{{ weaponsMap.get(detailWeaponId)?.name || detailWeaponId }}</v-card-title>
+        <v-card-subtitle>{{ getWeaponStatsText(detailWeaponId) }}</v-card-subtitle>
+        <template #append>
+          <v-btn icon="mdi-close" variant="text" @click="detailDialog = false" />
+        </template>
+      </v-card-item>
+      <v-divider />
+      <v-card-text>
+        <!-- 当前状态 -->
+        <div class="mb-4">
+          <div class="text-subtitle-2 mb-1">当前基质等级</div>
+          <v-chip :color="isWeaponOwned(detailWeaponId) ? 'primary' : 'grey'" variant="flat">
+            {{ getMatrixLevelText(detailWeaponId) }}
+          </v-chip>
+          <v-chip
+            v-if="isWeaponMaxed(detailWeaponId)"
+            class="ml-2"
+            color="success"
+            size="small"
+            variant="flat"
+          >
+            已满级
+          </v-chip>
+        </div>
+
+        <!-- 优先级设置 -->
+        <div class="mb-4">
+          <div class="text-subtitle-2 mb-1">基质匹配优先级</div>
+          <div class="d-flex flex-wrap align-center ga-2 mb-2">
+            <v-chip
+              v-for="p in [1, 2, 3, 4, 5, 6, 7, 8, 9]"
+              :key="p"
+              :color="getUserPriority(detailWeaponId) === p ? 'primary' : undefined"
+              size="small"
+              :variant="getUserPriority(detailWeaponId) === p ? 'flat' : 'outlined'"
+              @click="setWeaponPriority(detailWeaponId!, p)"
+            >
+              {{ p }}
+            </v-chip>
+          </div>
+          <div class="text-caption text-medium-emphasis" style="line-height: 1.6">
+            当扫描到一个无暇基质同时匹配多把武器时，系统会按优先级将该基质分配给优先级最高的武器。<br />
+            默认使用武器稀有度作为优先级（6★=6, 5★=5, 4★=4, 3★=3）。<br />
+            手动设置 1-9 可覆盖默认值，数值越大越优先。<br />
+            已满级（6/6/3）的武器会被自动跳过。
+          </div>
+        </div>
+
+        <!-- 同类武器 -->
+        <div v-if="getSameStatWeapons(detailWeaponId).length > 0">
+          <div class="text-subtitle-2 mb-2">同类属性武器</div>
+          <div class="d-flex flex-column ga-2">
+            <v-card
+              v-for="sameId in getSameStatWeapons(detailWeaponId)"
+              :key="sameId"
+              class="pa-2"
+              variant="outlined"
+            >
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <item-icon class="weapon-icon-same" :item-id="sameId" />
+                  <div>
+                    <div class="font-weight-bold text-body-2">
+                      {{ weaponsMap.get(sameId)?.name || sameId }}
+                    </div>
+                    <div class="text-caption text-medium-emphasis">
+                      {{ getMatrixLevelText(sameId) }}
+                      <span class="ml-1">优先级: {{ getWeaponPriority(sameId) }}</span>
+                    </div>
+                  </div>
+                </div>
+                <v-btn
+                  color="primary"
+                  size="small"
+                  variant="tonal"
+                  @click="swapMatrix(detailWeaponId!, sameId)"
+                >
+                  交换
+                </v-btn>
+              </div>
+            </v-card>
+          </div>
+        </div>
+        <div v-else class="text-medium-emphasis text-caption">
+          没有其他武器与此武器共享相同属性组合。
+        </div>
+      </v-card-text>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script lang="ts" setup>
@@ -111,13 +202,13 @@ const {
   treasureMatrix,
   addTreasureMatrixEntry,
   removeTreasureMatrixEntry,
+  updateTreasureMatrix,
 } = useProfiles()
 const { selectedRarities } = useRarityFilters()
 
-// 当前激活的武器ID（用于显示弹出提示）
-const activeWeaponId = ref<string | null>(null)
-// 定时器，用于自动关闭弹出提示
-let hideTimer: ReturnType<typeof setTimeout> | null = null
+// 武器详情弹窗
+const detailDialog = ref(false)
+const detailWeaponId = ref<string | null>(null)
 
 const ownedWeaponIds = computed(() => treasureMatrix.value.map((e) => e.weapon_id))
 
@@ -180,23 +271,11 @@ async function toggleWeaponOwnership(weaponId: string) {
 }
 
 /**
- * 显示武器属性（左键点击）
+ * 显示武器详情弹窗（左键点击）
  */
-function showWeaponStats(weaponId: string) {
-  // 清除之前的定时器
-  if (hideTimer) {
-    clearTimeout(hideTimer)
-    hideTimer = null
-  }
-
-  // 显示当前武器的属性
-  activeWeaponId.value = weaponId
-
-  // 2秒后自动隐藏
-  hideTimer = setTimeout(() => {
-    activeWeaponId.value = null
-    hideTimer = null
-  }, 2000)
+function showWeaponDetail(weaponId: string) {
+  detailWeaponId.value = weaponId
+  detailDialog.value = true
 }
 
 /**
@@ -218,6 +297,138 @@ function getWeaponStatsText(weaponId: string): string {
   }
 
   return parts.join('、') || '无属性'
+}
+
+/**
+ * 获取同类武器（相同属性组合）
+ */
+function getSameStatWeapons(weaponId: string): string[] {
+  const weapon = weaponsMap.value.get(weaponId)
+  if (!weapon) return []
+  const sameWeapons: string[] = []
+  for (const [id, w] of weaponsMap.value.entries()) {
+    if (
+      id !== weaponId &&
+      w.attributeStatId === weapon.attributeStatId &&
+      w.secondaryStatId === weapon.secondaryStatId &&
+      w.skillStatId === weapon.skillStatId
+    ) {
+      sameWeapons.push(id)
+    }
+  }
+  return sameWeapons
+}
+
+/**
+ * 获取武器的基质等级文本
+ */
+function getMatrixLevelText(weaponId: string): string {
+  const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
+  if (!entry) return '未配置'
+  return `+${entry.affix1_level} / +${entry.affix2_level} / +${entry.affix3_level}`
+}
+
+/**
+ * 获取用户手动设置的优先级（0 表示未设置）
+ */
+function getUserPriority(weaponId: string): number {
+  const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
+  return entry?.priority || 0
+}
+
+/**
+ * 获取武器的有效优先级（未设置时使用稀有度）
+ */
+function getWeaponPriority(weaponId: string): number {
+  const userP = getUserPriority(weaponId)
+  if (userP > 0) return userP
+  const weapon = weaponsMap.value.get(weaponId)
+  return weapon ? weapon.rarity : 0
+}
+
+/**
+ * 设置武器优先级
+ */
+async function setWeaponPriority(weaponId: string, priority: number) {
+  const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
+  if (!entry) return
+  entry.priority = priority
+  await updateTreasureMatrix([...treasureMatrix.value])
+}
+
+/**
+ * 获取当前最高优先级
+ */
+function getHighestPriority(): number {
+  let max = 0
+  for (const entry of treasureMatrix.value) {
+    const p = entry.priority || 0
+    if (p > max) max = p
+  }
+  return max
+}
+
+/**
+ * 交换两把武器的基质数据
+ */
+async function swapMatrix(weaponAId: string, weaponBId: string) {
+  const entryA = treasureMatrix.value.find((e) => e.weapon_id === weaponAId)
+  const entryB = treasureMatrix.value.find((e) => e.weapon_id === weaponBId)
+
+  const weaponA = weaponsMap.value.get(weaponAId)
+  const weaponB = weaponsMap.value.get(weaponBId)
+
+  const hasA = !!entryA
+  const hasB = !!entryB
+
+  if (!hasA && !hasB) return
+
+  if (hasA && !hasB) {
+    // A有基质、B无基质 → A移除、B添加A的数据
+    await removeTreasureMatrixEntry(weaponAId)
+    await addTreasureMatrixEntry({
+      weapon_id: weaponBId,
+      weapon_name: weaponB?.name || weaponBId,
+      affix1_level: entryA!.affix1_level,
+      affix2_level: entryA!.affix2_level,
+      affix3_level: entryA!.affix3_level,
+      include_in_calculation: entryA!.include_in_calculation,
+      priority: getHighestPriority() + 1,
+    })
+  } else if (!hasA && hasB) {
+    // A无基质、B有基质 → A添加B的数据、B移除
+    await removeTreasureMatrixEntry(weaponBId)
+    await addTreasureMatrixEntry({
+      weapon_id: weaponAId,
+      weapon_name: weaponA?.name || weaponAId,
+      affix1_level: entryB!.affix1_level,
+      affix2_level: entryB!.affix2_level,
+      affix3_level: entryB!.affix3_level,
+      include_in_calculation: entryB!.include_in_calculation,
+      priority: getHighestPriority() + 1,
+    })
+  } else {
+    // 两者都有基质，交换等级
+    const tempLevels = {
+      affix1: entryA!.affix1_level,
+      affix2: entryA!.affix2_level,
+      affix3: entryA!.affix3_level,
+    }
+    entryA!.affix1_level = entryB!.affix1_level
+    entryA!.affix2_level = entryB!.affix2_level
+    entryA!.affix3_level = entryB!.affix3_level
+    entryB!.affix1_level = tempLevels.affix1
+    entryB!.affix2_level = tempLevels.affix2
+    entryB!.affix3_level = tempLevels.affix3
+
+    // 提升目标武器优先级
+    entryB!.priority = getHighestPriority() + 1
+
+    await updateTreasureMatrix([...treasureMatrix.value])
+  }
+
+  // 关闭弹窗
+  detailDialog.value = false
 }
 </script>
 
@@ -266,34 +477,15 @@ function getWeaponStatsText(weaponId: string): string {
   }
 }
 
-// 武器属性提示框
-.weapon-stats-tooltip {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-bottom: 8px;
-  padding: 8px 12px;
-  background: rgb(var(--v-theme-surface));
-  border: 2px solid rgb(var(--v-theme-primary));
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  white-space: nowrap;
-  z-index: 9999;
-  pointer-events: none;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+.weapon-icon-detail {
+  width: 3rem !important;
+  height: 3rem !important;
+}
 
-  // 小三角形
-  &::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 6px solid transparent;
-    border-top-color: rgb(var(--v-theme-surface));
-  }
+.weapon-icon-same {
+  width: 2rem !important;
+  height: 2rem !important;
+  flex-shrink: 0;
 }
 
 .rainbow-border {
