@@ -130,9 +130,9 @@
             <v-chip
               v-for="p in [1, 2, 3, 4, 5, 6, 7, 8, 9]"
               :key="p"
-              :color="getUserPriority(detailWeaponId) === p ? 'primary' : undefined"
+              :color="getWeaponPriority(detailWeaponId!) === p ? 'primary' : undefined"
               size="small"
-              :variant="getUserPriority(detailWeaponId) === p ? 'flat' : 'outlined'"
+              :variant="getWeaponPriority(detailWeaponId!) === p ? 'flat' : 'outlined'"
               @click="setWeaponPriority(detailWeaponId!, p)"
             >
               {{ p }}
