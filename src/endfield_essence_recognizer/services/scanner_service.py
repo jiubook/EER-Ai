@@ -5,6 +5,48 @@ from typing import TYPE_CHECKING
 
 from endfield_essence_recognizer.utils.log import logger
 
+
+def _format_level(value: int, color: str | None) -> str:
+    """格式化单个等级数值，带颜色。"""
+    text = f"+{value}"
+    if color:
+        return f"<fg {color}>{text}</>"
+    return text
+
+
+def _format_levels(affix1: int, affix2: int, affix3: int, static_data: object) -> str:
+    """格式化三个词条等级，按规则着色。
+
+    前两个词条: +6→6★色, +5/+4→5★色, +3/+2→4★色, +1→无色
+    第三个词条:  +3→6★色, +2→5★色, +1→无色
+    """
+    c6 = static_data.get_rarity_color(6)
+    c5 = static_data.get_rarity_color(5)
+    c4 = static_data.get_rarity_color(4)
+
+    def affix_color_12(v: int) -> str | None:
+        if v >= 6:
+            return c6
+        if v >= 4:
+            return c5
+        if v >= 2:
+            return c4
+        return None
+
+    def affix_color_3(v: int) -> str | None:
+        if v >= 3:
+            return c6
+        if v >= 2:
+            return c5
+        return None
+
+    return (
+        f"{_format_level(affix1, affix_color_12(affix1))}"
+        f"/{_format_level(affix2, affix_color_12(affix2))}"
+        f"/{_format_level(affix3, affix_color_3(affix3))}"
+    )
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -291,8 +333,22 @@ class ScannerService:
                     )
                     profile_manager.add_treasure_matrix_entry(entry)
                     added_count += 1
-                    logger.info(
-                        f"已将武器 {weapon_name} 添加到宝藏基质配置，等级: +{levels[0]}/+{levels[1]}/+{levels[2]}"
+                    rarity_color = (
+                        static_data.get_rarity_color(weapon.rarity)
+                        if weapon
+                        else "#FFFFFF"
+                    )
+                    weapon_type = (
+                        static_data.get_weapon_type(weapon.weapon_type)
+                        if weapon
+                        else None
+                    )
+                    type_name = weapon_type.name if weapon_type else "未知类型"
+                    level_text = _format_levels(
+                        levels[0], levels[1], levels[2], static_data
+                    )
+                    logger.opt(colors=True).info(
+                        f"已将武器 <fg {rarity_color}><bold>{weapon_name}（{weapon.rarity}★ {type_name}）</></> 添加到宝藏基质配置，等级: {level_text}"
                     )
                 else:
                     # 已存在则更新为更高的等级
@@ -321,8 +377,26 @@ class ScannerService:
                             profile_manager.get_active_profile().treasure_matrix
                         )
                         updated_count += 1
-                        logger.info(
-                            f"已更新武器 {existing.weapon_name} 的等级: +{existing.affix1_level}/+{existing.affix2_level}/+{existing.affix3_level}"
+                        weapon = static_data.get_weapon(weapon_id)
+                        rarity_color = (
+                            static_data.get_rarity_color(weapon.rarity)
+                            if weapon
+                            else "#FFFFFF"
+                        )
+                        weapon_type = (
+                            static_data.get_weapon_type(weapon.weapon_type)
+                            if weapon
+                            else None
+                        )
+                        type_name = weapon_type.name if weapon_type else "未知类型"
+                        level_text = _format_levels(
+                            existing.affix1_level,
+                            existing.affix2_level,
+                            existing.affix3_level,
+                            static_data,
+                        )
+                        logger.opt(colors=True).info(
+                            f"已更新武器 <fg {rarity_color}><bold>{existing.weapon_name}（{weapon.rarity}★ {type_name}）</></> 的等级: {level_text}"
                         )
 
             logger.info(
