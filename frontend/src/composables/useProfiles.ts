@@ -13,6 +13,7 @@ export interface TreasureMatrixEntry {
   affix2_level: number
   affix3_level: number
   include_in_calculation?: boolean
+  priority?: number
 }
 
 export interface ProfileData {
