@@ -320,6 +320,23 @@ class ScannerEngine:
 
         return sorted(weapon_ids, key=lambda wid: -get_priority(wid))
 
+    def _init_weapon_levels_from_profile(self) -> None:
+        """从 profile 的宝藏基质配置中初始化已有武器等级。"""
+        try:
+            from endfield_essence_recognizer.api.routes.profiles import (
+                get_profile_manager,
+            )
+
+            profile = get_profile_manager().get_active_profile()
+            for entry in profile.treasure_matrix:
+                self._weapon_essence_levels[entry.weapon_id] = (
+                    entry.affix1_level,
+                    entry.affix2_level,
+                    entry.affix3_level,
+                )
+        except Exception:
+            pass
+
     def _get_stat_tuple(self, weapon_ids: set[str]) -> tuple:
         """获取一组武器的属性组合作为 hashable key。"""
         for wid in weapon_ids:
@@ -459,6 +476,9 @@ class ScannerEngine:
         self._weapon_essence_levels = {}
         self._total_essence_count = 0
         self._skip_exact_level_counts = {}
+
+        # 从 profile 初始化已有武器等级，用于同等级跳过判断
+        self._init_weapon_levels_from_profile()
 
         icon_x_list = self._profile.essence_icon_x_list
         icon_y_list = self._profile.essence_icon_y_list
@@ -616,6 +636,9 @@ class DraggableScannerEngine(ScannerEngine):
         self._weapon_essence_levels = {}
         self._total_essence_count = 0
         self._skip_exact_level_counts = {}
+
+        # 从 profile 初始化已有武器等级，用于同等级跳过判断
+        self._init_weapon_levels_from_profile()
 
         # 检查是否启用自动翻页
         auto_page_flip = user_setting.auto_page_flip
