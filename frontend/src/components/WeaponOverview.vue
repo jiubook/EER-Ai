@@ -77,12 +77,24 @@
               :class="{
                 'weapon-not-owned': !isWeaponOwned(weaponId),
                 'weapon-maxed': isWeaponMaxed(weaponId),
+                'switch-target-maxed': isSwitchable(weaponId) && isSwitchTargetMaxed(weaponId),
               }"
             >
               <item-icon :item-id="weaponId" show-item-name />
 
               <!-- 满级的彩虹边框 -->
               <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
+
+              <!-- 可切换标记 -->
+              <v-chip
+                v-if="isSwitchable(weaponId)"
+                class="switchable-badge"
+                color="warning"
+                size="x-small"
+                variant="flat"
+              >
+                可切换
+              </v-chip>
             </div>
 
           </div>
@@ -320,6 +332,31 @@ function getSameStatWeapons(weaponId: string): string[] {
 }
 
 /**
+ * 判断武器是否"可切换"：存在同属性、更高优先级、且已拥有的武器
+ */
+function isSwitchable(weaponId: string): boolean {
+  const myPriority = getWeaponPriority(weaponId)
+  const sameWeapons = getSameStatWeapons(weaponId)
+  return sameWeapons.some(
+    (id) => isWeaponOwned(id) && getWeaponPriority(id) > myPriority,
+  )
+}
+
+/**
+ * 获取可切换的目标武器是否满级（用于灰色呼吸动画）
+ */
+function isSwitchTargetMaxed(weaponId: string): boolean {
+  const myPriority = getWeaponPriority(weaponId)
+  const sameWeapons = getSameStatWeapons(weaponId)
+  return sameWeapons.some(
+    (id) =>
+      isWeaponOwned(id)
+      && getWeaponPriority(id) > myPriority
+      && isWeaponMaxed(id),
+  )
+}
+
+/**
  * 获取武器的基质等级文本
  */
 function getMatrixLevelText(weaponId: string): string {
@@ -475,6 +512,11 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   &.weapon-maxed {
     animation: rainbow-glow 3s linear infinite;
   }
+
+  // 可切换目标满级：灰色呼吸背景
+  &.switch-target-maxed {
+    animation: switch-target-breathe 2s ease-in-out infinite;
+  }
 }
 
 .weapon-icon-detail {
@@ -542,6 +584,27 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   }
   85% {
     box-shadow: 0 0 10px rgba(148, 0, 211, 0.8);
+  }
+}
+
+.switchable-badge {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  pointer-events: none;
+  font-size: 0.55rem !important;
+  height: 14px !important;
+}
+
+@keyframes switch-target-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 8px 2px rgba(128, 128, 128, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 14px 5px rgba(158, 158, 158, 0.85);
   }
 }
 </style>
