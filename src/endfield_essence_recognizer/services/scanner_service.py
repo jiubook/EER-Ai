@@ -363,14 +363,13 @@ class ScannerService:
                         existing.affix3_level = levels[2]
                         updated = True
 
-                    # 如果更新后达到满级，自动取消勾选
-                    if (
+                    # 等级变更后达到满级，自动取消勾选
+                    if updated and (
                         existing.affix1_level == 6
                         and existing.affix2_level == 6
                         and existing.affix3_level == 3
                     ):
                         existing.include_in_calculation = False
-                        updated = True
 
                     if updated:
                         profile_manager.update_treasure_matrix(
