@@ -245,10 +245,12 @@ class ScannerEngine:
         self._user_setting_manager: UserSettingManager = user_setting_manager
         self._profile: ResolutionProfile = profile
 
-        # 以下两个字段是 ScannerEngine 维护的运行时状态
+        # 以下字段是 ScannerEngine 维护的运行时状态
         self._weapon_essence_counts: dict[WeaponId, int] = {}
         self._weapon_essence_levels: dict[WeaponId, tuple[int, int, int]] = {}
         self._total_essence_count: int = 0
+        # 跟踪每个属性组合已跳过的满级(6/6/3)基质次数
+        self._maxed_skip_counts: dict[tuple, int] = {}
 
         from endfield_essence_recognizer.utils.log import str_properties_and_attrs
 
@@ -318,6 +320,18 @@ class ScannerEngine:
 
         return sorted(weapon_ids, key=lambda wid: -get_priority(wid))
 
+    def _get_stat_tuple(self, weapon_ids: set[str]) -> tuple:
+        """获取一组武器的属性组合作为 hashable key。"""
+        for wid in weapon_ids:
+            weapon = self.ctx.static_game_data.get_weapon(wid)
+            if weapon:
+                return (
+                    weapon.attribute_stat_id,
+                    weapon.secondary_stat_id,
+                    weapon.skill_stat_id,
+                )
+        return ()
+
     def _assign_essence_to_weapon(
         self,
         matched_weapon_ids: set[str],
@@ -326,8 +340,11 @@ class ScannerEngine:
         """将一个基质按优先级分配给单把武器。
 
         规则：
-        1. 只分配给一把武器（优先级最高的、未满 6/6/3 的）
-        2. 扫描到的等级取历史最高值更新
+        1. 只分配给一把武器（优先级最高的可接受武器）
+        2. 非降级原则：基质各维度等级必须 >= 武器当前等级才可更新
+        3. 已满级(6/6/3)的武器跳过
+        4. 首次遇到满级基质且存在同属性满级兄弟时跳过（归属不确定）
+           后续再遇到满级基质则分配给最高优先级的未满级武器
         """
         if not matched_weapon_ids:
             return
@@ -340,12 +357,56 @@ class ScannerEngine:
             levels[2] or 1,
         )
 
-        # 找到第一个未满级的高优先级武器
+        is_maxed_matrix = current_levels == (6, 6, 3)
+
+        # 检查是否存在同属性的已满级武器
+        has_maxed_sibling = any(
+            self._weapon_essence_levels.get(wid) == (6, 6, 3) for wid in sorted_weapons
+        )
+
+        # 满级基质 + 满级兄弟：跳过次数 = 满级武器数量，后续可分配
+        if is_maxed_matrix and has_maxed_sibling:
+            stat_key = self._get_stat_tuple(matched_weapon_ids)
+            maxed_count = sum(
+                1
+                for wid in sorted_weapons
+                if self._weapon_essence_levels.get(wid) == (6, 6, 3)
+            )
+            skip_count = self._maxed_skip_counts.get(stat_key, 0)
+            if skip_count < maxed_count:
+                self._maxed_skip_counts[stat_key] = skip_count + 1
+                logger.debug(
+                    f"满级基质(6/6/3)存在{maxed_count}个同属性满级武器，"
+                    f"已跳过{skip_count + 1}/{maxed_count}次（归属不确定）"
+                )
+                return
+            # 已跳过足够次数，后续的满级基质可分配给未满级武器
+
+        # 非降级原则检查：所有维度 >= 武器当前等级
+        def can_upgrade(weapon_id: str) -> bool:
+            existing = self._weapon_essence_levels.get(weapon_id)
+            if existing is None:
+                return True  # 新武器，可以接受任何等级
+            return (
+                current_levels[0] >= existing[0]
+                and current_levels[1] >= existing[1]
+                and current_levels[2] >= existing[2]
+            )
+
+        # 找到第一个未满级且可接受该基质的高优先级武器
         for weapon_id in sorted_weapons:
             existing_levels = self._weapon_essence_levels.get(weapon_id)
 
-            # 如果武器已满级(6/6/3)，跳过
+            # 已满级武器跳过
             if existing_levels and existing_levels == (6, 6, 3):
+                continue
+
+            # 非降级检查
+            if not can_upgrade(weapon_id):
+                logger.debug(
+                    f"武器 {weapon_id} 当前等级 {existing_levels}，"
+                    f"基质等级 {current_levels}，不满足非降级原则，跳过"
+                )
                 continue
 
             # 分配基质
@@ -353,45 +414,24 @@ class ScannerEngine:
                 self._weapon_essence_counts.get(weapon_id, 0) + 1
             )
 
-            # 更新等级（取最高等级）
-            try:
-                if existing_levels:
-                    self._weapon_essence_levels[weapon_id] = (
-                        max(existing_levels[0], current_levels[0]),
-                        max(existing_levels[1], current_levels[1]),
-                        max(existing_levels[2], current_levels[2]),
-                    )
-                else:
-                    self._weapon_essence_levels[weapon_id] = current_levels
-            except Exception as e:
-                logger.error(
-                    f"更新武器 {weapon_id} 等级失败: {e}, levels={levels}",
-                    exc_info=True,
+            # 更新等级
+            if existing_levels:
+                self._weapon_essence_levels[weapon_id] = (
+                    max(existing_levels[0], current_levels[0]),
+                    max(existing_levels[1], current_levels[1]),
+                    max(existing_levels[2], current_levels[2]),
                 )
+            else:
+                self._weapon_essence_levels[weapon_id] = current_levels
 
             return  # 只分配给一把武器
 
-        # 如果所有武器都满了，分配给最高优先级的
+        # 没有可分配的武器（所有武器都满了或不满足非降级），分配给最高优先级的（仅计数）
         if sorted_weapons:
             weapon_id = sorted_weapons[0]
             self._weapon_essence_counts[weapon_id] = (
                 self._weapon_essence_counts.get(weapon_id, 0) + 1
             )
-            try:
-                existing_levels = self._weapon_essence_levels.get(weapon_id)
-                if existing_levels:
-                    self._weapon_essence_levels[weapon_id] = (
-                        max(existing_levels[0], current_levels[0]),
-                        max(existing_levels[1], current_levels[1]),
-                        max(existing_levels[2], current_levels[2]),
-                    )
-                else:
-                    self._weapon_essence_levels[weapon_id] = current_levels
-            except Exception as e:
-                logger.error(
-                    f"更新武器 {weapon_id} 等级失败: {e}, levels={levels}",
-                    exc_info=True,
-                )
 
     def _execute_grid_scan(self, stop_event: threading.Event) -> None:
         """
@@ -424,6 +464,7 @@ class ScannerEngine:
         self._weapon_essence_counts = {}
         self._weapon_essence_levels = {}
         self._total_essence_count = 0
+        self._maxed_skip_counts = {}
 
         icon_x_list = self._profile.essence_icon_x_list
         icon_y_list = self._profile.essence_icon_y_list
@@ -580,6 +621,7 @@ class DraggableScannerEngine(ScannerEngine):
         self._weapon_essence_counts = {}
         self._weapon_essence_levels = {}
         self._total_essence_count = 0
+        self._maxed_skip_counts = {}
 
         # 检查是否启用自动翻页
         auto_page_flip = user_setting.auto_page_flip
