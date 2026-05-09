@@ -44,9 +44,27 @@ jobs:
         run: |
           uv sync --no-dev --group build
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Lint updater (clippy + fmt check)
+        run: |
+          cargo clippy --release --manifest-path updater/Cargo.toml -- -D warnings
+          cargo fmt --manifest-path updater/Cargo.toml --check
+
+      - name: Build updater
+        run: cargo build --release --manifest-path updater/Cargo.toml
+
       - name: Build with PyInstaller
         run: |
           uv run --no-dev --group build pyinstaller main.spec
+
+      - name: Copy updater to dist
+        shell: pwsh
+        run: |
+          Copy-Item "updater/target/release/eer_updater.exe" "dist/endfield-essence-recognizer/eer_updater.exe"
 
       - name: Generate update manifest
         run: |

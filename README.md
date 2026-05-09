@@ -40,6 +40,14 @@
 
 **宝藏基质和养成材料：** 可以在设置界面自定义。默认情况下，如果这个基质和任何一把武器能对上（基质的所有属性与至少 1 件已实装武器的属性完全相同），则是宝藏，否则是养成材料。
 
+## 应用内更新
+
+- 工具支持在应用内检查并一键更新到最新版本。
+- 更新包基于 `_internal/manifest.json` 执行文件级更新，默认保留 `config.json`、`profiles.json`、`logs/`、`screenshots/`、`_updates/`、`_update_temp/` 和 `.env`。
+- 更新由独立 Rust 更新器 `eer_updater.exe` 执行，支持更新器自更新，并在复制失败时尽量回滚旧文件。
+- 如更新失败，请查看 `logs/updater.log` 和安装目录中的 `_update_failure.txt`。
+- 开发和发布细节见 [HOT_UPDATE_GUIDE.md](HOT_UPDATE_GUIDE.md)。
+
 ## 常见问题
 
 ### 1. 双击运行时遇到“Unhandled exception in script”弹窗报错

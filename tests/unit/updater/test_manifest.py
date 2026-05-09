@@ -41,6 +41,7 @@ def fake_dist_dir(tmp_path: Path) -> Path:
     (resources / "images" / "error.webp").write_text("webp")
 
     (dist / "README.md").write_text("readme")
+    (dist / "eer_updater.exe").write_text("updater")
     (dist / "config.json").write_text("{}")  # 用户配置，应该被 protected
 
     return dist
@@ -57,6 +58,7 @@ class TestScanDistDirectory:
         assert "_internal/cv2/cv2.pyd" in files
         assert "resources/images/error.webp" in files
         assert "README.md" in files
+        assert "eer_updater.exe" in files
         assert "config.json" in files
 
     def test_scan_uses_forward_slashes(self, fake_dist_dir: Path) -> None:
@@ -92,15 +94,20 @@ class TestGenerateManifest:
         assert manifest["version"] == "2.3.4"
 
     def test_manifest_files_count(self, fake_dist_dir: Path) -> None:
-        """文件数量应匹配实际文件数 + manifest.json 自身。"""
+        """文件数量应匹配实际文件数 + manifest.json + eer_updater.exe 自身。"""
         manifest = generate_manifest(fake_dist_dir, "1.0.0")
-        # 6 个实际文件 + manifest.json 自身被自动加入 files 列表
-        assert len(manifest["files"]) == 7
+        # 7 个实际文件 + manifest.json 自身
+        assert len(manifest["files"]) == 8
 
     def test_manifest_includes_self(self, fake_dist_dir: Path) -> None:
         """manifest.json 自身必须在 files 列表中。"""
         manifest = generate_manifest(fake_dist_dir, "1.0.0")
         assert MANIFEST_RELATIVE_PATH in manifest["files"]
+
+    def test_manifest_includes_updater(self, fake_dist_dir: Path) -> None:
+        """dist 中的 eer_updater.exe 应进入 files 列表。"""
+        manifest = generate_manifest(fake_dist_dir, "1.0.0")
+        assert "eer_updater.exe" in manifest["files"]
 
     def test_manifest_protected_defaults(self, fake_dist_dir: Path) -> None:
         """默认应使用 PROTECTED_PATHS 作为保护列表。"""
@@ -130,6 +137,10 @@ class TestProtectedPaths:
         """config.json 必须在保护列表中。"""
         assert "config.json" in PROTECTED_PATHS
 
+    def test_profiles_json_is_protected(self) -> None:
+        """profiles.json 必须在保护列表中，避免多账号配置被热更新覆盖。"""
+        assert "profiles.json" in PROTECTED_PATHS
+
     def test_logs_dir_is_protected(self) -> None:
         """logs/ 目录必须在保护列表中。"""
         assert "logs/" in PROTECTED_PATHS
@@ -138,6 +149,10 @@ class TestProtectedPaths:
         """screenshots/ 目录必须在保护列表中。"""
         assert "screenshots/" in PROTECTED_PATHS
 
+    def test_updater_exe_is_not_protected(self) -> None:
+        """eer_updater.exe 需要参与复制，才能支持自更新。"""
+        assert "eer_updater.exe" not in PROTECTED_PATHS
+
 
 class TestDeleteListGeneration:
     """删除清单生成的测试。"""
@@ -145,7 +160,7 @@ class TestDeleteListGeneration:
     def test_delete_all_old_files_except_protected(self, tmp_path: Path) -> None:
         """应删除旧 manifest 中的所有文件（排除 protected）。"""
         from src.endfield_essence_recognizer.updater.installer import (
-            _prepare_delete_list,
+            _compute_delete_list,
         )
 
         # 创建旧 manifest
@@ -161,8 +176,6 @@ class TestDeleteListGeneration:
         )
 
         # 新 manifest
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         new_manifest = {
             "version": "0.9.0",
             "files": ["app.exe", "new.dll", "lib.pyd"],
@@ -170,11 +183,7 @@ class TestDeleteListGeneration:
         }
 
         # 生成删除清单
-        _prepare_delete_list(current_dir, temp_dir, new_manifest)
-
-        # 读取删除清单
-        delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
-        deleted_files = [line for line in delete_list.strip().split("\n") if line]
+        deleted_files = _compute_delete_list(current_dir, new_manifest)
 
         # 验证：应删除所有旧文件（排除 protected）
         assert "app.exe" in deleted_files
@@ -187,7 +196,7 @@ class TestDeleteListGeneration:
     ) -> None:
         """首次升级（无旧 manifest）只清理 manifest 目录下的旧程序文件，不删用户文件。"""
         from src.endfield_essence_recognizer.updater.installer import (
-            _prepare_delete_list,
+            _compute_delete_list,
         )
 
         current_dir = tmp_path / "current"
@@ -208,8 +217,6 @@ class TestDeleteListGeneration:
         (current_dir / "logs").mkdir()
         (current_dir / "logs" / "app.log").write_text("log")
 
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         new_manifest = {
             "version": "0.9.0",
             "files": [
@@ -222,51 +229,44 @@ class TestDeleteListGeneration:
             "protected": ["config.json", "logs/"],
         }
 
-        _prepare_delete_list(current_dir, temp_dir, new_manifest)
+        deleted_files = _compute_delete_list(current_dir, new_manifest)
 
-        delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
-        deleted_files = [line for line in delete_list.strip().split("\n") if line]
-
-        # _internal/ 下的旧程序文件 → 删除（Windows 路径格式）
-        assert "_internal\\old.dll" in deleted_files
-        assert "_internal\\old.exe" in deleted_files
+        # _internal/ 下的旧程序文件 → 删除
+        assert "_internal/old.dll" in deleted_files
+        assert "_internal/old.exe" in deleted_files
         # _internal/ 下的新文件 → 不删除
-        assert "_internal\\new.dll" not in deleted_files
+        assert "_internal/new.dll" not in deleted_files
         # 根目录的用户文件 → 不删除
         assert "my_data.txt" not in deleted_files
         # 根目录的旧程序文件（不在 manifest 目录下）→ 不删除
         assert "old_root.exe" not in deleted_files
         # protected → 不删除
         assert "config.json" not in deleted_files
-        assert "logs\\app.log" not in deleted_files
+        assert "logs/app.log" not in deleted_files
 
     def test_no_old_manifest_empty_install_dir(self, tmp_path: Path) -> None:
         """首次升级且安装目录为空时，删除清单也应为空。"""
         from src.endfield_essence_recognizer.updater.installer import (
-            _prepare_delete_list,
+            _compute_delete_list,
         )
 
         current_dir = tmp_path / "current"
         current_dir.mkdir()
         # 安装目录为空
 
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         new_manifest = {
             "version": "0.9.0",
             "files": ["app.exe", "new.dll"],
             "protected": ["config.json"],
         }
 
-        _prepare_delete_list(current_dir, temp_dir, new_manifest)
-
-        delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
-        assert delete_list.strip() == ""
+        deleted_files = _compute_delete_list(current_dir, new_manifest)
+        assert deleted_files == []
 
     def test_protected_prefix_matching(self, tmp_path: Path) -> None:
         """protected 目录下的文件应被保护（前缀匹配）。"""
         from src.endfield_essence_recognizer.updater.installer import (
-            _prepare_delete_list,
+            _compute_delete_list,
         )
 
         current_dir = tmp_path / "current"
@@ -280,18 +280,13 @@ class TestDeleteListGeneration:
             json.dumps(old_manifest), encoding="utf-8"
         )
 
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         new_manifest = {
             "version": "0.9.0",
             "files": ["app.exe"],
             "protected": ["logs/"],
         }
 
-        _prepare_delete_list(current_dir, temp_dir, new_manifest)
-
-        delete_list = (temp_dir / "__to_delete.txt").read_text(encoding="utf-8")
-        deleted_files = [line for line in delete_list.strip().split("\n") if line]
+        deleted_files = _compute_delete_list(current_dir, new_manifest)
 
         # logs/ 下的文件应被保护
         assert "app.exe" in deleted_files
@@ -302,81 +297,63 @@ class TestDeleteListGeneration:
 class TestCopyListExcludesProtected:
     """复制清单应排除 protected 文件。"""
 
-    def test_protected_excluded_from_copy_list(self, tmp_path: Path) -> None:
-        """protected 文件不应出现在 __manifest_files.txt 中。"""
+    def test_protected_excluded_from_copy_list(self) -> None:
+        """protected 文件不应出现在复制清单中。"""
         from src.endfield_essence_recognizer.updater.installer import (
-            _prepare_manifest_files_list,
+            _compute_copy_list,
         )
 
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         manifest = {
             "version": "0.9.0",
             "files": ["app.exe", "config.json", "lib.dll", "logs/app.log"],
             "protected": ["config.json", "logs/"],
         }
 
-        _prepare_manifest_files_list(temp_dir, manifest)
-
-        copy_list = (temp_dir / "__manifest_files.txt").read_text(encoding="utf-8")
-        copy_files = [line for line in copy_list.strip().split("\n") if line]
+        copy_files = _compute_copy_list(manifest)
 
         assert "app.exe" in copy_files
         assert "lib.dll" in copy_files
         assert "config.json" not in copy_files
         assert "logs/app.log" not in copy_files
 
-    def test_manifest_json_always_in_copy_list(self, tmp_path: Path) -> None:
+    def test_manifest_json_always_in_copy_list(self) -> None:
         """manifest.json 自身（_internal/manifest.json）必须在复制清单中。"""
         from src.endfield_essence_recognizer.updater.installer import (
             MANIFEST_RELATIVE_PATH,
-            _prepare_manifest_files_list,
+            _compute_copy_list,
         )
 
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         manifest = {
             "version": "0.9.0",
             "files": ["app.exe", MANIFEST_RELATIVE_PATH],
             "protected": ["config.json"],
         }
 
-        _prepare_manifest_files_list(temp_dir, manifest)
+        copy_files = _compute_copy_list(manifest)
 
-        copy_list = (temp_dir / "__manifest_files.txt").read_text(encoding="utf-8")
-        copy_files = [line for line in copy_list.strip().split("\n") if line]
-
-        # Windows 路径格式
-        assert MANIFEST_RELATIVE_PATH.replace("/", "\\") in copy_files
+        assert MANIFEST_RELATIVE_PATH in copy_files
 
 
 class TestProtectedBackupList:
     """protected 文件备份清单测试。"""
 
-    def test_protected_files_list(self, tmp_path: Path) -> None:
-        """__protected_files.txt 应包含非目录的 protected 条目。"""
+    def test_protected_files_list(self) -> None:
+        """应包含非目录的 protected 条目。"""
         from src.endfield_essence_recognizer.updater.installer import (
-            _prepare_protected_files_list,
+            _compute_protected_list,
         )
 
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         manifest = {
             "version": "0.9.0",
             "files": ["app.exe", "config.json"],
             "protected": ["config.json", "logs/", ".env"],
         }
 
-        _prepare_protected_files_list(temp_dir, manifest)
+        entries = _compute_protected_list(manifest)
 
-        protected_list = (temp_dir / "__protected_files.txt").read_text(
-            encoding="utf-8"
-        )
-        entries = [line for line in protected_list.strip().split("\n") if line]
-
-        # 目录条目（logs/）不应在备份列表中
+        # 目录条目（logs/）不应在列表中
         assert "logs/" not in entries
-        # 文件条目应在备份列表中
+        # 文件条目应在列表中
         assert "config.json" in entries
         assert ".env" in entries
 

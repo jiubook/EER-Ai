@@ -84,3 +84,9 @@ for path in (Path(DISTPATH) / NAME / "_internal" / "cv2").glob(
     "opencv_videoio_ffmpeg*.dll"
 ):
     path.unlink()
+
+# 拷贝 eer_updater.exe 到 dist 目录（本地构建时从 updater/target/release/ 复制）
+updater_src = Path("updater/target/release/eer_updater.exe")
+updater_dst = Path(DISTPATH) / NAME / "eer_updater.exe"
+if updater_src.is_file():
+    shutil.copy(updater_src, updater_dst)

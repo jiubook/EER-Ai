@@ -1,80 +1,160 @@
-# 热更新功能说明
+﻿# 热更新功能说明
 
 ## 功能概述
 
-应用内一键更新到最新版本，支持多镜像源、代理配置、实时进度显示。
+应用内更新用于让用户在不手动重新下载完整压缩包的情况下升级到新版本。当前方案支持：
 
-## 实现原理
+- 多镜像源下载与代理配置
+- WebSocket 实时下载进度
+- 更新包 SHA-256 校验（当发布资产提供 digest 时）
+- 基于 manifest 的文件级更新
+- 独立 Rust 更新器 `eer_updater.exe`
+- `eer_updater.exe` 自更新
+- 失败时尽力回滚到旧版本文件
 
-1. **版本检查** - 启动时自动检查一图流 API
-2. **下载更新** - 后台下载更新包，WebSocket 实时推送进度
-3. **自动安装** - 批处理脚本替换文件并重启程序
+## 核心原则
 
-## 核心功能
+热更新的第一目标不是“尽快覆盖文件”，而是“安全地把安装目录收敛到目标版本”。因此需要遵守以下原则：
 
-### 一键更新
-- 点击"一键更新"按钮直接完成下载和安装
-- 实时显示下载进度、速度、文件大小
-- 支持取消下载（使用任务取消机制立即中断网络请求）
-- 失败时显示错误信息和重试按钮，无需重新检查更新
+1. **目标状态明确**：发布包中的 `_internal/manifest.json` 声明该版本应包含的文件和 protected 路径。
+2. **用户数据不动**：`config.json`、`profiles.json`、`logs/`、`screenshots/`、`_updates/`、`_update_temp/`、`.env` 等路径不会被删除或覆盖。
+3. **路径不可越界**：Python 解压阶段和 Rust 执行阶段都会拒绝路径穿越。
+4. **失败优先保旧版本可用**：删除或覆盖旧文件前先备份；复制失败、源文件缺失或路径非法时写入失败状态并尽力回滚。
+5. **更新器可自更新**：优先运行更新包中的新版 `eer_updater.exe`，由新版更新器替换安装目录中的旧 updater。
 
-### 多镜像源
-- 一图流 API 返回的镜像（global、cn）
-- GitHub 官方
-- ghproxy 镜像（多个节点）
-- gitmirror、gh.con.sh、githubproxy.cc 等镜像
-- fastgit 镜像
-- 下载过程中可动态切换
-
-### 代理支持
-- 可配置代理端口（默认 7890）
-- 下载过程中可启用/禁用
-- 格式：`http://127.0.0.1:{port}`
-
-## 新增文件
+## 模块结构
 
 ### 后端
-- `src/endfield_essence_recognizer/updater/` - 更新模块
-  - `__init__.py` - 模块入口
-  - `checker.py` - 版本检查
-  - `downloader.py` - 下载管理
-  - `installer.py` - 安装逻辑
-  - `manager.py` - 更新管理器
-  - `mirrors.py` - 镜像源配置
-- `src/endfield_essence_recognizer/api/routes/update.py` - 更新 API
-- `src/endfield_essence_recognizer/api/websockets/update_progress.py` - 进度推送
 
-### 前端
-- 修改 `frontend/src/composables/useUpdateChecker.ts` - 一键更新逻辑
-- 修改 `frontend/src/components/UpdateDialogs.vue` - 进度对话框
-- 修改 `frontend/src/pages/settings.vue` - 更新设置
+- `src/endfield_essence_recognizer/updater/checker.py`：检查版本、解析下载地址、获取 GitHub asset digest。
+- `src/endfield_essence_recognizer/updater/downloader.py`：下载更新包并回调进度。
+- `src/endfield_essence_recognizer/updater/installer.py`：解压更新包、读取 manifest、生成 `_plan.json`、启动 updater。
+- `src/endfield_essence_recognizer/updater/manager.py`：串联检查、下载、校验和安装流程。
+- `src/endfield_essence_recognizer/updater/mirrors.py`：维护镜像源模板。
+- `src/endfield_essence_recognizer/api/routes/update.py`：更新相关 HTTP API。
+- `src/endfield_essence_recognizer/api/websockets/update_progress.py`：下载进度 WebSocket。
 
-### 配置
-- `pyproject.toml` - 添加 `packaging`、`aiofiles` 依赖
-- `src/endfield_essence_recognizer/schemas/user_setting.py` - 新增 `update_mirror` 和 `update_proxy` 字段
-- `src/endfield_essence_recognizer/api/router.py` - 注册更新路由
+### 独立更新器
 
-## API 接口
+- `updater/`：Rust 编写的独立更新器工程。
+- `updater/src/main.rs`：等待主程序退出、执行文件删除/复制/回滚、重启主程序。
+- `updater/Cargo.toml` / `updater/Cargo.lock`：Rust 依赖和锁文件。
 
-### GET /api/update/check
-检查是否有新版本（数据来源：一图流 API）
+### 发布辅助
+
+- `scripts/generate_manifest.py`：扫描 PyInstaller 产物并生成 `_internal/manifest.json`。
+- `main.spec`：PyInstaller 打包脚本，会在本地存在 release updater 时复制 `eer_updater.exe` 到 dist 根目录。
+
+## Manifest 与 Plan
+
+### `_internal/manifest.json`
+
+manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成：
 
 ```json
 {
-  "has_update": true,
-  "update_info": {
-    "version": "0.9.0",
-    "download_url": "https://github.com/.../release.zip",
-    "mirrors": {
-      "global": {"downloadUrl": "https://github.com/..."},
-      "cn": {"downloadUrl": "https://cos.yituliu.cn/..."}
-    }
-  }
+  "version": "0.9.0",
+  "files": [
+    "endfield-essence-recognizer.exe",
+    "eer_updater.exe",
+    "_internal/python3.dll",
+    "_internal/manifest.json",
+    "README.md"
+  ],
+  "protected": [
+    "config.json",
+    "profiles.json",
+    "logs/",
+    "screenshots/",
+    "_updates/",
+    "_update_temp/",
+    ".env"
+  ]
 }
 ```
 
-### POST /api/update/install
-下载并安装更新
+`eer_updater.exe` 必须在 `files` 中，但不能在 `protected` 中，否则无法自更新。
+
+### `_update_temp/_plan.json`
+
+安装开始前，Python 侧会把 manifest 转换为 updater 可执行的 plan：
+
+```json
+{
+  "package_type": "manifest",
+  "remove_list": ["_internal/old.dll"],
+  "copy_list": ["endfield-essence-recognizer.exe", "eer_updater.exe"],
+  "protected_list": ["config.json", ".env"]
+}
+```
+
+兼容要求：`_plan.json` 是 Python installer 与 Rust updater 之间的协议。新增字段必须向后兼容，不能破坏旧主程序调用新版 updater。
+
+## 更新流程
+
+1. 用户点击“一键更新”。
+2. 后端检查版本并确定下载地址。
+3. `download_update()` 下载 zip 到 `_updates/`，前端通过 WebSocket 显示进度。
+4. 如果可获得 SHA-256，`UpdateManager` 校验下载包完整性。
+5. `install_update()` 解压 zip 到 `_update_temp/`，并校验 zip 条目不能路径穿越。
+6. Python 读取 `_internal/manifest.json`，计算 `remove_list`、`copy_list`、`protected_list`。
+7. Python 写入 `_update_temp/_plan.json`。
+8. Python 优先启动 `_update_temp/eer_updater.exe`；如果更新包没有 updater，才回退到安装目录中的 `eer_updater.exe`。
+9. 当前主程序延迟退出，Rust updater 等待父进程退出。
+10. Rust updater 拒绝安装在盘符根目录的场景，并校验 plan 中所有路径不能越界。
+11. 需要删除或覆盖的旧文件先移动到 `_update_temp/_backup/`。
+12. Rust updater 按 `copy_list` 从 `_update_temp/` 复制新文件到安装目录。
+13. 如果复制失败、源文件缺失或路径非法，Rust updater 删除本次新增文件并从 `_backup/` 恢复旧文件。
+14. 更新成功后写入 `_update_success.txt`，删除失败状态文件、更新包，并重启主程序。
+15. 如果 updater 正从 `_update_temp/` 运行，为避免 Windows 删除正在运行的 exe，临时目录会延后到下次更新前清理。
+
+## 自更新说明
+
+Windows 不允许删除或替换正在运行的 exe，因此不能让安装目录中的旧 `eer_updater.exe` 直接替换自己。当前方案是：
+
+- 更新包内携带新版 `eer_updater.exe`。
+- Python installer 优先启动 `_update_temp/eer_updater.exe`。
+- 新版 updater 作为独立进程运行，安装目录中的旧 updater 没有被占用。
+- 新版 updater 复制 `eer_updater.exe` 到安装目录，完成自更新。
+
+这意味着新版 updater 必须能理解旧主程序生成的 `_plan.json`。如需升级 plan 协议，请只添加可选字段，并保持旧字段语义不变。
+
+## 安全特性
+
+### 文件保护
+
+默认 protected 路径定义在 `scripts/generate_manifest.py` 的 `PROTECTED_PATHS` 中：
+
+- `config.json`：用户配置
+- `profiles.json`：多账号配置
+- `logs/`：运行日志
+- `screenshots/`：用户截图
+- `_updates/`：下载缓存
+- `_update_temp/`：临时解压目录
+- `.env`：环境变量配置
+
+修改 protected 列表时，请同步更新单元测试。
+
+### 路径穿越防护
+
+- Python 解压 zip 前使用 `Path.resolve()` 与 `relative_to()` 拒绝 `../`、绝对路径等可疑条目。
+- Rust updater 执行 plan 时再次拒绝绝对路径、盘符路径、根路径、`..` 和空路径。
+
+### 回滚策略
+
+- 删除和覆盖前先移动到 `_backup/`。
+- 若 copy 阶段失败，先删除本次新增文件，再把 `_backup/` 中的旧文件恢复到原位置。
+- 回滚是“尽力而为”：权限错误、磁盘错误或杀进程仍可能导致手动修复需求。
+
+## API 接口
+
+### `GET /api/update/check`
+
+检查是否有新版本。
+
+### `POST /api/update/install`
+
+下载并安装更新。
 
 ```json
 {
@@ -82,23 +162,17 @@
 }
 ```
 
-### POST /api/update/cancel
-取消当前下载
+### `POST /api/update/cancel`
 
-### GET /api/update/mirrors
-获取可用镜像源列表
+取消当前下载任务。
 
-```json
-{
-  "mirrors": [
-    {"title": "GitHub 官方", "value": "github"},
-    {"title": "ghproxy 镜像", "value": "ghproxy"}
-  ]
-}
-```
+### `GET /api/update/mirrors`
 
-### WebSocket /ws/update/progress
-实时推送下载进度
+获取可用镜像源列表。
+
+### `WebSocket /ws/update/progress`
+
+实时推送下载进度。
 
 ```json
 {
@@ -109,129 +183,50 @@
 }
 ```
 
-## 使用方式
+## 本地开发与验证
 
-1. **自动检查** - 程序启动时自动检查
-2. **手动检查** - 点击顶部工具栏更新按钮
-3. **一键更新** - 发现新版本后点击"一键更新"
-4. **配置设置** - 在设置页面配置镜像源和代理
+```bash
+# Python 侧 manifest / installer 测试
+uv run pytest tests/unit/updater/test_manifest.py
 
-## 更新流程
+# Python 侧 lint
+uv run ruff check scripts/generate_manifest.py src/endfield_essence_recognizer/updater/installer.py tests/unit/updater/test_manifest.py
 
-### 基于 Manifest 的增量更新
-
-更新包中包含一个 `manifest.json` 文件（由 CI 在构建时自动生成），描述了该版本应有的所有文件和受保护路径：
-
-```json
-{
-  "version": "0.9.0",
-  "files": [
-    "endfield-essence-recognizer.exe",
-    "_internal/python3.dll",
-    "README.md",
-    ...
-  ],
-  "protected": [
-    "config.json",
-    "logs/",
-    "screenshots/",
-    ...
-  ]
-}
+# Rust updater
+cargo fmt --manifest-path updater/Cargo.toml --check
+cargo clippy --manifest-path updater/Cargo.toml -- -D warnings
+cargo test --manifest-path updater/Cargo.toml
 ```
-
-安装时根据 manifest 执行三步操作：
-1. **删除旧版本文件**：读取目标目录中的旧 manifest.json，删除其中列出的所有文件（排除 protected 列表）
-2. **复制新版本文件**：将新 manifest 中列出的所有文件从更新包复制到目标目录
-3. **清理**：删除临时更新文件
-
-**安全特性**：
-- 只删除程序自己的旧文件（在旧 manifest 中列出的）
-- 用户手动添加的文件不会被删除（不在旧 manifest 中）
-- 所有程序文件都会被新版本替换（全量复制）
-- protected 列表保护用户数据
-
-**示例场景**：
-- 目标目录现有：`app.exe(v0.8)`, `old.dll`, `config.json`, `user_notes.txt`
-- 旧 manifest.files：`["app.exe", "old.dll"]`
-- 新 manifest.files：`["app.exe", "new.dll"]`
-- 执行结果：
-  - 删除：`app.exe(v0.8)`, `old.dll`（旧版本文件）
-  - 保留：`config.json`（protected）, `user_notes.txt`（用户文件）
-  - 复制：`app.exe(v0.9)`, `new.dll`（新版本文件）
-
-如更新包中不包含 manifest.json（兼容旧版更新包），则回退到硬编码删除列表 + 全量复制的方案。
-
-### 执行步骤
-
-1. 用户点击"一键更新"
-2. 显示进度对话框，建立 WebSocket 连接
-3. 后端下载更新包到 `_updates` 目录
-4. 实时推送下载进度
-5. 解压到临时目录 `_update_temp`
-6. 读取 manifest.json（如存在）
-7. 对比新旧 manifest，生成删除清单和文件列表
-8. 生成批处理脚本（manifest 模式或回退模式）
-9. 启动脚本并退出当前程序
-10. 脚本等待进程完全退出和文件句柄释放
-11. 删除旧版本文件（基于旧 manifest）
-12. 复制新版本文件（基于新 manifest）
-13. 自动启动新版本程序
-14. 清理临时文件和更新包
-
-## 安全特性
-
-### 文件保护
-
-更新通过 manifest 的 `protected` 列表保护用户数据，以下路径在更新时不会被删除：
-
-- `config.json` - 用户配置
-- `logs/` - 运行日志
-- `screenshots/` - 用户截图
-- `_updates/` - 下载缓存
-- `.env` - 环境变量配置
-
-如需修改保护列表，编辑 `scripts/generate_manifest.py` 中的 `PROTECTED_PATHS` 常量。
-
-### 路径穿越防护
-
-解压更新包时会校验每个 zip 条目的目标路径，拒绝包含 `../` 等路径穿越攻击的条目。
-
-## 注意事项
-
-1. 需要管理员权限
-2. 更新过程中会短暂关闭程序
-3. 确保网络连接正常
-4. 更新包从 GitHub Releases 获取
-
-## 配置说明
-
-### 后端配置
-修改 `src/endfield_essence_recognizer/updater/checker.py`：
-
-```python
-UPDATE_CHECK_URL = "https://cos.yituliu.cn/endfield/endfield-essence-recognizer/version.json"
-```
-
-### 用户配置
-在设置页面或更新对话框中配置：
-- 镜像源选择
-- 代理端口（默认 7890）
-- 是否启用代理
 
 ## 发布新版本
 
-1. 更新 `pyproject.toml` 中的版本号（`version.py` 通过 `importlib.metadata` 动态读取包版本，无需手动修改）
-2. 构建并打包应用
-3. CI 会自动在 PyInstaller 构建后执行 `scripts/generate_manifest.py`，将 manifest.json 打入 zip 包
-4. 在 GitHub 创建 Release 并上传 zip 包
-5. 用户端会自动检测到新版本
+1. 更新 `pyproject.toml` 中的版本号。
+2. 构建前端产物。
+3. 构建 release updater：`cargo build --release --manifest-path updater/Cargo.toml`。
+4. 使用 PyInstaller 构建应用，`main.spec` 会复制 release updater 到 dist 根目录。
+5. 执行 `scripts/generate_manifest.py` 写入 `_internal/manifest.json`。
+6. 打包 zip 并创建 GitHub Release。
+7. 用户端检查到新版本后即可应用内更新。
 
-**本地测试 manifest 生成：**
+本地生成 manifest：
+
 ```bash
-# 构建后手动生成 manifest
 uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-recognizer
-
-# 或指定自定义路径
-uv run python scripts/generate_manifest.py --dist-dir /path/to/dist --version 0.9.0
 ```
+
+## 常见问题
+
+### 更新器缺失
+
+如果安装目录中没有 `eer_updater.exe`，应用内更新会失败。请确认发布包中包含该文件，并且构建流程已先执行 Rust release build。
+
+### 更新失败后如何排查
+
+- 查看 `logs/updater.log`。
+- 查看安装目录中的 `_update_failure.txt`。
+- 检查更新包是否缺少 manifest 声明的文件。
+- 检查是否被杀毒软件、权限策略或磁盘空间问题阻止写入。
+
+### 为什么 `_update_temp/` 有时不会立刻删除
+
+当新版 updater 从 `_update_temp/` 运行时，Windows 会锁定正在运行的 exe。为支持 updater 自更新，临时目录会延后清理，下一次更新开始前 Python installer 会先删除旧的 `_update_temp/`。

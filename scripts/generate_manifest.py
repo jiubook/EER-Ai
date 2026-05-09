@@ -23,11 +23,11 @@ from pathlib import Path
 # 用户数据目录 / 文件，更新时绝对不能删除或覆盖
 PROTECTED_PATHS: list[str] = [
     "config.json",
+    "profiles.json",
     "logs/",
     "screenshots/",
     "_updates/",
     "_update_temp/",
-    "_updater.bat",
     ".env",
 ]
 
