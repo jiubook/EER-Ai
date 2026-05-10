@@ -15,20 +15,25 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 from pathlib import Path
 
 from endfield_essence_recognizer.utils.log import logger
+
+UPDATE_TEMP_PARENT_NAME = "endfield-essence-recognizer"
+UPDATE_TEMP_PREFIX = "update-"
+STALE_UPDATE_TEMP_SECONDS = 24 * 60 * 60
 
 # manifest 在安装目录中的相对路径（与 generate_manifest.py 保持一致）
 MANIFEST_RELATIVE_PATH = "_internal/manifest.json"
 
 # updater 可执行文件名
 UPDATER_EXE_NAME = "eer_updater.exe"
+UPDATER_RELATIVE_PATH = f"_internal/{UPDATER_EXE_NAME}"
 
-# 状态文件名
-SUCCESS_STATUS_FILE = "_update_success.txt"
-FAILURE_STATUS_FILE = "_update_failure.txt"
+STATUS_DIR_NAME = "logs"
 
 
 def _is_path_traversal(temp_dir: Path, member: str) -> bool:
@@ -88,6 +93,108 @@ def _load_manifest(temp_dir: Path) -> dict | None:
     except (json.JSONDecodeError, OSError) as exc:
         logger.error(f"加载 manifest.json 失败: {exc}")
         return None
+
+
+def _safe_status_version(value: object) -> str:
+    """Return a filesystem-safe version fragment for updater status files."""
+    text = str(value or "unknown").strip() or "unknown"
+    return "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in text)
+
+
+def _load_installed_manifest_version(current_dir: Path) -> str:
+    """Read the installed version from the current manifest when available."""
+    for manifest_path in (
+        current_dir / MANIFEST_RELATIVE_PATH,
+        current_dir / "manifest.json",
+    ):
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return _safe_status_version(manifest.get("version"))
+        except (json.JSONDecodeError, OSError):
+            logger.warning(f"无法读取已安装版本: {manifest_path}")
+    return "unknown"
+
+
+def _build_status_file_paths(
+    current_dir: Path,
+    old_version: str,
+    new_version: str,
+) -> tuple[Path, Path]:
+    """Build logs/{old}_{new}_updater_success|failure.txt status paths."""
+    prefix = f"{_safe_status_version(old_version)}_{_safe_status_version(new_version)}"
+    logs_dir = current_dir / STATUS_DIR_NAME
+    return (
+        logs_dir / f"{prefix}_updater_success.txt",
+        logs_dir / f"{prefix}_updater_failure.txt",
+    )
+
+
+def _cleanup_legacy_install_temp_dir(current_dir: Path) -> None:
+    """Remove the old install-root _update_temp directory if present."""
+    legacy_temp_dir = current_dir / "_update_temp"
+    if not legacy_temp_dir.exists():
+        return
+    import shutil
+
+    try:
+        shutil.rmtree(legacy_temp_dir)
+    except OSError as exc:
+        logger.warning(f"清理旧临时目录失败: {legacy_temp_dir} ({exc})")
+
+
+def _cleanup_stale_update_temp_dirs(
+    now: float | None = None,
+    stale_seconds: int = STALE_UPDATE_TEMP_SECONDS,
+) -> None:
+    """Best-effort cleanup for stale external update temp directories."""
+    import shutil
+
+    parent = Path(tempfile.gettempdir()) / UPDATE_TEMP_PARENT_NAME
+    if not parent.is_dir():
+        return
+
+    current_time = time.time() if now is None else now
+    for path in parent.iterdir():
+        if not path.is_dir() or not path.name.startswith(UPDATE_TEMP_PREFIX):
+            continue
+        try:
+            age = current_time - path.stat().st_mtime
+        except OSError:
+            continue
+        if age < stale_seconds:
+            continue
+        try:
+            shutil.rmtree(path)
+            logger.info(f"已清理过期更新临时目录: {path}")
+        except OSError as exc:
+            logger.warning(f"清理过期更新临时目录失败: {path} ({exc})")
+
+
+def _build_update_temp_dir(current_dir: Path) -> Path:
+    """Build a per-install external temp directory for extracted update files."""
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    return (
+        Path(tempfile.gettempdir())
+        / UPDATE_TEMP_PARENT_NAME
+        / f"{UPDATE_TEMP_PREFIX}{timestamp}-{subprocess.os.getpid()}"
+    )
+
+
+def _protect_installed_updater_when_package_lacks_it(
+    temp_dir: Path,
+    remove_list: list[str],
+    protected_list: list[str],
+) -> tuple[list[str], list[str]]:
+    """Keep the installed updater when the downloaded package has no updater."""
+    if (temp_dir / UPDATER_RELATIVE_PATH).is_file():
+        return remove_list, protected_list
+
+    remove_list = [path for path in remove_list if path != UPDATER_RELATIVE_PATH]
+    if UPDATER_RELATIVE_PATH not in protected_list:
+        protected_list = [*protected_list, UPDATER_RELATIVE_PATH]
+    return remove_list, sorted(protected_list)
 
 
 def _is_protected(file_path: str, protected: set[str]) -> bool:
@@ -291,7 +398,7 @@ def install_update(zip_path: Path) -> bool:
     4. 生成复制清单（已排除 protected）
     5. 生成 protected 备份清单
     6. 生成 plan JSON 文件
-    7. 启动 eer_updater.exe 并退出当前程序
+    7. 启动 _internal/eer_updater.exe 并退出当前程序
 
     Args:
         zip_path: 更新包路径。
@@ -308,13 +415,15 @@ def install_update(zip_path: Path) -> bool:
         else:
             current_dir = Path.cwd()
 
-        # 创建临时解压目录
-        temp_dir = current_dir / "_update_temp"
+        # 创建临时解压目录。解压目录放在系统临时目录，避免安装目录残留 _update_temp。
+        _cleanup_legacy_install_temp_dir(current_dir)
+        _cleanup_stale_update_temp_dirs()
+        temp_dir = _build_update_temp_dir(current_dir)
         if temp_dir.exists():
             import shutil
 
             shutil.rmtree(temp_dir)
-        temp_dir.mkdir()
+        temp_dir.mkdir(parents=True)
 
         # 解压更新包
         logger.info(f"解压更新包到: {temp_dir}")
@@ -326,6 +435,8 @@ def install_update(zip_path: Path) -> bool:
                     return False
             zip_ref.extractall(temp_dir)
 
+        old_version = _load_installed_manifest_version(current_dir)
+
         # 尝试加载 manifest
         manifest = _load_manifest(temp_dir)
 
@@ -335,6 +446,14 @@ def install_update(zip_path: Path) -> bool:
             remove_list = _compute_delete_list(current_dir, manifest)
             copy_list = _compute_copy_list(manifest)
             protected_list = _compute_protected_list(manifest)
+            remove_list, protected_list = (
+                _protect_installed_updater_when_package_lacks_it(
+                    temp_dir,
+                    remove_list,
+                    protected_list,
+                )
+            )
+            new_version = _safe_status_version(manifest.get("version"))
             plan_path = _generate_plan_json(
                 temp_dir, "manifest", remove_list, copy_list, protected_list
             )
@@ -349,21 +468,28 @@ def install_update(zip_path: Path) -> bool:
                 if p.is_file() and p.name != "_plan.json"
             ]
             protected_list = ["config.json", ".env"]
+            new_version = "unknown"
             plan_path = _generate_plan_json(
                 temp_dir, "fallback", remove_list, copy_list, protected_list
             )
 
-        # 优先运行更新包内的新 updater，使 updater 本身可以被替换。
-        packaged_updater = temp_dir / UPDATER_EXE_NAME
-        updater_exe = packaged_updater if packaged_updater.is_file() else current_dir / UPDATER_EXE_NAME
+        # updater 固定放在 _internal，避免用户在安装根目录误启动。
+        packaged_updater = temp_dir / UPDATER_RELATIVE_PATH
+        installed_updater = current_dir / UPDATER_RELATIVE_PATH
+        updater_exe = (
+            packaged_updater if packaged_updater.is_file() else installed_updater
+        )
         if not updater_exe.is_file():
             logger.error(f"未找到更新器: {updater_exe}")
             return False
 
         # 构造命令行参数
         main_exe = current_dir / "endfield-essence-recognizer.exe"
-        success_file = current_dir / SUCCESS_STATUS_FILE
-        failure_file = current_dir / FAILURE_STATUS_FILE
+        success_file, failure_file = _build_status_file_paths(
+            current_dir,
+            old_version,
+            new_version,
+        )
 
         args = [
             str(updater_exe),

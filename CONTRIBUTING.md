@@ -44,12 +44,12 @@
 
 ### 4. Rust 更新器规范 (`updater/`)
 
-`eer_updater.exe` 是应用内热更新的最后执行者，修改时请优先保证安全边界和可回滚性：
+`_internal/eer_updater.exe` 是应用内热更新的最后执行者，修改时请优先保证安全边界和可回滚性：
 
-* **协议向后兼容**：Python 侧生成的 `_plan.json` 与 updater 命令行参数是兼容协议。新增能力应优先添加可选字段，避免旧主程序无法调用新版 updater。
+* **协议保持稳定**：Python 侧生成的 `_plan.json` 与 updater 命令行参数是内部协议。新增能力应优先添加可选字段，避免破坏 installer 与 updater 的调用关系。
 * **路径必须收敛在根目录内**：所有来自 manifest 或 plan 的路径都必须拒绝绝对路径、盘符路径、`..`、根路径和空路径。
 * **失败优先保旧版本可用**：删除或覆盖前必须先备份；复制失败、缺少源文件或路径非法时，应写入失败状态并尽量回滚。
-* **支持 updater 自更新**：更新包中的新版 `eer_updater.exe` 会优先被启动，用于替换安装目录中的旧 updater；不要把 `eer_updater.exe` 加入 protected 列表。
+* **更新器位置固定**：`eer_updater.exe` 必须放在 `_internal/` 下，并参与 manifest 复制；不要把 `_internal/eer_updater.exe` 加入 protected 列表。
 * **测试要求**：涉及路径解析、复制、删除、回滚、protected 规则或 plan schema 的变更，必须补充 Rust 单元测试或 Python 侧计划生成测试。
 
 常用检查命令：
@@ -145,7 +145,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 #### 2.5 安装 Rust 工具链（可选，仅打包时需要）
 
-更新器 `eer_updater.exe` 使用 Rust 编写。如果需要本地构建完整包，需安装 [Rust 工具链](https://rustup.rs/)：
+更新器 `_internal/eer_updater.exe` 使用 Rust 编写。如果需要本地构建完整包，需安装 [Rust 工具链](https://rustup.rs/)：
 
 ```bash
 # 安装 rustup（Windows）
@@ -331,4 +331,4 @@ uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-reco
 打包产物位于 `dist/endfield-essence-recognizer` 目录。
 
 > **注意**：第 3 步需要 Rust 工具链。如果不需要本地构建更新器，可以跳过第 3 步，
-> 但打包产物中将不包含 `eer_updater.exe`，应用内更新功能将无法使用。
+> 但打包产物中将不包含 `_internal/eer_updater.exe`，应用内更新功能将无法使用。

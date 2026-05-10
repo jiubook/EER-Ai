@@ -8,8 +8,8 @@
 - WebSocket 实时下载进度
 - 更新包 SHA-256 校验（当发布资产提供 digest 时）
 - 基于 manifest 的文件级更新
-- 独立 Rust 更新器 `eer_updater.exe`
-- `eer_updater.exe` 自更新
+- 独立 Rust 更新器 `_internal/eer_updater.exe`
+- 更新器随 manifest 复制并可被后续更新替换
 - 失败时尽力回滚到旧版本文件
 
 ## 核心原则
@@ -17,10 +17,10 @@
 热更新的第一目标不是“尽快覆盖文件”，而是“安全地把安装目录收敛到目标版本”。因此需要遵守以下原则：
 
 1. **目标状态明确**：发布包中的 `_internal/manifest.json` 声明该版本应包含的文件和 protected 路径。
-2. **用户数据不动**：`config.json`、`profiles.json`、`logs/`、`screenshots/`、`_updates/`、`_update_temp/`、`.env` 等路径不会被删除或覆盖。
+2. **用户数据不动**：`config.json`、`profiles.json`、`logs/`、`screenshots/`、`.env` 等路径不会被删除或覆盖；`_updates/` 和系统临时目录中的更新解压目录会在更新完成后尽量清理。
 3. **路径不可越界**：Python 解压阶段和 Rust 执行阶段都会拒绝路径穿越。
 4. **失败优先保旧版本可用**：删除或覆盖旧文件前先备份；复制失败、源文件缺失或路径非法时写入失败状态并尽力回滚。
-5. **更新器可自更新**：优先运行更新包中的新版 `eer_updater.exe`，由新版更新器替换安装目录中的旧 updater。
+5. **更新器放在内部目录**：`eer_updater.exe` 固定放在 `_internal/` 下，避免用户在安装根目录误启动。
 
 ## 模块结构
 
@@ -43,7 +43,7 @@
 ### 发布辅助
 
 - `scripts/generate_manifest.py`：扫描 PyInstaller 产物并生成 `_internal/manifest.json`。
-- `main.spec`：PyInstaller 打包脚本，会在本地存在 release updater 时复制 `eer_updater.exe` 到 dist 根目录。
+- `main.spec`：PyInstaller 打包脚本，会在本地存在 release updater 时复制 `_internal/eer_updater.exe` 到 dist 的 `_internal` 目录。
 
 ## Manifest 与 Plan
 
@@ -56,7 +56,7 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
   "version": "0.9.0",
   "files": [
     "endfield-essence-recognizer.exe",
-    "eer_updater.exe",
+    "_internal/eer_updater.exe",
     "_internal/python3.dll",
     "_internal/manifest.json",
     "README.md"
@@ -66,16 +66,14 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
     "profiles.json",
     "logs/",
     "screenshots/",
-    "_updates/",
-    "_update_temp/",
     ".env"
   ]
 }
 ```
 
-`eer_updater.exe` 必须在 `files` 中，但不能在 `protected` 中，否则无法自更新。
+`_internal/eer_updater.exe` 必须在 `files` 中，但不能在 `protected` 中，否则后续无法替换更新器。
 
-### `_update_temp/_plan.json`
+### 临时解压目录中的 `_plan.json`
 
 安装开始前，Python 侧会把 manifest 转换为 updater 可执行的 plan：
 
@@ -83,12 +81,12 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 {
   "package_type": "manifest",
   "remove_list": ["_internal/old.dll"],
-  "copy_list": ["endfield-essence-recognizer.exe", "eer_updater.exe"],
+  "copy_list": ["endfield-essence-recognizer.exe", "_internal/eer_updater.exe"],
   "protected_list": ["config.json", ".env"]
 }
 ```
 
-兼容要求：`_plan.json` 是 Python installer 与 Rust updater 之间的协议。新增字段必须向后兼容，不能破坏旧主程序调用新版 updater。
+协议要求：`_plan.json` 是 Python installer 与 Rust updater 之间的协议。新增字段应优先保持可选，避免破坏双方调用关系。
 
 ## 更新流程
 
@@ -96,28 +94,30 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 2. 后端检查版本并确定下载地址。
 3. `download_update()` 下载 zip 到 `_updates/`，前端通过 WebSocket 显示进度。
 4. 如果可获得 SHA-256，`UpdateManager` 校验下载包完整性。
-5. `install_update()` 解压 zip 到 `_update_temp/`，并校验 zip 条目不能路径穿越。
+5. `install_update()` 解压 zip 到系统临时目录中的独立更新目录，并校验 zip 条目不能路径穿越。
 6. Python 读取 `_internal/manifest.json`，计算 `remove_list`、`copy_list`、`protected_list`。
-7. Python 写入 `_update_temp/_plan.json`。
-8. Python 优先启动 `_update_temp/eer_updater.exe`；如果更新包没有 updater，才回退到安装目录中的 `eer_updater.exe`。
+7. Python 写入临时解压目录中的 `_plan.json`。
+8. Python 优先启动临时解压目录中的 `_internal/eer_updater.exe`；如果更新包没有 updater，才回退到安装目录中的 `_internal/eer_updater.exe`。
 9. 当前主程序延迟退出，Rust updater 等待父进程退出。
 10. Rust updater 拒绝安装在盘符根目录的场景，并校验 plan 中所有路径不能越界。
-11. 需要删除或覆盖的旧文件先移动到 `_update_temp/_backup/`。
-12. Rust updater 按 `copy_list` 从 `_update_temp/` 复制新文件到安装目录。
-13. 如果复制失败、源文件缺失或路径非法，Rust updater 删除本次新增文件并从 `_backup/` 恢复旧文件。
-14. 更新成功后写入 `_update_success.txt`，删除失败状态文件、更新包，并重启主程序。
-15. 如果 updater 正从 `_update_temp/` 运行，为避免 Windows 删除正在运行的 exe，临时目录会延后到下次更新前清理。
+11. 需要删除或覆盖的旧文件先移动到安装目录同盘的 `_update_backup_{pid}/`，避免 Windows 跨盘 `rename` 失败。
+12. Rust updater 按 `copy_list` 从临时解压目录复制新文件到安装目录。
+13. 如果复制失败、源文件缺失或路径非法，Rust updater 删除本次新增文件并从 `_update_backup_{pid}/` 恢复旧文件。
+14. 更新成功后写入 `logs/{旧版本}_{新版本}_updater_success.txt`，删除同版本失败状态文件、更新包，并重启主程序。
+15. 如果 updater 正从临时解压目录运行，会在退出后延迟删除该目录；`_updates/` 在更新包删除后也会尝试删除空目录。
+16. `_update_backup_{pid}/` 会在更新成功或失败回滚后删除；如果 Windows 暂时拒绝访问，会安排延迟重试，并在下次更新开始前再次清理遗留目录。
+17. 每次更新使用 `update-{时间戳}-{进程ID}` 形式的唯一临时目录，并在开始前清理超过 24 小时的旧更新临时目录。
 
-## 自更新说明
+## 更新器位置与运行方式
 
-Windows 不允许删除或替换正在运行的 exe，因此不能让安装目录中的旧 `eer_updater.exe` 直接替换自己。当前方案是：
+`eer_updater.exe` 不是给用户直接打开的程序，因此打包产物中固定放在 `_internal/` 下：
 
-- 更新包内携带新版 `eer_updater.exe`。
-- Python installer 优先启动 `_update_temp/eer_updater.exe`。
-- 新版 updater 作为独立进程运行，安装目录中的旧 updater 没有被占用。
-- 新版 updater 复制 `eer_updater.exe` 到安装目录，完成自更新。
-
-这意味着新版 updater 必须能理解旧主程序生成的 `_plan.json`。如需升级 plan 协议，请只添加可选字段，并保持旧字段语义不变。
+- 发布包路径：`_internal/eer_updater.exe`。
+- 解压后的运行路径：系统临时目录中的 `_internal/eer_updater.exe`。
+- 安装目录回退路径：`_internal/eer_updater.exe`。
+- 该文件必须写入 manifest 的 `files`，并且不能加入 `protected`。
+- 如果下载到的测试包不包含 updater，installer 会保留当前安装目录里的 `_internal/eer_updater.exe`，避免移动正在运行的更新器。
+- 临时解压目录使用唯一名称，避免上一次清理失败影响下一次更新。
 
 ## 安全特性
 
@@ -129,8 +129,9 @@ Windows 不允许删除或替换正在运行的 exe，因此不能让安装目�
 - `profiles.json`：多账号配置
 - `logs/`：运行日志
 - `screenshots/`：用户截图
-- `_updates/`：下载缓存
-- `_update_temp/`：临时解压目录
+- `_updates/`：下载缓存；更新成功后会删除本次下载包，并尝试删除空目录
+- 系统临时目录中的更新解压目录：使用唯一目录名，更新成功后会尽量删除；下次更新会清理超过 24 小时的旧目录
+- `_update_backup_{pid}/`：安装目录同盘的临时回滚备份；更新结束后会尽量删除，失败时会延迟重试并在下次更新前清理
 - `.env`：环境变量配置
 
 修改 protected 列表时，请同步更新单元测试。
@@ -142,8 +143,9 @@ Windows 不允许删除或替换正在运行的 exe，因此不能让安装目�
 
 ### 回滚策略
 
-- 删除和覆盖前先移动到 `_backup/`。
-- 若 copy 阶段失败，先删除本次新增文件，再把 `_backup/` 中的旧文件恢复到原位置。
+- 删除和覆盖前先移动到 `_update_backup_{pid}/`。
+- 若 copy 阶段失败，先删除本次新增文件，再把 `_update_backup_{pid}/` 中的旧文件恢复到原位置。
+- `_update_backup_{pid}/` 删除前会清理只读属性；若被杀毒软件或系统短暂占用导致删除失败，会安排后台延迟重试。
 - 回滚是“尽力而为”：权限错误、磁盘错误或杀进程仍可能导致手动修复需求。
 
 ## API 接口
@@ -203,7 +205,7 @@ cargo test --manifest-path updater/Cargo.toml
 1. 更新 `pyproject.toml` 中的版本号。
 2. 构建前端产物。
 3. 构建 release updater：`cargo build --release --manifest-path updater/Cargo.toml`。
-4. 使用 PyInstaller 构建应用，`main.spec` 会复制 release updater 到 dist 根目录。
+4. 使用 PyInstaller 构建应用，`main.spec` 会复制 release updater 到 dist 的 `_internal` 目录。
 5. 执行 `scripts/generate_manifest.py` 写入 `_internal/manifest.json`。
 6. 打包 zip 并创建 GitHub Release。
 7. 用户端检查到新版本后即可应用内更新。
@@ -218,15 +220,19 @@ uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-reco
 
 ### 更新器缺失
 
-如果安装目录中没有 `eer_updater.exe`，应用内更新会失败。请确认发布包中包含该文件，并且构建流程已先执行 Rust release build。
+如果安装目录中没有 `_internal/eer_updater.exe`，应用内更新会失败。请确认发布包中包含该文件，并且构建流程已先执行 Rust release build。
 
 ### 更新失败后如何排查
 
 - 查看 `logs/updater.log`。
-- 查看安装目录中的 `_update_failure.txt`。
+- 查看 `logs/{旧版本}_{新版本}_updater_failure.txt`。
 - 检查更新包是否缺少 manifest 声明的文件。
 - 检查是否被杀毒软件、权限策略或磁盘空间问题阻止写入。
 
-### 为什么 `_update_temp/` 有时不会立刻删除
+### 为什么临时解压目录有时不会立刻删除
 
-当新版 updater 从 `_update_temp/` 运行时，Windows 会锁定正在运行的 exe。为支持 updater 自更新，临时目录会延后清理，下一次更新开始前 Python installer 会先删除旧的 `_update_temp/`。
+当 updater 从临时解压目录运行时，Windows 会锁定正在运行的 exe。为避免删除正在运行的文件，updater 会启动延迟清理命令，在自身退出后删除该目录。安装目录下历史遗留的 `_update_temp/` 会在安装开始前尝试清理。
+
+### 为什么 `_update_backup_{pid}` 有时不会立刻删除
+
+`_update_backup_{pid}/` 是更新过程中的临时回滚备份，必须放在安装目录同盘，否则 Windows 无法使用 `rename` 快速移动旧文件。更新结束后 updater 会清理该目录；如果 Windows Defender、杀毒软件或系统文件句柄短暂占用旧 DLL/PYD，可能先返回“拒绝访问”。这种情况下 updater 会安排延迟清理，并且下次更新开始前会再次清理遗留的 `_update_backup_*` 目录。

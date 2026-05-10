@@ -85,8 +85,9 @@ for path in (Path(DISTPATH) / NAME / "_internal" / "cv2").glob(
 ):
     path.unlink()
 
-# 拷贝 eer_updater.exe 到 dist 目录（本地构建时从 updater/target/release/ 复制）
+# 拷贝 eer_updater.exe 到 _internal 目录（本地构建时从 updater/target/release/ 复制）
 updater_src = Path("updater/target/release/eer_updater.exe")
-updater_dst = Path(DISTPATH) / NAME / "eer_updater.exe"
+updater_dst = Path(DISTPATH) / NAME / "_internal" / "eer_updater.exe"
 if updater_src.is_file():
+    updater_dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(updater_src, updater_dst)

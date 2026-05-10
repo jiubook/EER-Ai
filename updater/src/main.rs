@@ -17,6 +17,9 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Threading::{
     OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
@@ -28,6 +31,9 @@ use windows_sys::Win32::System::Threading::{
 
 const MAX_LOG_SIZE: u64 = 4 * 1024 * 1024; // 4MB
 const PARENT_WAIT_TIMEOUT_MS: u32 = 100;
+const BACKUP_DIR_PREFIX: &str = "_update_backup_";
+#[cfg(windows)]
+const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
 
 // ---------------------------------------------------------------------------
 // Plan JSON 结构
@@ -159,27 +165,28 @@ fn try_resolve_path_under_root(root: &Path, relative: &str) -> Option<PathBuf> {
     if trimmed.len() >= 2 && trimmed.as_bytes()[1] == b':' {
         return None;
     }
-    let mut has_normal_component = false;
+    let mut safe_relative = PathBuf::new();
     for component in relative_path.components() {
         match component {
-            Component::Normal(_) => has_normal_component = true,
+            Component::Normal(part) => safe_relative.push(part),
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
         }
     }
-    if !has_normal_component {
+    if safe_relative.as_os_str().is_empty() {
         return None;
     }
 
-    let combined = root.join(trimmed.replace('/', "\\"));
-    // 规范化
-    let canonical = match fs::canonicalize(&combined) {
-        Ok(p) => p,
-        Err(_) => combined,
-    };
     let root_canonical = match fs::canonicalize(root) {
         Ok(p) => p,
         Err(_) => root.to_path_buf(),
+    };
+    let combined = root.join(&safe_relative);
+    // Existing paths can be canonicalized directly. Missing copy targets are
+    // resolved from the canonical root to avoid case/prefix mismatches on Windows.
+    let canonical = match fs::canonicalize(&combined) {
+        Ok(p) => p,
+        Err(_) => root_canonical.join(&safe_relative),
     };
 
     if canonical.starts_with(&root_canonical) {
@@ -220,10 +227,46 @@ fn wait_for_parent_process(parent_pid: u32) {
 // 文件操作
 // ---------------------------------------------------------------------------
 
+#[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)]
+fn clear_readonly_recursive(path: &Path) {
+    if path.is_dir()
+        && let Ok(entries) = fs::read_dir(path)
+    {
+        for entry in entries.flatten() {
+            clear_readonly_recursive(&entry.path());
+        }
+    }
+
+    if let Ok(metadata) = fs::metadata(path) {
+        let mut permissions = metadata.permissions();
+        if permissions.readonly() {
+            // Windows read-only files can make remove_dir_all return access denied.
+            permissions.set_readonly(false);
+            let _ = fs::set_permissions(path, permissions);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn clear_readonly_recursive(_path: &Path) {}
+
 /// 递归删除目录（忽略错误）
-fn remove_dir_all_safe(path: &Path) {
-    if path.exists() {
-        let _ = fs::remove_dir_all(path);
+fn remove_dir_all_safe(path: &Path, logger: &mut Logger) -> bool {
+    if !path.exists() {
+        return true;
+    }
+
+    clear_readonly_recursive(path);
+    match fs::remove_dir_all(path) {
+        Ok(_) => {
+            logger.log(&format!("已删除目录: {}", path.display()));
+            true
+        }
+        Err(e) => {
+            logger.log(&format!("删除目录失败: {} ({e})", path.display()));
+            false
+        }
     }
 }
 
@@ -238,6 +281,74 @@ fn remove_file_safe(path: &Path) {
 fn try_remove_empty_dir(path: &Path) {
     if path.is_dir() {
         let _ = fs::remove_dir(path);
+    }
+}
+
+#[cfg(windows)]
+fn schedule_remove_dir_after_exit(path: &Path, logger: &mut Logger) {
+    let dir = path.to_string_lossy();
+    let script = format!(
+        "for /l %i in (1,1,20) do (rmdir /s /q \"{dir}\" 2>NUL && exit /b 0 & ping 127.0.0.1 -n 2 >NUL)"
+    );
+    match Command::new("cmd")
+        .args(["/C", &script])
+        .creation_flags(CREATE_NO_WINDOW_FLAG)
+        .spawn()
+    {
+        Ok(_) => logger.log(&format!("已安排延迟清理目录: {}", path.display())),
+        Err(e) => logger.log(&format!("安排延迟清理目录失败: {} ({e})", path.display())),
+    }
+}
+
+#[cfg(not(windows))]
+fn schedule_remove_dir_after_exit(path: &Path, logger: &mut Logger) {
+    logger.log(&format!("当前平台不支持延迟清理目录: {}", path.display()));
+}
+
+fn build_backup_dir(root_dir: &Path) -> PathBuf {
+    let pid = std::process::id();
+    for index in 0..=999 {
+        let name = if index == 0 {
+            format!("{BACKUP_DIR_PREFIX}{pid}")
+        } else {
+            format!("{BACKUP_DIR_PREFIX}{pid}_{index}")
+        };
+        let path = root_dir.join(name);
+        if !path.exists() {
+            return path;
+        }
+    }
+    root_dir.join(format!("{BACKUP_DIR_PREFIX}{pid}_fallback"))
+}
+
+fn is_update_backup_dir(path: &Path) -> bool {
+    path.is_dir()
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.starts_with(BACKUP_DIR_PREFIX))
+            .unwrap_or(false)
+}
+
+fn remove_dir_all_or_schedule(path: &Path, logger: &mut Logger) {
+    if !remove_dir_all_safe(path, logger) && path.exists() {
+        logger.log("目录直接清理未完成，安排延迟重试");
+        schedule_remove_dir_after_exit(path, logger);
+    }
+}
+
+fn cleanup_stale_backup_dirs(root_dir: &Path, logger: &mut Logger) {
+    let Ok(entries) = fs::read_dir(root_dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_update_backup_dir(&path) {
+            continue;
+        }
+        logger.log(&format!("清理上次遗留的备份目录: {}", path.display()));
+        remove_dir_all_or_schedule(&path, logger);
     }
 }
 
@@ -422,10 +533,21 @@ fn run_with_args(args: Vec<String>) -> i32 {
     ));
 
     // 阶段 4：执行更新
-    let backup_dir = extract_dir.join("_backup");
-    let _ = fs::create_dir_all(&backup_dir);
+    cleanup_stale_backup_dirs(&root_dir, &mut logger);
 
-    let protected_set: HashSet<&str> = plan.protected_list.iter().map(|s| s.as_str()).collect();
+    // Backup must stay on the same drive as root_dir because Windows cannot
+    // rename files across drives. The extract dir may live in the system temp
+    // directory on a different drive.
+    let backup_dir = build_backup_dir(&root_dir);
+    let _ = fs::create_dir_all(&backup_dir);
+    logger.log(&format!("BackupDir: {}", backup_dir.display()));
+
+    let protected_normalized: Vec<String> = plan
+        .protected_list
+        .iter()
+        .map(|s| s.replace('/', "\\"))
+        .collect();
+    let protected_set: HashSet<&str> = protected_normalized.iter().map(|s| s.as_str()).collect();
     let mut success = true;
     let mut failure_reason = String::new();
     // 记录本次新增的文件；如果后续复制失败，先删除这些新文件再恢复旧备份。
@@ -447,7 +569,7 @@ fn run_with_args(args: Vec<String>) -> i32 {
             if let Err(e) = move_to_backup(&target, &backup_target) {
                 logger.log(&format!("  备份失败: {rel_normalized} ({e})，尝试直接删除"));
                 if target.is_dir() {
-                    remove_dir_all_safe(&target);
+                    remove_dir_all_safe(&target, &mut logger);
                 } else {
                     remove_file_safe(&target);
                 }
@@ -560,6 +682,7 @@ fn run_with_args(args: Vec<String>) -> i32 {
         logger.log("开始回滚已备份文件...");
         let restored = restore_backup_recursive(&root_dir, &backup_dir, &mut logger);
         logger.log(&format!("已回滚 {restored} 个文件"));
+        remove_dir_all_or_schedule(&backup_dir, &mut logger);
         write_status_file(&failure_file, &failure_reason);
         return 2;
     }
@@ -592,14 +715,21 @@ fn run_with_args(args: Vec<String>) -> i32 {
         .map(|p| p.starts_with(&extract_dir))
         .unwrap_or(false);
     if running_from_extract {
-        // 自更新时当前进程位于 `_update_temp`，Windows 不允许删除正在运行的 exe。
-        // 临时目录会在下一次更新开始前由 Python 侧清理。
-        logger.log("更新器正在临时目录中运行，延后清理临时目录");
+        logger.log("更新器正在临时目录中运行，退出后延迟清理临时目录");
+        schedule_remove_dir_after_exit(&extract_dir, &mut logger);
     } else {
-        remove_dir_all_safe(&extract_dir);
+        remove_dir_all_safe(&extract_dir, &mut logger);
+        if extract_dir.exists() {
+            logger.log("临时目录直接清理未完成，安排延迟重试");
+            schedule_remove_dir_after_exit(&extract_dir, &mut logger);
+        }
     }
     remove_file_safe(&plan_file);
     remove_file_safe(&package_path);
+    if let Some(package_dir) = package_path.parent() {
+        try_remove_empty_dir(package_dir);
+    }
+    remove_dir_all_or_schedule(&backup_dir, &mut logger);
 
     // 阶段 6：写入成功状态
     write_status_file(&success_file, "succeeded");
@@ -685,6 +815,23 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn resolve_accepts_missing_file_when_root_casing_differs() {
+        let base = test_dir("case-root");
+        let root = base.join("MixedCaseRoot");
+        fs::create_dir_all(&root).unwrap();
+        let canonical_root = fs::canonicalize(&root).unwrap();
+        let lower_root = PathBuf::from(canonical_root.to_string_lossy().to_lowercase());
+
+        let resolved = try_resolve_path_under_root(&lower_root, "README.md").unwrap();
+
+        assert!(resolved.starts_with(&canonical_root));
+        assert!(resolved.ends_with("README.md"));
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
     fn missing_copy_source_fails_and_removes_new_files() {
         let base = test_dir("missing-source");
         let root = base.join("root");
@@ -765,6 +912,27 @@ mod tests {
 
         assert_eq!(code, 2);
         assert_eq!(fs::read_to_string(root.join("app.dll")).unwrap(), "old");
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn stale_backup_cleanup_removes_backup_dirs() {
+        let base = test_dir("stale-backup");
+        let root = base.join("root");
+        let backup = root.join(format!("{BACKUP_DIR_PREFIX}12345"));
+        fs::create_dir_all(backup.join("_internal")).unwrap();
+        let stale_file = backup.join("_internal").join("old.dll");
+        fs::write(&stale_file, "old").unwrap();
+
+        let mut permissions = fs::metadata(&stale_file).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&stale_file, permissions).unwrap();
+
+        let mut logger = Logger::init(&root.join("updater.log"));
+        cleanup_stale_backup_dirs(&root, &mut logger);
+
+        assert!(!backup.exists());
 
         let _ = fs::remove_dir_all(base);
     }

@@ -41,7 +41,7 @@ def fake_dist_dir(tmp_path: Path) -> Path:
     (resources / "images" / "error.webp").write_text("webp")
 
     (dist / "README.md").write_text("readme")
-    (dist / "eer_updater.exe").write_text("updater")
+    (internal / "eer_updater.exe").write_text("updater")
     (dist / "config.json").write_text("{}")  # 用户配置，应该被 protected
 
     return dist
@@ -58,7 +58,7 @@ class TestScanDistDirectory:
         assert "_internal/cv2/cv2.pyd" in files
         assert "resources/images/error.webp" in files
         assert "README.md" in files
-        assert "eer_updater.exe" in files
+        assert "_internal/eer_updater.exe" in files
         assert "config.json" in files
 
     def test_scan_uses_forward_slashes(self, fake_dist_dir: Path) -> None:
@@ -94,7 +94,7 @@ class TestGenerateManifest:
         assert manifest["version"] == "2.3.4"
 
     def test_manifest_files_count(self, fake_dist_dir: Path) -> None:
-        """文件数量应匹配实际文件数 + manifest.json + eer_updater.exe 自身。"""
+        """文件数量应匹配实际文件数 + manifest.json + _internal/eer_updater.exe 自身。"""
         manifest = generate_manifest(fake_dist_dir, "1.0.0")
         # 7 个实际文件 + manifest.json 自身
         assert len(manifest["files"]) == 8
@@ -105,9 +105,9 @@ class TestGenerateManifest:
         assert MANIFEST_RELATIVE_PATH in manifest["files"]
 
     def test_manifest_includes_updater(self, fake_dist_dir: Path) -> None:
-        """dist 中的 eer_updater.exe 应进入 files 列表。"""
+        """dist 中的 _internal/eer_updater.exe 应进入 files 列表。"""
         manifest = generate_manifest(fake_dist_dir, "1.0.0")
-        assert "eer_updater.exe" in manifest["files"]
+        assert "_internal/eer_updater.exe" in manifest["files"]
 
     def test_manifest_protected_defaults(self, fake_dist_dir: Path) -> None:
         """默认应使用 PROTECTED_PATHS 作为保护列表。"""
@@ -150,8 +150,8 @@ class TestProtectedPaths:
         assert "screenshots/" in PROTECTED_PATHS
 
     def test_updater_exe_is_not_protected(self) -> None:
-        """eer_updater.exe 需要参与复制，才能支持自更新。"""
-        assert "eer_updater.exe" not in PROTECTED_PATHS
+        """_internal/eer_updater.exe 需要参与复制，才能支持更新器替换。"""
+        assert "_internal/eer_updater.exe" not in PROTECTED_PATHS
 
 
 class TestDeleteListGeneration:
@@ -356,6 +356,165 @@ class TestProtectedBackupList:
         # 文件条目应在列表中
         assert "config.json" in entries
         assert ".env" in entries
+
+
+class TestStatusFilePaths:
+    """更新状态文件路径测试。"""
+
+    def test_status_files_are_written_under_logs_with_versions(
+        self, tmp_path: Path
+    ) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            _build_status_file_paths,
+        )
+
+        success_file, failure_file = _build_status_file_paths(
+            tmp_path,
+            "0.8.0",
+            "0.9.0",
+        )
+
+        assert success_file == tmp_path / "logs" / "0.8.0_0.9.0_updater_success.txt"
+        assert failure_file == tmp_path / "logs" / "0.8.0_0.9.0_updater_failure.txt"
+
+    def test_status_file_versions_are_sanitized(self, tmp_path: Path) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            _build_status_file_paths,
+        )
+
+        success_file, _ = _build_status_file_paths(tmp_path, "0/8 beta", "0:9")
+
+        assert success_file.name == "0_8_beta_0_9_updater_success.txt"
+
+    def test_installed_manifest_version_is_read_from_internal_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            MANIFEST_RELATIVE_PATH,
+            _load_installed_manifest_version,
+        )
+
+        manifest_path = tmp_path / MANIFEST_RELATIVE_PATH
+        manifest_path.parent.mkdir()
+        manifest_path.write_text(json.dumps({"version": "1.2.3"}), encoding="utf-8")
+
+        assert _load_installed_manifest_version(tmp_path) == "1.2.3"
+
+
+class TestUpdaterProtection:
+    """更新包缺少 updater 时应保留当前安装的 updater。"""
+
+    def test_installed_updater_is_protected_when_package_lacks_updater(
+        self, tmp_path: Path
+    ) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            UPDATER_RELATIVE_PATH,
+            _protect_installed_updater_when_package_lacks_it,
+        )
+
+        remove_list, protected_list = _protect_installed_updater_when_package_lacks_it(
+            tmp_path,
+            [UPDATER_RELATIVE_PATH, "_internal/python3.dll"],
+            ["config.json"],
+        )
+
+        assert UPDATER_RELATIVE_PATH not in remove_list
+        assert "_internal/python3.dll" in remove_list
+        assert UPDATER_RELATIVE_PATH in protected_list
+
+    def test_packaged_updater_is_not_protected_when_package_contains_updater(
+        self, tmp_path: Path
+    ) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            UPDATER_RELATIVE_PATH,
+            _protect_installed_updater_when_package_lacks_it,
+        )
+
+        updater = tmp_path / UPDATER_RELATIVE_PATH
+        updater.parent.mkdir()
+        updater.write_text("updater")
+
+        remove_list, protected_list = _protect_installed_updater_when_package_lacks_it(
+            tmp_path,
+            [UPDATER_RELATIVE_PATH],
+            ["config.json"],
+        )
+
+        assert remove_list == [UPDATER_RELATIVE_PATH]
+        assert protected_list == ["config.json"]
+
+
+class TestUpdateTempDir:
+    """更新解压临时目录测试。"""
+
+    def test_update_temp_dir_is_unique_and_outside_install_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            _build_update_temp_dir,
+        )
+
+        monkeypatch.setattr(
+            "src.endfield_essence_recognizer.updater.installer.time.strftime",
+            lambda _fmt: "20260510-143601",
+        )
+        monkeypatch.setattr(
+            "src.endfield_essence_recognizer.updater.installer.subprocess.os.getpid",
+            lambda: 12345,
+        )
+
+        temp_dir = _build_update_temp_dir(tmp_path)
+
+        assert not temp_dir.is_relative_to(tmp_path)
+        assert temp_dir.name == "update-20260510-143601-12345"
+
+    def test_legacy_install_temp_dir_is_cleaned(self, tmp_path: Path) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            _cleanup_legacy_install_temp_dir,
+        )
+
+        legacy_temp = tmp_path / "_update_temp"
+        legacy_temp.mkdir()
+        (legacy_temp / "old.tmp").write_text("old")
+
+        _cleanup_legacy_install_temp_dir(tmp_path)
+
+        assert not legacy_temp.exists()
+
+    def test_stale_external_update_temp_dirs_are_cleaned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            UPDATE_TEMP_PARENT_NAME,
+            _cleanup_stale_update_temp_dirs,
+        )
+
+        monkeypatch.setattr(
+            "src.endfield_essence_recognizer.updater.installer.tempfile.gettempdir",
+            lambda: str(tmp_path),
+        )
+        parent = tmp_path / UPDATE_TEMP_PARENT_NAME
+        stale = parent / "update-20260509-010101-1"
+        fresh = parent / "update-20260510-143601-2"
+        unrelated = parent / "keep-this"
+        stale.mkdir(parents=True)
+        fresh.mkdir()
+        unrelated.mkdir()
+        (stale / "old.tmp").write_text("old")
+        (fresh / "new.tmp").write_text("new")
+        (unrelated / "keep.tmp").write_text("keep")
+        old_time = 1000.0
+        fresh_time = 2000.0
+        import os
+
+        os.utime(stale, (old_time, old_time))
+        os.utime(fresh, (fresh_time, fresh_time))
+
+        _cleanup_stale_update_temp_dirs(now=2000.0, stale_seconds=500)
+
+        assert not stale.exists()
+        assert fresh.exists()
+        assert unrelated.exists()
 
 
 class TestPathTraversalProtection:

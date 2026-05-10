@@ -64,7 +64,8 @@ jobs:
       - name: Copy updater to dist
         shell: pwsh
         run: |
-          Copy-Item "updater/target/release/eer_updater.exe" "dist/endfield-essence-recognizer/eer_updater.exe"
+          New-Item -ItemType Directory -Force "dist/endfield-essence-recognizer/_internal" | Out-Null
+          Copy-Item "updater/target/release/eer_updater.exe" "dist/endfield-essence-recognizer/_internal/eer_updater.exe"
 
       - name: Generate update manifest
         run: |
