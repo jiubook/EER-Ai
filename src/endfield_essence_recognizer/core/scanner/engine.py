@@ -305,9 +305,12 @@ class ScannerEngine:
 
             profile_manager = get_profile_manager()
             profile = profile_manager.get_active_profile()
+            for weapon_id, priority in profile.weapon_priorities.items():
+                if weapon_id in weapon_ids:
+                    priority_map[weapon_id] = priority or 0
             for entry in profile.treasure_matrix:
                 if entry.weapon_id in weapon_ids:
-                    priority_map[entry.weapon_id] = entry.priority or 0
+                    priority_map.setdefault(entry.weapon_id, entry.priority or 0)
         except Exception:
             pass
 

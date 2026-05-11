@@ -59,6 +59,9 @@ class ProfileData(BaseModel):
     )
     """武器总览的星级过滤器配置。"""
 
+    weapon_priorities: dict[str, int] = Field(default_factory=dict)
+    """武器优先级配置，允许未拥有宝藏基质的武器也设置优先级。"""
+
 
 class ProfileCollection(BaseModel):
     """所有账号的集合。"""

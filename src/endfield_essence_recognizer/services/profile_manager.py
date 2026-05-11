@@ -215,6 +215,9 @@ class ProfileManager:
         """
         profile = self.get_active_profile()
         profile.treasure_matrix = entries
+        for entry in entries:
+            if entry.priority > 0:
+                profile.weapon_priorities[entry.weapon_id] = entry.priority
         self.save()
         return profile
 
@@ -230,6 +233,10 @@ class ProfileManager:
             更新后的 ProfileData。
         """
         profile = self.get_active_profile()
+        if entry.weapon_id in profile.weapon_priorities:
+            entry.priority = profile.weapon_priorities[entry.weapon_id]
+        elif entry.priority > 0:
+            profile.weapon_priorities[entry.weapon_id] = entry.priority
         profile.treasure_matrix = [
             e for e in profile.treasure_matrix if e.weapon_id != entry.weapon_id
         ]
@@ -264,5 +271,29 @@ class ProfileManager:
         """
         profile = self.get_active_profile()
         profile.weapon_overview_filters = filters
+        self.save()
+        return profile
+
+    def update_weapon_priority(self, weapon_id: str, priority: int) -> ProfileData:
+        """更新单个武器优先级，未拥有宝藏基质的武器也会保存。
+
+        Args:
+            weapon_id: 武器 ID。
+            priority: 优先级。0 表示清除手动设置并回到稀有度默认值。
+
+        Returns:
+            更新后的 ProfileData。
+        """
+        profile = self.get_active_profile()
+        if priority > 0:
+            profile.weapon_priorities[weapon_id] = priority
+        else:
+            profile.weapon_priorities.pop(weapon_id, None)
+
+        for entry in profile.treasure_matrix:
+            if entry.weapon_id == weapon_id:
+                entry.priority = priority
+                break
+
         self.save()
         return profile

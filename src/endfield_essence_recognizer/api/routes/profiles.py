@@ -259,3 +259,17 @@ async def update_weapon_overview_filters(
 ) -> ProfileData:
     """更新当前激活账号的武器总览过滤器配置。"""
     return manager.update_weapon_overview_filters(request.filters)
+
+
+class UpdateWeaponPriorityRequest(BaseModel):
+    weapon_id: str
+    priority: int = Field(default=0, ge=0, le=9)
+
+
+@router.post("/weapon_priority")
+async def update_weapon_priority(
+    request: UpdateWeaponPriorityRequest,
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> ProfileData:
+    """更新当前激活账号的单个武器优先级。"""
+    return manager.update_weapon_priority(request.weapon_id, request.priority)

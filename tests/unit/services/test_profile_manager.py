@@ -161,6 +161,18 @@ def test_treasure_matrix_operations(profile_manager: ProfileManager):
     assert matrix[0].weapon_id == "wpn_002"
 
 
+def test_update_weapon_priority_without_matrix(profile_manager: ProfileManager):
+    """测试未拥有宝藏基质的武器也可以保存优先级。"""
+    profile_manager.load()
+
+    profile = profile_manager.update_weapon_priority("wpn_003", 7)
+    assert profile.weapon_priorities["wpn_003"] == 7
+    assert profile.treasure_matrix == []
+
+    profile = profile_manager.update_weapon_priority("wpn_003", 0)
+    assert "wpn_003" not in profile.weapon_priorities
+
+
 def test_persistence(temp_profiles_file: Path):
     """测试账号配置持久化到磁盘。"""
     manager1 = ProfileManager(temp_profiles_file)

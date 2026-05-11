@@ -26,6 +26,7 @@ export interface ProfileData {
     '5star': boolean
     '6star': boolean
   }
+  weapon_priorities?: Record<string, number>
 }
 
 export interface ProfileCollection {
@@ -207,6 +208,20 @@ export function useProfiles() {
     }
   }
 
+  async function updateWeaponPriority(weaponId: string, priority: number) {
+    try {
+      const res = await fetch('/api/profiles/weapon_priority', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weapon_id: weaponId, priority }),
+      })
+      if (!res.ok) throw new Error('Failed to update weapon priority')
+      await fetchProfiles()
+    } catch (error) {
+      _handleError('更新武器优先级失败', error)
+    }
+  }
+
   return {
     collection,
     isLoaded,
@@ -224,5 +239,6 @@ export function useProfiles() {
     removeTreasureMatrixEntry,
     getBatchFarmingRecommendations,
     updateWeaponOverviewFilters,
+    updateWeaponPriority,
   }
 }

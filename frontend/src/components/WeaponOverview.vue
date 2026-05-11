@@ -84,19 +84,18 @@
 
               <!-- 满级的彩虹边框 -->
               <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
-
-              <!-- 可切换标记 -->
-              <v-chip
-                v-if="isSwitchable(weaponId)"
-                class="switchable-badge"
-                color="warning"
-                size="x-small"
-                variant="flat"
-              >
-                可切换
-              </v-chip>
             </div>
 
+            <!-- 可切换标记放在灰色滤镜容器外，避免被 opacity/filter 叠加 -->
+            <v-chip
+              v-if="isSwitchable(weaponId)"
+              class="switchable-badge"
+              color="warning"
+              size="x-small"
+              variant="flat"
+            >
+              可切换
+            </v-chip>
           </div>
         </div>
       </template>
@@ -204,17 +203,19 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
 import ItemIcon from '@/components/ItemIcon.vue'
-import { useProfiles } from '@/composables/useProfiles'
+import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
 
 const { weaponTypes, weaponsMap } = useStaticData()
 const {
+  activeProfile,
   treasureMatrix,
   addTreasureMatrixEntry,
   removeTreasureMatrixEntry,
   updateTreasureMatrix,
+  updateWeaponPriority,
 } = useProfiles()
 const { selectedRarities } = useRarityFilters()
 
@@ -338,7 +339,7 @@ function isSwitchable(weaponId: string): boolean {
   const myPriority = getWeaponPriority(weaponId)
   const sameWeapons = getSameStatWeapons(weaponId)
   return sameWeapons.some(
-    (id) => isWeaponOwned(id) && getWeaponPriority(id) > myPriority,
+    (id) => isWeaponOwned(id) && getWeaponPriority(id) >= myPriority,
   )
 }
 
@@ -351,7 +352,7 @@ function isSwitchTargetMaxed(weaponId: string): boolean {
   return sameWeapons.some(
     (id) =>
       isWeaponOwned(id)
-      && getWeaponPriority(id) > myPriority
+      && getWeaponPriority(id) >= myPriority
       && isWeaponMaxed(id),
   )
 }
@@ -369,6 +370,8 @@ function getMatrixLevelText(weaponId: string): string {
  * 获取用户手动设置的优先级（0 表示未设置）
  */
 function getUserPriority(weaponId: string): number {
+  const profilePriority = activeProfile.value.weapon_priorities?.[weaponId]
+  if (profilePriority && profilePriority > 0) return profilePriority
   const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
   return entry?.priority || 0
 }
@@ -383,34 +386,31 @@ function getWeaponPriority(weaponId: string): number {
   return weapon ? weapon.rarity : 0
 }
 
+function getEffectivePriorityForSwap(weaponId: string, entry?: TreasureMatrixEntry): number {
+  const userPriority = getUserPriority(weaponId) || entry?.priority || 0
+  if (userPriority > 0) return userPriority
+  const weapon = weaponsMap.value.get(weaponId)
+  return weapon ? weapon.rarity : 0
+}
+
 /**
  * 设置武器优先级
  */
 async function setWeaponPriority(weaponId: string, priority: number) {
   const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
-  if (!entry) return
-  entry.priority = priority
-  await updateTreasureMatrix([...treasureMatrix.value])
-}
-
-/**
- * 获取当前最高优先级
- */
-function getHighestPriority(): number {
-  let max = 0
-  for (const entry of treasureMatrix.value) {
-    const p = entry.priority || 0
-    if (p > max) max = p
+  if (entry) {
+    entry.priority = priority
   }
-  return max
+  await updateWeaponPriority(weaponId, priority)
 }
 
 /**
  * 交换两把武器的基质数据
  */
 async function swapMatrix(weaponAId: string, weaponBId: string) {
-  const entryA = treasureMatrix.value.find((e) => e.weapon_id === weaponAId)
-  const entryB = treasureMatrix.value.find((e) => e.weapon_id === weaponBId)
+  const entries = treasureMatrix.value.map((entry) => ({ ...entry }))
+  const entryA = entries.find((e) => e.weapon_id === weaponAId)
+  const entryB = entries.find((e) => e.weapon_id === weaponBId)
 
   const weaponA = weaponsMap.value.get(weaponAId)
   const weaponB = weaponsMap.value.get(weaponBId)
@@ -420,48 +420,58 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
 
   if (!hasA && !hasB) return
 
+  const priorityA = getEffectivePriorityForSwap(weaponAId, entryA)
+  const priorityB = getEffectivePriorityForSwap(weaponBId, entryB)
+
   if (hasA && !hasB) {
     // A有基质、B无基质 → A移除、B添加A的数据
-    await removeTreasureMatrixEntry(weaponAId)
-    await addTreasureMatrixEntry({
-      weapon_id: weaponBId,
-      weapon_name: weaponB?.name || weaponBId,
-      affix1_level: entryA!.affix1_level,
-      affix2_level: entryA!.affix2_level,
-      affix3_level: entryA!.affix3_level,
-      include_in_calculation: entryA!.include_in_calculation,
-      priority: getHighestPriority() + 1,
-    })
+    const nextEntries = entries
+      .filter((entry) => entry.weapon_id !== weaponAId)
+      .concat({
+        ...entryA!,
+        weapon_id: weaponBId,
+        weapon_name: weaponB?.name || weaponBId,
+        priority: priorityA,
+      })
+    await updateTreasureMatrix(nextEntries)
+    await updateWeaponPriority(weaponAId, priorityB)
+    await updateWeaponPriority(weaponBId, priorityA)
   } else if (!hasA && hasB) {
     // A无基质、B有基质 → A添加B的数据、B移除
-    await removeTreasureMatrixEntry(weaponBId)
-    await addTreasureMatrixEntry({
-      weapon_id: weaponAId,
-      weapon_name: weaponA?.name || weaponAId,
-      affix1_level: entryB!.affix1_level,
-      affix2_level: entryB!.affix2_level,
-      affix3_level: entryB!.affix3_level,
-      include_in_calculation: entryB!.include_in_calculation,
-      priority: getHighestPriority() + 1,
-    })
+    const nextEntries = entries
+      .filter((entry) => entry.weapon_id !== weaponBId)
+      .concat({
+        ...entryB!,
+        weapon_id: weaponAId,
+        weapon_name: weaponA?.name || weaponAId,
+        priority: priorityB,
+      })
+    await updateTreasureMatrix(nextEntries)
+    await updateWeaponPriority(weaponAId, priorityB)
+    await updateWeaponPriority(weaponBId, priorityA)
   } else {
-    // 两者都有基质，交换等级
-    const tempLevels = {
+    // 两者都有基质，交换等级、计算开关和有效优先级
+    const matrixA = {
       affix1: entryA!.affix1_level,
       affix2: entryA!.affix2_level,
       affix3: entryA!.affix3_level,
+      includeInCalculation: entryA!.include_in_calculation,
     }
     entryA!.affix1_level = entryB!.affix1_level
     entryA!.affix2_level = entryB!.affix2_level
     entryA!.affix3_level = entryB!.affix3_level
-    entryB!.affix1_level = tempLevels.affix1
-    entryB!.affix2_level = tempLevels.affix2
-    entryB!.affix3_level = tempLevels.affix3
+    entryA!.include_in_calculation = entryB!.include_in_calculation
+    entryA!.priority = priorityB
 
-    // 提升目标武器优先级
-    entryB!.priority = getHighestPriority() + 1
+    entryB!.affix1_level = matrixA.affix1
+    entryB!.affix2_level = matrixA.affix2
+    entryB!.affix3_level = matrixA.affix3
+    entryB!.include_in_calculation = matrixA.includeInCalculation
+    entryB!.priority = priorityA
 
-    await updateTreasureMatrix([...treasureMatrix.value])
+    await updateTreasureMatrix(entries)
+    await updateWeaponPriority(weaponAId, priorityB)
+    await updateWeaponPriority(weaponBId, priorityA)
   }
 
   // 关闭弹窗
@@ -499,10 +509,11 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   position: relative;
   transition:
     transform 0.15s,
-    opacity 0.15s;
+    opacity 0.15s,
+    filter 0.15s;
   border-radius: 6px;
 
-  // 未拥有：半透明灰色层（只作用于图标，不影响 tooltip）
+  // 未拥有：灰色滤镜必须作用于上级容器，标记作为兄弟节点避免被叠加影响
   &.weapon-not-owned {
     opacity: 0.4;
     filter: grayscale(0.8);
@@ -592,10 +603,11 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   top: -6px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1;
+  z-index: 3;
   pointer-events: none;
   font-size: 0.55rem !important;
   height: 14px !important;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
 }
 
 @keyframes switch-target-breathe {
