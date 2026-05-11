@@ -223,13 +223,18 @@ const { selectedRarities } = useRarityFilters()
 const detailDialog = ref(false)
 const detailWeaponId = ref<string | null>(null)
 
-const ownedWeaponIds = computed(() => treasureMatrix.value.map((e) => e.weapon_id))
+const matrixEntryByWeaponId = computed(
+  () => new Map(treasureMatrix.value.map((entry) => [entry.weapon_id, entry])),
+)
+
+// 武器总览会为每个图标多次判断拥有/满级状态，用 Set/Map 避免重复扫描 treasureMatrix。
+const ownedWeaponIds = computed(() => new Set(matrixEntryByWeaponId.value.keys()))
 
 const totalCount = computed(() =>
   weaponTypes.value.reduce((sum, wType) => sum + wType.weaponIds.length, 0),
 )
 
-const ownedCount = computed(() => ownedWeaponIds.value.length)
+const ownedCount = computed(() => ownedWeaponIds.value.size)
 
 // 过滤后的武器类型列表
 const filteredWeaponTypes = computed(() => {
@@ -254,11 +259,11 @@ const filteredWeaponTypes = computed(() => {
 })
 
 function isWeaponOwned(weaponId: string): boolean {
-  return ownedWeaponIds.value.includes(weaponId)
+  return ownedWeaponIds.value.has(weaponId)
 }
 
 function isWeaponMaxed(weaponId: string): boolean {
-  const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
+  const entry = matrixEntryByWeaponId.value.get(weaponId)
   return (
     entry !== undefined &&
     entry.affix1_level === 6 &&
@@ -361,7 +366,7 @@ function isSwitchTargetMaxed(weaponId: string): boolean {
  * 获取武器的基质等级文本
  */
 function getMatrixLevelText(weaponId: string): string {
-  const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
+  const entry = matrixEntryByWeaponId.value.get(weaponId)
   if (!entry) return '未配置'
   return `+${entry.affix1_level} / +${entry.affix2_level} / +${entry.affix3_level}`
 }
@@ -372,7 +377,7 @@ function getMatrixLevelText(weaponId: string): string {
 function getUserPriority(weaponId: string): number {
   const profilePriority = activeProfile.value.weapon_priorities?.[weaponId]
   if (profilePriority && profilePriority > 0) return profilePriority
-  const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
+  const entry = matrixEntryByWeaponId.value.get(weaponId)
   return entry?.priority || 0
 }
 
@@ -397,7 +402,7 @@ function getEffectivePriorityForSwap(weaponId: string, entry?: TreasureMatrixEnt
  * 设置武器优先级
  */
 async function setWeaponPriority(weaponId: string, priority: number) {
-  const entry = treasureMatrix.value.find((e) => e.weapon_id === weaponId)
+  const entry = matrixEntryByWeaponId.value.get(weaponId)
   if (entry) {
     entry.priority = priority
   }

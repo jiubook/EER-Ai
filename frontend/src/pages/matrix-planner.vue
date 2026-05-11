@@ -494,6 +494,21 @@ const noPrecraftMode = ref(false)
 /** 不使用预刻券模式下选中的武器ID，用于置顶包含该武器的地点 */
 const selectedWeaponForLocation = ref<string | null>(null)
 
+// 页面渲染中会频繁判断“是否已有基质”，用 Set 避免对 treasureMatrix 反复线性扫描。
+const obtainedWeaponIds = computed(
+  () => new Set(treasureMatrix.value.map((entry) => entry.weapon_id)),
+)
+
+// 需求武器集合被按钮状态、排序和方案统计共用，集中计算可保持口径一致。
+const selectedRequiredWeaponIds = computed(
+  () =>
+    new Set(
+      requiredEssenceStats.value
+        .filter((stat) => !stat.isCustom && stat.weaponId)
+        .map((stat) => stat.weaponId!),
+    ),
+)
+
 /**
  * 生成所有刷取地点的列表（不使用预刻券模式）
  */
@@ -571,6 +586,12 @@ const displayedBattleChoices = computed<BattleChoice[]>(() => {
   return bestChoices.value
 })
 
+// 武器图标渲染时会逐个判断是否命中当前方案，预先汇总命中集合减少模板函数开销。
+const matchedWeaponIdsInDisplayedPlans = computed(() => {
+  if (noPrecraftMode.value) return new Set<string>()
+  return new Set(displayedBattleChoices.value.flatMap((choice) => choice.matchedWeaponIds))
+})
+
 // 方案更新时在方案一上播放高亮脉冲
 watch(
   [displayedLocationChoices, displayedBattleChoices],
@@ -592,7 +613,7 @@ const weaponSearch = ref('')
  * 判断武器是否已在宝藏基质配置中
  */
 function isWeaponObtained(weaponId: string): boolean {
-  return treasureMatrix.value.some((entry) => entry.weapon_id === weaponId)
+  return obtainedWeaponIds.value.has(weaponId)
 }
 
 function filteredWeaponIds(weaponIds: string[]): string[] {
@@ -624,7 +645,7 @@ function filteredWeaponIds(weaponIds: string[]): string[] {
 }
 
 function isWeaponSelected(weaponId: string): boolean {
-  return requiredEssenceStats.value.some((s) => !s.isCustom && s.weaponId === weaponId)
+  return selectedRequiredWeaponIds.value.has(weaponId)
 }
 
 /**
@@ -688,7 +709,7 @@ function sortedWeaponIdsByObtained(weaponIds: string[]): string[] {
  * 判断某个武器是否是用户选择的需求武器
  */
 function isRequiredWeapon(weaponId: string): boolean {
-  return requiredEssenceStats.value.some((s) => !s.isCustom && s.weaponId === weaponId)
+  return selectedRequiredWeaponIds.value.has(weaponId)
 }
 
 /**
@@ -696,34 +717,23 @@ function isRequiredWeapon(weaponId: string): boolean {
  * 仅在使用预刻券模式下有效
  */
 function isWeaponMatchedInPlans(weaponId: string): boolean {
-  // 只在使用预刻券模式下显示橙黄脉冲
-  if (noPrecraftMode.value) {
-    return false
-  }
-
-  // 检查是否在最优方案中
-  return displayedBattleChoices.value.some(choice =>
-    choice.matchedWeaponIds.includes(weaponId)
-  )
+  return matchedWeaponIdsInDisplayedPlans.value.has(weaponId)
 }
 
 /**
  * 获取已选择的武器总数
  */
 function getSelectedWeaponCount(): number {
-  return requiredEssenceStats.value.filter(stat => !stat.isCustom && stat.weaponId).length
+  return selectedRequiredWeaponIds.value.size
 }
 
 /**
  * 获取方案匹配的已选择武器数量
  */
 function getSelectedWeaponMatchCount(choice: BattleChoice): number {
-  const selectedWeaponIds = new Set(
-    requiredEssenceStats.value
-      .filter(stat => !stat.isCustom && stat.weaponId)
-      .map(stat => stat.weaponId!)
-  )
-  return choice.matchedWeaponIds.filter((id: string) => selectedWeaponIds.has(id)).length
+  return choice.matchedWeaponIds.filter((id: string) =>
+    selectedRequiredWeaponIds.value.has(id),
+  ).length
 }
 
 /**

@@ -38,6 +38,13 @@ export interface EnergyAlluvium {
   skillStats: string[]
 }
 
+interface PlannerWeaponStats {
+  weaponId: string
+  attribute: string
+  secondary: string
+  skill: string
+}
+
 /** 淤积点名称前缀，显示时裁掉 */
 const ALLUVIUM_PREFIX = '重度能量淤积点·'
 
@@ -136,6 +143,7 @@ const energyAlluviums: Record<string, EnergyAlluvium> = {
 
 // 所有属性词条
 const allAttributeStats = ['敏捷提升', '力量提升', '意志提升', '智识提升', '主能力提升']
+const allAttributeCombinations = combinations(allAttributeStats, 3)
 
 // 所有副属性词条
 const allSecondaryStats = [
@@ -195,7 +203,7 @@ function requirementMatchesBattle(
 
 /** 查找匹配战斗词条组合的所有武器。 */
 function findMatchingWeapons(
-  weaponsMap: Map<string, { attributeStatId: string | null; secondaryStatId: string | null; skillStatId: string | null }>,
+  weaponStats: PlannerWeaponStats[],
   selectedAttributes: string[],
   battleSecondaryStats: string[],
   battleSkillStats: string[],
@@ -203,25 +211,34 @@ function findMatchingWeapons(
   selectedSkill: string | null,
 ): string[] {
   const matched: string[] = []
-  for (const [weaponId, weapon] of weaponsMap.entries()) {
-    const weaponAttr = getStatDisplayName(weapon.attributeStatId)
-    const weaponSec = getStatDisplayName(weapon.secondaryStatId)
-    const weaponSkill = getStatDisplayName(weapon.skillStatId)
-    if (!weaponAttr || !weaponSec || !weaponSkill) continue
-    if (!selectedAttributes.includes(weaponAttr)) continue
+  for (const weapon of weaponStats) {
+    if (!selectedAttributes.includes(weapon.attribute)) continue
     const secOk = selectedSecondary !== null
-      ? weaponSec === selectedSecondary
-      : battleSecondaryStats.includes(weaponSec)
+      ? weapon.secondary === selectedSecondary
+      : battleSecondaryStats.includes(weapon.secondary)
     const skillOk = selectedSkill !== null
-      ? weaponSkill === selectedSkill
-      : battleSkillStats.includes(weaponSkill)
-    if (secOk && skillOk) matched.push(weaponId)
+      ? weapon.skill === selectedSkill
+      : battleSkillStats.includes(weapon.skill)
+    if (secOk && skillOk) matched.push(weapon.weaponId)
   }
   return matched
 }
 
 export function useMatrixPlanner() {
   const { weaponsMap } = useStaticData()
+
+  // 规划计算会反复按词条匹配武器，先把武器 ID 转成显示词条，避免在每个方案里重复转换。
+  const weaponPlannerStats = computed<PlannerWeaponStats[]>(() => {
+    const rows: PlannerWeaponStats[] = []
+    for (const [weaponId, weapon] of weaponsMap.value.entries()) {
+      const attribute = getStatDisplayName(weapon.attributeStatId)
+      const secondary = getStatDisplayName(weapon.secondaryStatId)
+      const skill = getStatDisplayName(weapon.skillStatId)
+      if (!attribute || !secondary || !skill) continue
+      rows.push({ weaponId, attribute, secondary, skill })
+    }
+    return rows
+  })
 
   // 从localStorage加载保存的状态
   const savedStats = localStorage.getItem('matrixPlannerStats')
@@ -315,7 +332,14 @@ export function useMatrixPlanner() {
       }
     }
     if (matchedSelectedIndices.length === 0) return undefined
-    const matchedWeaponIds = findMatchingWeapons(weaponsMap.value, selectedAttribute, [], battleSkillStats, selectedSecondary, null)
+    const matchedWeaponIds = findMatchingWeapons(
+      weaponPlannerStats.value,
+      selectedAttribute,
+      [],
+      battleSkillStats,
+      selectedSecondary,
+      null,
+    )
     return { battleId, battleName, selectedAttribute, selectedSecondary, selectedSkill: null, matchedSelectedIndices, matchedWeaponIds }
   }
 
@@ -333,7 +357,14 @@ export function useMatrixPlanner() {
       }
     }
     if (matchedSelectedIndices.length === 0) return undefined
-    const matchedWeaponIds = findMatchingWeapons(weaponsMap.value, selectedAttribute, battleSecondaryStats, [], null, selectedSkill)
+    const matchedWeaponIds = findMatchingWeapons(
+      weaponPlannerStats.value,
+      selectedAttribute,
+      battleSecondaryStats,
+      [],
+      null,
+      selectedSkill,
+    )
     return { battleId, battleName, selectedAttribute, selectedSecondary: null, selectedSkill, matchedSelectedIndices, matchedWeaponIds }
   }
 
@@ -347,7 +378,7 @@ export function useMatrixPlanner() {
   function _recomputeChoices() {
     const result: BattleChoice[] = []
     for (const { battleId, battleName, secondaryStats, skillStats } of Object.values(energyAlluviums)) {
-      for (const selectedAttribute of combinations(allAttributeStats, 3)) {
+      for (const selectedAttribute of allAttributeCombinations) {
         for (const selectedSecondary of secondaryStats) {
           const choice = buildChoiceForSecondary(battleId, battleName, selectedAttribute, selectedSecondary, skillStats)
           if (choice) result.push(choice)

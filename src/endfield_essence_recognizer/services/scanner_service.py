@@ -300,30 +300,16 @@ class ScannerService:
 
             logger.info("获取到 profile_manager 和 static_data")
 
-            # 遍历扫描到的武器
-            added_count = 0
-            updated_count = 0
+            entries: list[TreasureMatrixEntry] = []
             for weapon_id, levels in weapon_levels.items():
                 logger.debug(f"处理武器 {weapon_id}, 等级: {levels}")
-                # 检查是否已存在
-                existing = next(
-                    (
-                        e
-                        for e in profile_manager.get_active_profile().treasure_matrix
-                        if e.weapon_id == weapon_id
-                    ),
-                    None,
-                )
+                weapon = static_data.get_weapon(weapon_id)
+                weapon_name = weapon.name if weapon else weapon_id
 
-                if existing is None:
-                    # 不存在则添加
-                    weapon = static_data.get_weapon(weapon_id)
-                    weapon_name = weapon.name if weapon else weapon_id
-
-                    # 满级（6/6/3）默认不参与计算
-                    is_maxed = levels[0] == 6 and levels[1] == 6 and levels[2] == 3
-
-                    entry = TreasureMatrixEntry(
+                # 新增满级武器默认不参与计算，避免扫描后把已毕业武器加入刷取建议。
+                is_maxed = levels[0] == 6 and levels[1] == 6 and levels[2] == 3
+                entries.append(
+                    TreasureMatrixEntry(
                         weapon_id=weapon_id,
                         weapon_name=weapon_name,
                         affix1_level=levels[0],
@@ -331,75 +317,49 @@ class ScannerService:
                         affix3_level=levels[2],
                         include_in_calculation=not is_maxed,
                     )
-                    profile_manager.add_treasure_matrix_entry(entry)
-                    added_count += 1
-                    rarity_color = (
-                        static_data.get_rarity_color(weapon.rarity)
-                        if weapon
-                        else "#FFFFFF"
-                    )
-                    weapon_type = (
-                        static_data.get_weapon_type(weapon.weapon_type)
-                        if weapon
-                        else None
-                    )
-                    type_name = weapon_type.name if weapon_type else "未知类型"
-                    level_text = _format_levels(
-                        levels[0], levels[1], levels[2], static_data
-                    )
+                )
+
+            sync_result = profile_manager.sync_treasure_matrix_entries(entries)
+
+            def log_synced_entry(entry: TreasureMatrixEntry, *, is_added: bool) -> None:
+                """统一输出新增/更新日志，避免两处格式漂移。"""
+                weapon = static_data.get_weapon(entry.weapon_id)
+                rarity_color = (
+                    static_data.get_rarity_color(weapon.rarity) if weapon else "#FFFFFF"
+                )
+                weapon_type = (
+                    static_data.get_weapon_type(weapon.weapon_type) if weapon else None
+                )
+                type_name = weapon_type.name if weapon_type else "未知类型"
+                rarity_label = f"{weapon.rarity}★ {type_name}" if weapon else type_name
+                weapon_name = entry.weapon_name or (
+                    weapon.name if weapon else entry.weapon_id
+                )
+                level_text = _format_levels(
+                    entry.affix1_level,
+                    entry.affix2_level,
+                    entry.affix3_level,
+                    static_data,
+                )
+                weapon_text = (
+                    f"<fg {rarity_color}><bold>{weapon_name}（{rarity_label}）</></>"
+                )
+                if is_added:
                     logger.opt(colors=True).info(
-                        f"已将武器 <fg {rarity_color}><bold>{weapon_name}（{weapon.rarity}★ {type_name}）</></> 添加到宝藏基质配置，等级: {level_text}"
+                        f"已将武器 {weapon_text} 添加到宝藏基质配置，等级: {level_text}"
                     )
                 else:
-                    # 已存在则更新为更高的等级
-                    updated = False
-                    if existing.affix1_level < levels[0]:
-                        existing.affix1_level = levels[0]
-                        updated = True
-                    if existing.affix2_level < levels[1]:
-                        existing.affix2_level = levels[1]
-                        updated = True
-                    if existing.affix3_level < levels[2]:
-                        existing.affix3_level = levels[2]
-                        updated = True
+                    logger.opt(colors=True).info(
+                        f"已更新武器 {weapon_text} 的等级: {level_text}"
+                    )
 
-                    # 等级变更后达到满级，自动取消勾选
-                    if updated and (
-                        existing.affix1_level == 6
-                        and existing.affix2_level == 6
-                        and existing.affix3_level == 3
-                    ):
-                        existing.include_in_calculation = False
-
-                    if updated:
-                        profile_manager.update_treasure_matrix(
-                            profile_manager.get_active_profile().treasure_matrix
-                        )
-                        updated_count += 1
-                        weapon = static_data.get_weapon(weapon_id)
-                        rarity_color = (
-                            static_data.get_rarity_color(weapon.rarity)
-                            if weapon
-                            else "#FFFFFF"
-                        )
-                        weapon_type = (
-                            static_data.get_weapon_type(weapon.weapon_type)
-                            if weapon
-                            else None
-                        )
-                        type_name = weapon_type.name if weapon_type else "未知类型"
-                        level_text = _format_levels(
-                            existing.affix1_level,
-                            existing.affix2_level,
-                            existing.affix3_level,
-                            static_data,
-                        )
-                        logger.opt(colors=True).info(
-                            f"已更新武器 <fg {rarity_color}><bold>{existing.weapon_name}（{weapon.rarity}★ {type_name}）</></> 的等级: {level_text}"
-                        )
+            for entry in sync_result.added:
+                log_synced_entry(entry, is_added=True)
+            for entry in sync_result.updated:
+                log_synced_entry(entry, is_added=False)
 
             logger.info(
-                f"扫描数据同步完成: 新增 {added_count} 把武器，更新 {updated_count} 把武器"
+                f"扫描数据同步完成: 新增 {len(sync_result.added)} 把武器，更新 {len(sync_result.updated)} 把武器"
             )
         except Exception as e:
             logger.error(f"同步扫描数据到宝藏基质配置失败: {e}", exc_info=True)

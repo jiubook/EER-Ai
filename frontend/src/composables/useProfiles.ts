@@ -46,6 +46,23 @@ const isLoaded = ref(false)
 /** 最近一次操作错误信息（供 UI 展示） */
 const lastError = ref<string | null>(null)
 
+function applyActiveProfile(profile: ProfileData) {
+  const activeName = collection.value.active_profile
+  const profileName = profile.name || activeName
+
+  // 写操作接口已经返回最新 ProfileData；直接更新本地账号快照，避免再拉取整份 profiles。
+  collection.value = {
+    ...collection.value,
+    active_profile: profileName,
+    profiles: {
+      ...collection.value.profiles,
+      [profileName]: profile,
+    },
+  }
+  isLoaded.value = true
+  lastError.value = null
+}
+
 function _handleError(context: string, error: unknown): never {
   const message = error instanceof Error ? error.message : String(error)
   const fullMessage = `${context}: ${message}`
@@ -134,7 +151,7 @@ export function useProfiles() {
         body: JSON.stringify({ entries }),
       })
       if (!res.ok) throw new Error('Failed to update treasure matrix')
-      await fetchProfiles()
+      applyActiveProfile(await res.json())
     } catch (error) {
       _handleError('更新宝藏基质失败', error)
     }
@@ -148,7 +165,7 @@ export function useProfiles() {
         body: JSON.stringify(entry),
       })
       if (!res.ok) throw new Error('Failed to add treasure matrix entry')
-      await fetchProfiles()
+      applyActiveProfile(await res.json())
     } catch (error) {
       _handleError('添加宝藏基质条目失败', error)
     }
@@ -162,7 +179,7 @@ export function useProfiles() {
         body: JSON.stringify({ weapon_id: weaponId }),
       })
       if (!res.ok) throw new Error('Failed to remove treasure matrix entry')
-      await fetchProfiles()
+      applyActiveProfile(await res.json())
     } catch (error) {
       _handleError('移除宝藏基质条目失败', error)
     }
@@ -202,7 +219,7 @@ export function useProfiles() {
         body: JSON.stringify({ filters }),
       })
       if (!res.ok) throw new Error('Failed to update weapon overview filters')
-      await fetchProfiles()
+      applyActiveProfile(await res.json())
     } catch (error) {
       _handleError('更新武器总览过滤器失败', error)
     }
@@ -216,7 +233,7 @@ export function useProfiles() {
         body: JSON.stringify({ weapon_id: weaponId, priority }),
       })
       if (!res.ok) throw new Error('Failed to update weapon priority')
-      await fetchProfiles()
+      applyActiveProfile(await res.json())
     } catch (error) {
       _handleError('更新武器优先级失败', error)
     }

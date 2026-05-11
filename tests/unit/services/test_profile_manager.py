@@ -7,6 +7,9 @@ import pytest
 from endfield_essence_recognizer.schemas.profile import (
     TreasureMatrixEntry,
 )
+from endfield_essence_recognizer.services import (
+    profile_manager as profile_manager_module,
+)
 from endfield_essence_recognizer.services.profile_manager import ProfileManager
 
 
@@ -187,3 +190,94 @@ def test_persistence(temp_profiles_file: Path):
     manager2.load()
     assert manager2.get_active_profile_name() == "test"
     assert len(manager2.get_active_profile().treasure_matrix) == 1
+
+
+def test_sync_treasure_matrix_entries_saves_once(
+    profile_manager: ProfileManager, monkeypatch: pytest.MonkeyPatch
+):
+    """批量同步多把新武器时，只执行一次持久化。"""
+    profile_manager.load()
+    save_count = 0
+
+    def fake_save(*args, **kwargs):
+        nonlocal save_count
+        save_count += 1
+        return True
+
+    monkeypatch.setattr(profile_manager_module, "_save_profiles_to_file", fake_save)
+
+    result = profile_manager.sync_treasure_matrix_entries(
+        [
+            TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="Weapon 1"),
+            TreasureMatrixEntry(weapon_id="wpn_002", weapon_name="Weapon 2"),
+            TreasureMatrixEntry(weapon_id="wpn_003", weapon_name="Weapon 3"),
+        ]
+    )
+
+    assert [entry.weapon_id for entry in result.added] == [
+        "wpn_001",
+        "wpn_002",
+        "wpn_003",
+    ]
+    assert result.updated == []
+    assert save_count == 1
+    assert len(profile_manager.get_active_profile().treasure_matrix) == 3
+
+
+def test_sync_treasure_matrix_entries_updates_only_higher_levels(
+    profile_manager: ProfileManager, monkeypatch: pytest.MonkeyPatch
+):
+    """扫描同步只提升等级，不用较低扫描结果覆盖用户已有数据。"""
+    profile_manager.load()
+    profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(
+            weapon_id="wpn_001",
+            weapon_name="Weapon 1",
+            affix1_level=3,
+            affix2_level=3,
+            affix3_level=2,
+            include_in_calculation=True,
+        )
+    )
+    save_count = 0
+
+    def fake_save(*args, **kwargs):
+        nonlocal save_count
+        save_count += 1
+        return True
+
+    monkeypatch.setattr(profile_manager_module, "_save_profiles_to_file", fake_save)
+
+    no_change = profile_manager.sync_treasure_matrix_entries(
+        [
+            TreasureMatrixEntry(
+                weapon_id="wpn_001",
+                weapon_name="Weapon 1",
+                affix1_level=2,
+                affix2_level=3,
+                affix3_level=1,
+            )
+        ]
+    )
+    assert no_change.added == []
+    assert no_change.updated == []
+    assert save_count == 0
+
+    changed = profile_manager.sync_treasure_matrix_entries(
+        [
+            TreasureMatrixEntry(
+                weapon_id="wpn_001",
+                weapon_name="Weapon 1",
+                affix1_level=6,
+                affix2_level=6,
+                affix3_level=3,
+            )
+        ]
+    )
+
+    entry = profile_manager.get_active_profile().treasure_matrix[0]
+    assert changed.added == []
+    assert [updated.weapon_id for updated in changed.updated] == ["wpn_001"]
+    assert (entry.affix1_level, entry.affix2_level, entry.affix3_level) == (6, 6, 3)
+    assert entry.include_in_calculation is False
+    assert save_count == 1

@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from endfield_essence_recognizer.schemas.profile import (
@@ -20,7 +22,16 @@ from endfield_essence_recognizer.utils.log import logger
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["ProfileManager"]
+__all__ = ["ProfileManager", "TreasureMatrixSyncResult"]
+
+
+@dataclass(frozen=True)
+class TreasureMatrixSyncResult:
+    """扫描数据同步到宝藏基质后的变更摘要。"""
+
+    profile: ProfileData
+    added: list[TreasureMatrixEntry]
+    updated: list[TreasureMatrixEntry]
 
 
 def _load_profiles_from_file(path: Path) -> ProfileCollection | None:
@@ -69,36 +80,50 @@ class ProfileManager:
         """
         self._profiles_file = profiles_file
         self._collection = ProfileCollection()
+        self._lock = threading.RLock()
 
     def load(self) -> None:
         """从磁盘加载账号配置。"""
-        result = _load_profiles_from_file(self._profiles_file)
-        if result is not None:
-            self._collection = result
-            self._collection.ensure_default()
-            logger.info(
-                "加载账号配置成功，当前账号: {}", self._collection.active_profile
-            )
-        else:
-            logger.info("未找到账号配置文件，使用默认配置。")
-            self._collection.ensure_default()
-            self.save()
+        with self._lock:
+            result = _load_profiles_from_file(self._profiles_file)
+            if result is not None:
+                self._collection = result
+                self._collection.ensure_default()
+                logger.info(
+                    "加载账号配置成功，当前账号: {}", self._collection.active_profile
+                )
+            else:
+                logger.info("未找到账号配置文件，使用默认配置。")
+                self._collection.ensure_default()
+                self._save_unlocked()
 
     def save(self) -> None:
         """保存账号配置到磁盘。"""
+        with self._lock:
+            self._save_unlocked()
+
+    def _save_unlocked(self) -> None:
+        """保存账号配置；调用方必须已经持有 `_lock`。"""
         _save_profiles_to_file(self._collection, self._profiles_file)
+
+    def _get_active_unlocked(self) -> ProfileData:
+        """获取激活账号；调用方必须已经持有 `_lock`。"""
+        return self._collection.get_active()
 
     def get_collection(self) -> ProfileCollection:
         """获取当前账号集合。"""
-        return self._collection
+        with self._lock:
+            return self._collection
 
     def get_active_profile(self) -> ProfileData:
         """获取激活的账号数据。"""
-        return self._collection.get_active()
+        with self._lock:
+            return self._get_active_unlocked()
 
     def get_active_profile_name(self) -> str:
         """获取激活的账号名称。"""
-        return self._collection.active_profile
+        with self._lock:
+            return self._collection.active_profile
 
     def switch_profile(self, name: str) -> ProfileData:
         """切换到指定账号，如果不存在则创建。
@@ -113,13 +138,14 @@ class ProfileManager:
         Raises:
             ValueError: 如果名称无效。
         """
-        name = self._validate_profile_name(name)
-        if name not in self._collection.profiles:
-            self._collection.profiles[name] = ProfileData(name=name)
-        self._collection.active_profile = name
-        self.save()
-        logger.info("切换到账号: {}", name)
-        return self._collection.profiles[name]
+        with self._lock:
+            name = self._validate_profile_name(name)
+            if name not in self._collection.profiles:
+                self._collection.profiles[name] = ProfileData(name=name)
+            self._collection.active_profile = name
+            self._save_unlocked()
+            logger.info("切换到账号: {}", name)
+            return self._collection.profiles[name]
 
     @staticmethod
     def _validate_profile_name(name: str) -> str:
@@ -165,22 +191,23 @@ class ProfileManager:
         Raises:
             ValueError: 如果 old_name 不存在、new_name 已被占用或 new_name 无效。
         """
-        if old_name not in self._collection.profiles:
-            raise ValueError(f"账号 '{old_name}' 不存在")
-        new_name = self._validate_profile_name(new_name)
-        if new_name in self._collection.profiles:
-            raise ValueError(f"账号 '{new_name}' 已存在")
+        with self._lock:
+            if old_name not in self._collection.profiles:
+                raise ValueError(f"账号 '{old_name}' 不存在")
+            new_name = self._validate_profile_name(new_name)
+            if new_name in self._collection.profiles:
+                raise ValueError(f"账号 '{new_name}' 已存在")
 
-        profile = self._collection.profiles.pop(old_name)
-        profile.name = new_name
-        self._collection.profiles[new_name] = profile
+            profile = self._collection.profiles.pop(old_name)
+            profile.name = new_name
+            self._collection.profiles[new_name] = profile
 
-        if self._collection.active_profile == old_name:
-            self._collection.active_profile = new_name
+            if self._collection.active_profile == old_name:
+                self._collection.active_profile = new_name
 
-        self.save()
-        logger.info("重命名账号: {} -> {}", old_name, new_name)
-        return profile
+            self._save_unlocked()
+            logger.info("重命名账号: {} -> {}", old_name, new_name)
+            return profile
 
     def delete_profile(self, name: str) -> None:
         """删除账号。
@@ -193,16 +220,17 @@ class ProfileManager:
         Raises:
             ValueError: 如果账号是 'default'、是激活账号或不存在。
         """
-        if name == "default":
-            raise ValueError("不能删除默认账号")
-        if name not in self._collection.profiles:
-            raise ValueError(f"账号 '{name}' 不存在")
-        if self._collection.active_profile == name:
-            raise ValueError("不能删除当前正在使用的账号")
+        with self._lock:
+            if name == "default":
+                raise ValueError("不能删除默认账号")
+            if name not in self._collection.profiles:
+                raise ValueError(f"账号 '{name}' 不存在")
+            if self._collection.active_profile == name:
+                raise ValueError("不能删除当前正在使用的账号")
 
-        del self._collection.profiles[name]
-        self.save()
-        logger.info("删除账号: {}", name)
+            del self._collection.profiles[name]
+            self._save_unlocked()
+            logger.info("删除账号: {}", name)
 
     def update_treasure_matrix(self, entries: list[TreasureMatrixEntry]) -> ProfileData:
         """替换激活账号的完整宝藏基质配置。
@@ -213,13 +241,14 @@ class ProfileManager:
         Returns:
             更新后的 ProfileData。
         """
-        profile = self.get_active_profile()
-        profile.treasure_matrix = entries
-        for entry in entries:
-            if entry.priority > 0:
-                profile.weapon_priorities[entry.weapon_id] = entry.priority
-        self.save()
-        return profile
+        with self._lock:
+            profile = self._get_active_unlocked()
+            profile.treasure_matrix = entries
+            for entry in entries:
+                if entry.priority > 0:
+                    profile.weapon_priorities[entry.weapon_id] = entry.priority
+            self._save_unlocked()
+            return profile
 
     def add_treasure_matrix_entry(self, entry: TreasureMatrixEntry) -> ProfileData:
         """添加或更新单个宝藏基质条目。
@@ -232,17 +261,87 @@ class ProfileManager:
         Returns:
             更新后的 ProfileData。
         """
-        profile = self.get_active_profile()
-        if entry.weapon_id in profile.weapon_priorities:
-            entry.priority = profile.weapon_priorities[entry.weapon_id]
-        elif entry.priority > 0:
-            profile.weapon_priorities[entry.weapon_id] = entry.priority
-        profile.treasure_matrix = [
-            e for e in profile.treasure_matrix if e.weapon_id != entry.weapon_id
-        ]
-        profile.treasure_matrix.append(entry)
-        self.save()
-        return profile
+        with self._lock:
+            profile = self._get_active_unlocked()
+            if entry.weapon_id in profile.weapon_priorities:
+                entry.priority = profile.weapon_priorities[entry.weapon_id]
+            elif entry.priority > 0:
+                profile.weapon_priorities[entry.weapon_id] = entry.priority
+            profile.treasure_matrix = [
+                e for e in profile.treasure_matrix if e.weapon_id != entry.weapon_id
+            ]
+            profile.treasure_matrix.append(entry)
+            self._save_unlocked()
+            return profile
+
+    def sync_treasure_matrix_entries(
+        self, entries: list[TreasureMatrixEntry]
+    ) -> TreasureMatrixSyncResult:
+        """批量同步扫描得到的宝藏基质条目，并且最多只保存一次。
+
+        扫描通常一次返回多把武器。逐个调用 `add_treasure_matrix_entry()` 会
+        对同一个 JSON 文件重复序列化和写盘；这里先在内存中完成所有合并，最后
+        在确实有变更时统一保存。
+        """
+        with self._lock:
+            profile = self._get_active_unlocked()
+            existing_by_weapon_id = {
+                entry.weapon_id: entry for entry in profile.treasure_matrix
+            }
+            added: list[TreasureMatrixEntry] = []
+            updated: list[TreasureMatrixEntry] = []
+
+            for incoming in entries:
+                existing = existing_by_weapon_id.get(incoming.weapon_id)
+                if existing is None:
+                    if incoming.weapon_id in profile.weapon_priorities:
+                        incoming.priority = profile.weapon_priorities[
+                            incoming.weapon_id
+                        ]
+                    elif incoming.priority > 0:
+                        profile.weapon_priorities[incoming.weapon_id] = (
+                            incoming.priority
+                        )
+
+                    profile.treasure_matrix.append(incoming)
+                    existing_by_weapon_id[incoming.weapon_id] = incoming
+                    added.append(incoming)
+                    continue
+
+                level_changed = False
+                if existing.affix1_level < incoming.affix1_level:
+                    existing.affix1_level = incoming.affix1_level
+                    level_changed = True
+                if existing.affix2_level < incoming.affix2_level:
+                    existing.affix2_level = incoming.affix2_level
+                    level_changed = True
+                if existing.affix3_level < incoming.affix3_level:
+                    existing.affix3_level = incoming.affix3_level
+                    level_changed = True
+
+                # 只在扫描到更高等级时自动关闭满级武器，避免无变更扫描覆盖用户选择。
+                if level_changed and (
+                    existing.affix1_level == 6
+                    and existing.affix2_level == 6
+                    and existing.affix3_level == 3
+                ):
+                    existing.include_in_calculation = False
+
+                if level_changed:
+                    if existing.priority > 0:
+                        profile.weapon_priorities[existing.weapon_id] = (
+                            existing.priority
+                        )
+                    updated.append(existing)
+
+            if added or updated:
+                self._save_unlocked()
+
+            return TreasureMatrixSyncResult(
+                profile=profile,
+                added=added,
+                updated=updated,
+            )
 
     def remove_treasure_matrix_entry(self, weapon_id: str) -> ProfileData:
         """根据武器 ID 移除宝藏基质条目。
@@ -253,12 +352,13 @@ class ProfileManager:
         Returns:
             更新后的 ProfileData。
         """
-        profile = self.get_active_profile()
-        profile.treasure_matrix = [
-            e for e in profile.treasure_matrix if e.weapon_id != weapon_id
-        ]
-        self.save()
-        return profile
+        with self._lock:
+            profile = self._get_active_unlocked()
+            profile.treasure_matrix = [
+                e for e in profile.treasure_matrix if e.weapon_id != weapon_id
+            ]
+            self._save_unlocked()
+            return profile
 
     def update_weapon_overview_filters(self, filters: dict[str, bool]) -> ProfileData:
         """更新激活账号的武器总览过滤器配置。
@@ -269,10 +369,11 @@ class ProfileManager:
         Returns:
             更新后的 ProfileData。
         """
-        profile = self.get_active_profile()
-        profile.weapon_overview_filters = filters
-        self.save()
-        return profile
+        with self._lock:
+            profile = self._get_active_unlocked()
+            profile.weapon_overview_filters = filters
+            self._save_unlocked()
+            return profile
 
     def update_weapon_priority(self, weapon_id: str, priority: int) -> ProfileData:
         """更新单个武器优先级，未拥有宝藏基质的武器也会保存。
@@ -284,16 +385,17 @@ class ProfileManager:
         Returns:
             更新后的 ProfileData。
         """
-        profile = self.get_active_profile()
-        if priority > 0:
-            profile.weapon_priorities[weapon_id] = priority
-        else:
-            profile.weapon_priorities.pop(weapon_id, None)
+        with self._lock:
+            profile = self._get_active_unlocked()
+            if priority > 0:
+                profile.weapon_priorities[weapon_id] = priority
+            else:
+                profile.weapon_priorities.pop(weapon_id, None)
 
-        for entry in profile.treasure_matrix:
-            if entry.weapon_id == weapon_id:
-                entry.priority = priority
-                break
+            for entry in profile.treasure_matrix:
+                if entry.weapon_id == weapon_id:
+                    entry.priority = priority
+                    break
 
-        self.save()
-        return profile
+            self._save_unlocked()
+            return profile

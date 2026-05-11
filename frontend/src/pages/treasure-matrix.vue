@@ -753,7 +753,7 @@ function isUsingGrease(weaponId: string, affixIndex: number, fromLevel: number):
   return useGreaseForSteps.value[weaponId]?.[`${affixIndex}-${fromLevel}`] || false
 }
 
-function getAdjustedStats(rec: Recommendation) {
+function calculateAdjustedStats(rec: Recommendation) {
   let totalEssences = 0
   let totalGreaseGained = 0
   let totalGreaseUsed = 0
@@ -786,6 +786,19 @@ function getAdjustedStats(rec: Recommendation) {
     totalGreaseUsed,
     totalRuns,
   }
+}
+
+const adjustedStatsByWeaponId = computed(() => {
+  const result = new Map<string, ReturnType<typeof calculateAdjustedStats>>()
+  for (const rec of recommendations.value) {
+    result.set(rec.weapon_id, calculateAdjustedStats(rec))
+  }
+  return result
+})
+
+function getAdjustedStats(rec: Recommendation) {
+  // 模板中同一推荐项会多次读取统计值，集中缓存可避免每次渲染重复遍历升级步骤。
+  return adjustedStatsByWeaponId.value.get(rec.weapon_id) ?? calculateAdjustedStats(rec)
 }
 
 function toggleIncludeInCalculation(entry: TreasureMatrixEntry) {
