@@ -77,114 +77,155 @@
             v-for="(entry, index) in filteredMatrixEntries"
             :key="entry.weapon_id"
             class="mb-3 entry-card"
-            :class="{ 'entry-card--selected': entry.include_in_calculation !== false }"
+            :class="{
+              'entry-card--muted': entry.include_in_calculation === false,
+            }"
             variant="outlined"
           >
-            <v-card-text class="clickable-card" @click="toggleIncludeInCalculation(entry)">
-              <v-row align="center">
-                <v-col cols="12" md="3">
-                  <div class="d-flex align-center">
-                    <item-icon class="me-2 weapon-icon-small" :item-id="entry.weapon_id" />
-                    <div>
-                      <div class="font-weight-bold">{{ entry.weapon_name || entry.weapon_id }}</div>
-                      <div class="text-caption text-medium-emphasis">
-                        {{ getWeaponStats(entry.weapon_id) }}
-                      </div>
+            <v-card-text class="clickable-card pa-0" @click="toggleIncludeInCalculation(entry)">
+              <div class="matrix-card-body">
+                <section class="weapon-identity">
+                  <div class="weapon-icon-wrap" :class="getWeaponTierClass(entry.weapon_id)">
+                    <item-icon class="weapon-icon-small" :item-id="entry.weapon_id" />
+                    <span class="weapon-tier">{{ getWeaponRarityText(entry.weapon_id) }}</span>
+                  </div>
+                  <div class="weapon-info">
+                    <div class="weapon-name">{{ entry.weapon_name || entry.weapon_id }}</div>
+                    <div class="weapon-traits">
+                      <span
+                        v-for="trait in getWeaponTraitNames(entry.weapon_id)"
+                        :key="trait"
+                        class="trait"
+                      >
+                        {{ trait }}
+                      </span>
                     </div>
+                    <v-chip
+                      class="participation-chip"
+                      :color="entry.include_in_calculation === false ? 'grey' : 'primary'"
+                      size="x-small"
+                      variant="tonal"
+                    >
+                      {{ entry.include_in_calculation === false ? '已排除' : '参与计算' }}
+                    </v-chip>
                   </div>
-                </v-col>
-                <v-col cols="6" md="2">
-                  <v-select
-                    v-model="entry.affix1_level"
-                    density="compact"
-                    hide-details
-                    :items="[1, 2, 3, 4, 5, 6]"
-                    label="基础属性"
-                    variant="outlined"
-                    @click.stop
-                    @update:model-value="onEntryChange"
-                  >
-                    <template #selection="{ item }">
-                      <v-chip color="primary" size="x-small" variant="flat">+{{ item.title }}</v-chip>
-                    </template>
-                    <template #item="{ item, props }">
-                      <v-list-item v-bind="props">
-                        <template #title>+{{ item.title }}</template>
-                      </v-list-item>
-                    </template>
-                  </v-select>
-                </v-col>
-                <v-col cols="6" md="2">
-                  <v-select
-                    v-model="entry.affix2_level"
-                    density="compact"
-                    hide-details
-                    :items="[1, 2, 3, 4, 5, 6]"
-                    label="附加属性"
-                    variant="outlined"
-                    @click.stop
-                    @update:model-value="onEntryChange"
-                  >
-                    <template #selection="{ item }">
-                      <v-chip color="teal" size="x-small" variant="flat">+{{ item.title }}</v-chip>
-                    </template>
-                    <template #item="{ item, props }">
-                      <v-list-item v-bind="props">
-                        <template #title>+{{ item.title }}</template>
-                      </v-list-item>
-                    </template>
-                  </v-select>
-                </v-col>
-                <v-col cols="6" md="2">
-                  <v-select
-                    v-model="entry.affix3_level"
-                    density="compact"
-                    hide-details
-                    :items="[1, 2, 3]"
-                    label="技能属性"
-                    variant="outlined"
-                    @click.stop
-                    @update:model-value="onEntryChange"
-                  >
-                    <template #selection="{ item }">
-                      <v-chip color="blue" size="x-small" variant="flat">+{{ item.title }}</v-chip>
-                    </template>
-                    <template #item="{ item, props }">
-                      <v-list-item v-bind="props">
-                        <template #title>+{{ item.title }}</template>
-                      </v-list-item>
-                    </template>
-                  </v-select>
-                </v-col>
-                <v-col cols="12" md="3">
-                  <div class="d-flex ga-2 justify-end">
-                    <v-tooltip text="计算此武器的刷取建议">
-                      <template #activator="{ props }">
-                        <v-btn
-                          v-bind="props"
-                          color="primary"
-                          icon="mdi-calculator"
-                          size="default"
-                          variant="tonal"
-                          @click.stop="computeSingle(entry)"
-                        />
-                      </template>
-                    </v-tooltip>
-                    <v-tooltip text="移除此武器">
-                      <template #activator="{ props }">
-                        <v-btn
-                          v-bind="props"
-                          color="error"
-                          icon="mdi-delete"
-                          size="default"
-                          variant="tonal"
-                          @click.stop="removeEntry(index)"
-                        />
-                      </template>
-                    </v-tooltip>
+                </section>
+
+                <section class="attribute-section">
+                  <div class="attr-control attr-control--primary" @click.stop>
+                    <span class="attr-label">基础属性</span>
+                    <div aria-label="基础属性等级" class="attr-pips" role="group">
+                      <span
+                        v-for="level in affixLevelItems"
+                        :key="`a1-${level}`"
+                        :aria-label="`设置基础属性为 +${level}`"
+                        class="pip"
+                        :class="{
+                          active: level <= entry.affix1_level,
+                          'pip--max': entry.affix1_level === 6,
+                        }"
+                        role="button"
+                        tabindex="0"
+                        @click.stop="setEntryAffixLevel(entry, 1, level)"
+                        @keydown.enter.stop.prevent="setEntryAffixLevel(entry, 1, level)"
+                        @keydown.space.stop.prevent="setEntryAffixLevel(entry, 1, level)"
+                      />
+                    </div>
+                    <span
+                      class="attr-value"
+                      :class="{ 'attr-value--full': entry.affix1_level === 6 }"
+                    >
+                      +{{ entry.affix1_level }} / 6
+                    </span>
+                    <span v-if="entry.affix1_level === 6" class="max-label">MAX</span>
                   </div>
-                </v-col>
-              </v-row>
+
+                  <div class="attr-control attr-control--teal" @click.stop>
+                    <span class="attr-label">附加属性</span>
+                    <div aria-label="附加属性等级" class="attr-pips" role="group">
+                      <span
+                        v-for="level in affixLevelItems"
+                        :key="`a2-${level}`"
+                        :aria-label="`设置附加属性为 +${level}`"
+                        class="pip"
+                        :class="{
+                          active: level <= entry.affix2_level,
+                          'pip--max': entry.affix2_level === 6,
+                        }"
+                        role="button"
+                        tabindex="0"
+                        @click.stop="setEntryAffixLevel(entry, 2, level)"
+                        @keydown.enter.stop.prevent="setEntryAffixLevel(entry, 2, level)"
+                        @keydown.space.stop.prevent="setEntryAffixLevel(entry, 2, level)"
+                      />
+                    </div>
+                    <span
+                      class="attr-value"
+                      :class="{ 'attr-value--full': entry.affix2_level === 6 }"
+                    >
+                      +{{ entry.affix2_level }} / 6
+                    </span>
+                    <span v-if="entry.affix2_level === 6" class="max-label">MAX</span>
+                  </div>
+
+                  <div class="attr-control attr-control--indigo" @click.stop>
+                    <span class="attr-label">技能属性</span>
+                    <div aria-label="技能属性等级" class="attr-pips attr-pips--skill" role="group">
+                      <span
+                        v-for="level in skillLevelItems"
+                        :key="`a3-${level}`"
+                        :aria-label="`设置技能属性为 +${level}`"
+                        class="pip"
+                        :class="{
+                          active: level <= entry.affix3_level,
+                          'pip--max': entry.affix3_level === 3,
+                        }"
+                        role="button"
+                        tabindex="0"
+                        @click.stop="setEntryAffixLevel(entry, 3, level)"
+                        @keydown.enter.stop.prevent="setEntryAffixLevel(entry, 3, level)"
+                        @keydown.space.stop.prevent="setEntryAffixLevel(entry, 3, level)"
+                      />
+                    </div>
+                    <span
+                      class="attr-value"
+                      :class="{ 'attr-value--full': entry.affix3_level === 3 }"
+                    >
+                      +{{ entry.affix3_level }} / 3
+                    </span>
+                    <span v-if="entry.affix3_level === 3" class="max-label">MAX</span>
+                  </div>
+                </section>
+
+                <section class="card-action-rail">
+                  <v-tooltip text="计算此武器的刷取建议">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        class="matrix-action matrix-action--calc"
+                        color="primary"
+                        icon="mdi-calculator"
+                        size="small"
+                        variant="tonal"
+                        @click.stop="computeSingle(entry)"
+                      />
+                    </template>
+                  </v-tooltip>
+                  <v-tooltip text="移除此武器">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        class="matrix-action matrix-action--delete"
+                        color="error"
+                        icon="mdi-delete-outline"
+                        size="small"
+                        variant="tonal"
+                        @click.stop="removeEntry(index)"
+                      />
+                    </template>
+                  </v-tooltip>
+                </section>
+              </div>
             </v-card-text>
           </v-card>
 
@@ -215,11 +256,13 @@
           <v-row align="center" class="mb-4">
             <v-col cols="12" md="4">
               <v-select
+                id="treasure-matrix-target-affix1"
                 v-model="targetAffix1"
                 density="compact"
                 hide-details
-                :items="[1, 2, 3, 4, 5, 6]"
+                :items="affixLevelItems"
                 label="目标基础属性"
+                name="treasure-matrix-target-affix1"
                 variant="outlined"
               >
                 <template #selection="{ item }">+{{ item.title }}</template>
@@ -232,11 +275,13 @@
             </v-col>
             <v-col cols="12" md="4">
               <v-select
+                id="treasure-matrix-target-affix2"
                 v-model="targetAffix2"
                 density="compact"
                 hide-details
-                :items="[1, 2, 3, 4, 5, 6]"
+                :items="affixLevelItems"
                 label="目标附加属性"
+                name="treasure-matrix-target-affix2"
                 variant="outlined"
               >
                 <template #selection="{ item }">+{{ item.title }}</template>
@@ -249,11 +294,13 @@
             </v-col>
             <v-col cols="12" md="4">
               <v-select
+                id="treasure-matrix-target-affix3"
                 v-model="targetAffix3"
                 density="compact"
                 hide-details
-                :items="[1, 2, 3]"
+                :items="skillLevelItems"
                 label="目标技能属性"
+                name="treasure-matrix-target-affix3"
                 variant="outlined"
               >
                 <template #selection="{ item }">+{{ item.title }}</template>
@@ -475,12 +522,14 @@
         </v-card-title>
         <v-card-text>
           <v-text-field
+            id="treasure-matrix-weapon-search"
             v-model="weaponSearch"
             class="mb-4"
             clearable
             density="compact"
             hide-details
             label="搜索武器名称..."
+            name="treasure-matrix-weapon-search"
             prepend-inner-icon="mdi-magnify"
             variant="outlined"
           />
@@ -543,9 +592,6 @@ const { selectedRarities } = useRarityFilters()
 
 const { weaponsMap, weaponTypes } = useStaticData()
 
-// 控制面板展开状态
-const openedPanels = ref<number[]>([0, 1, 2])
-
 const showAddWeaponDialog = ref(false)
 const weaponSearch = ref('')
 const computing = ref(false)
@@ -553,6 +599,9 @@ const computing = ref(false)
 const targetAffix1 = ref(6)
 const targetAffix2 = ref(6)
 const targetAffix3 = ref(3)
+
+const affixLevelItems = [1, 2, 3, 4, 5, 6]
+const skillLevelItems = [1, 2, 3]
 
 interface Recommendation {
   weapon_id: string
@@ -587,6 +636,9 @@ const savedRecommendations = localStorage.getItem('treasureMatrixRecommendations
 const recommendations = ref<Recommendation[]>(
   savedRecommendations ? JSON.parse(savedRecommendations) : []
 )
+
+// Keep cached recommendations as the only initially open panel to avoid mounting every panel on route enter.
+const openedPanels = ref<number[]>(recommendations.value.length > 0 ? [2] : [0, 1, 2])
 
 // 监听 recommendations 变化，保存到 localStorage
 watch(
@@ -694,13 +746,27 @@ const filteredMatrixEntries = computed(() => {
   })
 })
 
-function getWeaponStats(weaponId: string): string {
+function getWeaponTraitNames(weaponId: string): string[] {
   const stats = getStatsForWeapon(weaponId)
   const parts: string[] = []
   if (stats.attribute) parts.push(getGemTagName(stats.attribute))
   if (stats.secondary) parts.push(getGemTagName(stats.secondary))
   if (stats.skill) parts.push(getGemTagName(stats.skill))
-  return parts.join('、') || '无属性'
+  return parts.length > 0 ? parts : ['无属性']
+}
+
+function getWeaponRarity(weaponId: string): number | null {
+  return weaponsMap.value.get(weaponId)?.rarity ?? null
+}
+
+function getWeaponTierClass(weaponId: string): string {
+  const rarity = getWeaponRarity(weaponId)
+  return rarity ? `tier-${rarity}` : ''
+}
+
+function getWeaponRarityText(weaponId: string): string {
+  const rarity = getWeaponRarity(weaponId)
+  return rarity ? `${rarity}★` : '??'
 }
 
 function filteredWeaponIds(weaponIds: string[]): string[] {
@@ -808,6 +874,13 @@ function toggleIncludeInCalculation(entry: TreasureMatrixEntry) {
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
+function setEntryAffixLevel(entry: TreasureMatrixEntry, affixIndex: 1 | 2 | 3, level: number) {
+  if (affixIndex === 1) entry.affix1_level = level
+  if (affixIndex === 2) entry.affix2_level = level
+  if (affixIndex === 3) entry.affix3_level = level
+  onEntryChange()
+}
+
 function onEntryChange() {
   // 检查是否有武器达到满级（6/6/3），自动取消勾选
   for (const entry of matrixEntries.value) {
@@ -909,11 +982,6 @@ function navigateToPlanner() {
 
 onMounted(() => {
   fetchProfiles()
-
-  // 如果有保存的推荐结果，自动折叠武器总览和宝藏基质配置面板
-  if (recommendations.value.length > 0) {
-    openedPanels.value = [2]
-  }
 })
 </script>
 
@@ -923,34 +991,364 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
 .treasure-matrix-page {
   .entry-card {
     position: relative;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
     overflow: hidden;
+    border-color: rgba(var(--v-border-color), 0.12);
+    border-radius: 18px;
+    background:
+      linear-gradient(135deg, rgba(var(--v-theme-surface), 1), rgba(var(--v-theme-primary), 0.035)),
+      rgb(var(--v-theme-surface));
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease,
+      opacity 0.18s ease, filter 0.18s ease;
 
     &:hover {
       transform: translateY(-1px);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+      border-color: rgba(var(--v-theme-primary), 0.35);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09), 0 2px 8px rgba(15, 23, 42, 0.06) !important;
     }
 
-    // 选中状态的左侧淡蓝色渐变
-    &.entry-card--selected::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 10px;
-      background: linear-gradient(
-        to right,
-        rgba(33, 150, 243, 0.8),
-        rgba(33, 150, 243, 0.4),
-        transparent
-      );
-      z-index: 1;
+    &.entry-card--muted {
+      opacity: 0.58;
+      filter: grayscale(0.25);
+
+      &:hover {
+        opacity: 0.82;
+        filter: grayscale(0);
+      }
     }
 
     .clickable-card {
       cursor: pointer;
       user-select: none;
+    }
+
+    .matrix-card-body {
+      display: flex;
+      align-items: stretch;
+      min-height: 76px;
+    }
+
+    .weapon-identity {
+      position: relative;
+      display: flex;
+      flex: 0 0 270px;
+      align-items: center;
+      gap: 12px;
+      padding: 0 20px;
+      background: linear-gradient(135deg, rgba(var(--v-theme-surface), 0.98), rgba(var(--v-theme-primary), 0.06));
+      border-right: 1px solid rgba(var(--v-border-color), 0.12);
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: 18px;
+        right: 0;
+        bottom: 18px;
+        width: 1px;
+        background: linear-gradient(
+          to bottom,
+          transparent,
+          rgba(var(--v-border-color), 0.28),
+          transparent
+        );
+      }
+    }
+
+    .weapon-icon-wrap {
+      position: relative;
+      width: 46px;
+      height: 46px;
+      flex-shrink: 0;
+      border: 2px solid rgba(var(--v-theme-primary), 0.35);
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(var(--v-theme-primary), 0.16);
+    }
+
+    .weapon-icon-wrap .weapon-icon-small {
+      width: 100% !important;
+      height: 100% !important;
+      border-radius: 8px;
+    }
+
+    .weapon-icon-wrap.tier-6 {
+      border-color: #ff5a36;
+      box-shadow: 0 4px 14px rgba(255, 90, 54, 0.28);
+    }
+
+    .weapon-icon-wrap.tier-6 .weapon-tier {
+      background: #ff5a36;
+    }
+
+    .weapon-icon-wrap.tier-5 {
+      border-color: #ffb020;
+      box-shadow: 0 4px 14px rgba(255, 176, 32, 0.28);
+    }
+
+    .weapon-icon-wrap.tier-5 .weapon-tier {
+      background: #ffb020;
+    }
+
+    .weapon-icon-wrap.tier-4 {
+      border-color: #8e5cff;
+      box-shadow: 0 4px 14px rgba(142, 92, 255, 0.24);
+    }
+
+    .weapon-icon-wrap.tier-4 .weapon-tier {
+      background: #8e5cff;
+    }
+
+    .weapon-icon-wrap.tier-3 {
+      border-color: #2196f3;
+      box-shadow: 0 4px 14px rgba(33, 150, 243, 0.22);
+    }
+
+    .weapon-icon-wrap.tier-3 .weapon-tier {
+      background: #2196f3;
+    }
+
+    .weapon-tier {
+      position: absolute;
+      right: -8px;
+      bottom: -7px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      color: #fff;
+      background: rgba(15, 23, 42, 0.82);
+      font-size: 0.625rem;
+      font-weight: 800;
+      line-height: 1.5;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+    }
+
+    .weapon-info {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .weapon-name {
+      overflow: hidden;
+      color: rgba(var(--v-theme-on-surface), 0.92);
+      font-size: 0.95rem;
+      font-weight: 800;
+      line-height: 1.3;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .weapon-traits {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px 0;
+      margin-top: 4px;
+      color: rgba(var(--v-theme-on-surface), 0.58);
+      font-size: 0.75rem;
+      line-height: 1.35;
+    }
+
+    .trait {
+      white-space: nowrap;
+
+      &::after {
+        content: ' / ';
+        opacity: 0.42;
+      }
+
+      &:last-child::after {
+        display: none;
+      }
+    }
+
+    .participation-chip {
+      margin-top: 8px;
+      font-weight: 700;
+    }
+
+    .attribute-section {
+      display: flex;
+      flex: 1;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 18px;
+    }
+
+    .attr-control {
+      position: relative;
+      display: flex;
+      flex: 1;
+      min-width: 118px;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 0 10px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+
+      &:hover {
+        transform: translateY(-1px);
+        border-color: rgba(var(--v-border-color), 0.16);
+        background: rgba(var(--v-theme-on-surface), 0.035);
+      }
+    }
+
+    .attr-label {
+      color: rgba(var(--v-theme-on-surface), 0.52);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .attr-pips {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      min-height: 18px;
+    }
+
+    .pip {
+      width: 8px;
+      height: 17px;
+      border-radius: 999px;
+      background: rgba(var(--v-theme-on-surface), 0.12);
+      cursor: pointer;
+      transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+
+      &:hover,
+      &:focus-visible {
+        outline: none;
+        transform: translateY(-1px) scaleY(1.08);
+      }
+    }
+
+    .attr-control--primary .pip.active {
+      background: rgb(var(--v-theme-primary));
+      box-shadow: 0 2px 7px rgba(var(--v-theme-primary), 0.32);
+    }
+
+    .attr-control--teal .pip.active {
+      background: #48a9a6;
+      box-shadow: 0 2px 7px rgba(72, 169, 166, 0.34);
+    }
+
+    .attr-control--indigo .pip.active {
+      background: #5c6bc0;
+      box-shadow: 0 2px 7px rgba(92, 107, 192, 0.34);
+    }
+
+    .pip.pip--max.active {
+      animation: matrixPipPulse 2.2s ease-in-out infinite;
+    }
+
+    .attr-value {
+      color: rgba(var(--v-theme-on-surface), 0.68);
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .attr-value--full {
+      color: rgb(var(--v-theme-primary));
+    }
+
+    .max-label {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      color: rgb(var(--v-theme-primary));
+      background: rgba(var(--v-theme-primary), 0.1);
+      font-size: 0.62rem;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+    }
+
+    .card-action-rail {
+      display: flex;
+      flex: 0 0 auto;
+      flex-direction: column;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 16px 10px 0;
+    }
+
+    .matrix-action {
+      border-radius: 10px;
+    }
+
+  }
+
+  @keyframes matrixPipPulse {
+    0%,
+    100% {
+      transform: scaleY(1);
+      filter: brightness(1);
+    }
+
+    50% {
+      transform: scaleY(1.08);
+      filter: brightness(1.18);
+    }
+  }
+
+  @media (max-width: 900px) {
+    .entry-card {
+      .matrix-card-body {
+        flex-direction: column;
+      }
+
+      .weapon-identity {
+        flex: none;
+        border-right: none;
+        border-bottom: 1px solid rgba(var(--v-border-color), 0.12);
+
+        &::after {
+          display: none;
+        }
+      }
+
+      .attribute-section {
+        padding: 14px 16px;
+      }
+
+      .card-action-rail {
+        flex-direction: row;
+        justify-content: flex-end;
+        padding: 0 16px 14px;
+      }
+    }
+  }
+
+  @media (max-width: 640px) {
+    .entry-card {
+      .weapon-identity {
+        padding: 16px;
+      }
+
+      .attribute-section {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .attr-control {
+        display: grid;
+        grid-template-columns: 72px 1fr 104px;
+        align-items: center;
+        width: 100%;
+      }
+
+      .attr-pips {
+        justify-content: center;
+      }
+
+      .max-label {
+        top: 50%;
+        right: 122px;
+        transform: translateY(-50%);
+      }
     }
   }
 
