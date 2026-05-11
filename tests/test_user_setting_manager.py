@@ -160,8 +160,8 @@ def test_update_from_dict_invalid_data(manager):
         manager.update_from_dict({"trash_weapon_ids": "not a list"})
 
 
-def test_config_migration_from_v3_to_v4():
-    """测试从 v3 迁移到 v4"""
+def test_config_migration_from_v3_to_current():
+    """测试从 v3 迁移到当前版本"""
     old_config = {
         "version": 3,
         "trash_weapon_ids": ["weapon_1"],
@@ -185,8 +185,13 @@ def test_config_migration_from_v3_to_v4():
     # 验证新字段有默认值
     assert migrated.update_mirror == "github"
     assert migrated.update_proxy == ""
+    assert migrated.treasure_essence_match_mode == "all"
+    assert migrated.high_level_treasure_match_mode == "any"
+    assert migrated.high_level_treasure_stats == []
+    assert migrated.same_type_treasure_limit_enabled is False
+    assert migrated.same_type_treasure_limit == 1
     # 验证版本更新
-    assert migrated.version == 4
+    assert migrated.version == UserSetting._VERSION
 
 
 def test_config_migration_invalid_version():
@@ -240,6 +245,7 @@ def test_user_setting_schema_stability():
         "version",
         "trash_weapon_ids",
         "treasure_essence_stats",
+        "treasure_essence_match_mode",
         "treasure_action",
         "trash_action",
         "non_five_star_behavior",
@@ -247,6 +253,10 @@ def test_user_setting_schema_stability():
         "high_level_treasure_attribute_threshold",
         "high_level_treasure_secondary_threshold",
         "high_level_treasure_skill_threshold",
+        "high_level_treasure_match_mode",
+        "high_level_treasure_stats",
+        "same_type_treasure_limit_enabled",
+        "same_type_treasure_limit",
         "auto_page_flip",
         "update_mirror",
         "update_proxy",
@@ -267,8 +277,8 @@ def test_user_setting_schema_stability():
     )
 
 
-def test_config_migration_chain_v2_to_v4():
-    """测试跨版本链式迁移：v2 → v3 → v4（早期 v2，缺少后期新增字段）"""
+def test_config_migration_chain_v2_to_current():
+    """测试跨版本链式迁移：v2 → 当前版本（早期 v2，缺少后期新增字段）"""
     early_v2_config = {
         "version": 2,
         "trash_weapon_ids": ["weapon_v2"],
@@ -284,7 +294,7 @@ def test_config_migration_chain_v2_to_v4():
 
     migrated = UserSetting.migrate_from_old_version(early_v2_config)
 
-    assert migrated.version == 4
+    assert migrated.version == UserSetting._VERSION
     assert migrated.trash_weapon_ids == ["weapon_v2"]
     # v2→v3 补充的字段
     assert migrated.non_five_star_behavior == "process"
@@ -292,6 +302,12 @@ def test_config_migration_chain_v2_to_v4():
     # v3→v4 补充的字段
     assert migrated.update_mirror == "github"
     assert migrated.update_proxy == ""
+    # v4→v5 补充的字段
+    assert migrated.treasure_essence_match_mode == "all"
+    assert migrated.high_level_treasure_match_mode == "any"
+    assert migrated.high_level_treasure_stats == []
+    assert migrated.same_type_treasure_limit_enabled is False
+    assert migrated.same_type_treasure_limit == 1
 
 
 def test_migrations_completeness():

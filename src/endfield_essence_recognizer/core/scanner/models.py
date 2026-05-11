@@ -63,3 +63,6 @@ class EvaluationResult:
 
     is_high_level: bool = False
     """Whether any attribute on the essence exceeded a high-level threshold."""
+
+    stop_scan: bool = False
+    """Whether the scanner should stop after this evaluation."""

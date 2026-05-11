@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 class Action(StrEnum):
@@ -29,6 +29,22 @@ class NonFiveStarBehavior(StrEnum):
     SKIP = "skip"
     """Skip any operations on non-5-star essences."""
 
+    STOP = "stop"
+    """Stop the current scan when a non-5-star essence is encountered."""
+
+
+class TreasureMatchMode(StrEnum):
+    """How configured treasure conditions are matched."""
+
+    ONLY = "only"
+    """Only configured slots are checked; unconfigured slots are ignored."""
+
+    ALL = "all"
+    """All three slots must be configured and matched."""
+
+    ANY = "any"
+    """Any configured slot can match."""
+
 
 class EssenceStats(BaseModel):
     attribute: str | None
@@ -36,13 +52,26 @@ class EssenceStats(BaseModel):
     skill: str | None
 
 
+class HighLevelTreasureStats(BaseModel):
+    attribute: str | None = None
+    secondary: str | None = None
+    skill: str | None = None
+    attribute_threshold: int = Field(default=3, ge=1, le=6)
+    secondary_threshold: int = Field(default=3, ge=1, le=6)
+    skill_threshold: int = Field(default=3, ge=1, le=3)
+
+
 class UserSetting(BaseModel):
-    _VERSION: ClassVar[int] = 4
+    _VERSION: ClassVar[int] = 5
+    _same_type_treasure_counts: dict[tuple[str | None, ...], int] = PrivateAttr(
+        default_factory=dict
+    )
 
     version: int = _VERSION
 
     trash_weapon_ids: list[str] = []
     treasure_essence_stats: list[EssenceStats] = []
+    treasure_essence_match_mode: TreasureMatchMode = TreasureMatchMode.ALL
 
     treasure_action: Action = Action.LOCK
     trash_action: Action = Action.UNLOCK
@@ -58,6 +87,15 @@ class UserSetting(BaseModel):
     """高等级附加属性词条的等级阈值（+1~+6）"""
     high_level_treasure_skill_threshold: int = Field(default=3, ge=1, le=3)
     """高等级技能属性词条的等级阈值（+1~+3）"""
+    high_level_treasure_match_mode: TreasureMatchMode = TreasureMatchMode.ANY
+    """高等级属性词条的匹配方式：仅/和/或。"""
+    high_level_treasure_stats: list[HighLevelTreasureStats] = []
+    """仅指定属性词条达到等级阈值时，才视为高等级宝藏；为空则沿用全属性阈值。"""
+
+    same_type_treasure_limit_enabled: bool = False
+    """是否启用同类型宝藏基质数量上限。"""
+    same_type_treasure_limit: int = Field(default=1, ge=1, le=999)
+    """每类宝藏基质允许保留的数量上限；超过后视为养成材料。"""
 
     auto_page_flip: bool = True
     """扫描时是否自动翻页"""
@@ -79,11 +117,21 @@ class UserSetting(BaseModel):
         data.setdefault("update_mirror", "github")
         data.setdefault("update_proxy", "")
 
+    @staticmethod
+    def _migrate_v4_to_v5(data: dict) -> None:
+        """v4 → v5: 添加宝藏匹配方式、限定高等级属性和同类型数量上限。"""
+        data.setdefault("treasure_essence_match_mode", "all")
+        data.setdefault("high_level_treasure_match_mode", "any")
+        data.setdefault("high_level_treasure_stats", [])
+        data.setdefault("same_type_treasure_limit_enabled", False)
+        data.setdefault("same_type_treasure_limit", 1)
+
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）
     _MIGRATIONS: ClassVar[dict[int, Any]] = {
         2: _migrate_v2_to_v3.__func__,
         3: _migrate_v3_to_v4.__func__,
+        4: _migrate_v4_to_v5.__func__,
     }
 
     @classmethod

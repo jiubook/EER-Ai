@@ -365,6 +365,11 @@ class ScannerEngine:
             else:
                 logger.opt(colors=True).success(evaluation.log_message)
 
+            if evaluation.stop_scan:
+                logger.info("已根据设置结束本次基质扫描。")
+                stop_event.set()
+                break
+
             # Decide actions
             actions = decide_actions(data, evaluation, user_setting)
 
@@ -654,6 +659,11 @@ class DraggableScannerEngine(ScannerEngine):
                     logger.opt(colors=True).warning(evaluation.log_message)
                 else:
                     logger.opt(colors=True).success(evaluation.log_message)
+
+                if evaluation.stop_scan:
+                    logger.info("已根据设置结束本次基质扫描。")
+                    stop_event.set()
+                    return
 
                 actions = decide_actions(data, evaluation, user_setting)
 
