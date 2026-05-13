@@ -8,9 +8,14 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 from dataclasses import dataclass
+from json import JSONDecodeError
 from typing import TYPE_CHECKING
+
+from pydantic import ValidationError
 
 from endfield_essence_recognizer.schemas.profile import (
     ProfileCollection,
@@ -22,7 +27,20 @@ from endfield_essence_recognizer.utils.log import logger
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["ProfileManager", "TreasureMatrixSyncResult"]
+__all__ = [
+    "ProfileLoadError",
+    "ProfileManager",
+    "ProfileSaveError",
+    "TreasureMatrixSyncResult",
+]
+
+
+class ProfileLoadError(RuntimeError):
+    """账号配置文件存在但无法安全加载。"""
+
+
+class ProfileSaveError(RuntimeError):
+    """账号配置文件无法安全保存。"""
 
 
 @dataclass(frozen=True)
@@ -36,31 +54,53 @@ class TreasureMatrixSyncResult:
 
 def _load_profiles_from_file(path: Path) -> ProfileCollection | None:
     """从 JSON 文件加载账号配置。"""
-    if not path.is_file():
+    if not path.exists():
         return None
+    if not path.is_file():
+        raise ProfileLoadError(f"账号配置路径不是文件: {path}")
+
     try:
         obj = json.loads(path.read_text(encoding="utf-8"))
         return ProfileCollection.model_validate(obj)
-    except Exception as e:
-        logger.error("Failed to load profiles from {}: {}", path, e)
-        return None
+    except (OSError, JSONDecodeError, ValidationError) as exc:
+        broken_path = path.with_suffix(f"{path.suffix}.broken")
+        try:
+            if broken_path.exists():
+                broken_path = path.with_suffix(f"{path.suffix}.broken.{os.getpid()}")
+            path.replace(broken_path)
+            logger.error("账号配置文件无效，已备份到: {}", broken_path)
+        except OSError:
+            logger.exception("账号配置文件无效，且备份失败: {}", path)
+        raise ProfileLoadError(f"账号配置文件无法加载: {path}") from exc
 
 
-def _save_profiles_to_file(collection: ProfileCollection, path: Path) -> bool:
+def _save_profiles_to_file(collection: ProfileCollection, path: Path) -> None:
     """原子性地保存账号配置到 JSON 文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = collection.model_dump_json(indent=4, ensure_ascii=False)
+
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+        text=True,
+    )
+    tmp_path = type(path)(tmp_name)
+
     try:
-        # 先写入临时文件
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            collection.model_dump_json(indent=4, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        # 原子替换
-        temp_path.replace(path)
-        return True
-    except Exception as e:
-        logger.error("Failed to save profiles to {}: {}", path, e)
-        return False
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as file:
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+
+        os.replace(tmp_path, path)
+    except Exception as exc:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("清理账号配置临时文件失败: {}", tmp_path)
+        logger.exception("保存账号配置失败: {}", path)
+        raise ProfileSaveError(f"账号配置文件无法保存: {path}") from exc
 
 
 class ProfileManager:
@@ -94,8 +134,10 @@ class ProfileManager:
                 )
             else:
                 logger.info("未找到账号配置文件，使用默认配置。")
-                self._collection.ensure_default()
-                self._save_unlocked()
+                collection = ProfileCollection()
+                collection.ensure_default()
+                _save_profiles_to_file(collection, self._profiles_file)
+                self._collection = collection
 
     def save(self) -> None:
         """保存账号配置到磁盘。"""
@@ -106,6 +148,11 @@ class ProfileManager:
         """保存账号配置；调用方必须已经持有 `_lock`。"""
         _save_profiles_to_file(self._collection, self._profiles_file)
 
+    def _commit_collection_unlocked(self, collection: ProfileCollection) -> None:
+        """保存新集合并在成功后替换内存状态；调用方必须已经持有 `_lock`。"""
+        _save_profiles_to_file(collection, self._profiles_file)
+        self._collection = collection
+
     def _get_active_unlocked(self) -> ProfileData:
         """获取激活账号；调用方必须已经持有 `_lock`。"""
         return self._collection.get_active()
@@ -113,12 +160,12 @@ class ProfileManager:
     def get_collection(self) -> ProfileCollection:
         """获取当前账号集合。"""
         with self._lock:
-            return self._collection
+            return self._collection.model_copy(deep=True)
 
     def get_active_profile(self) -> ProfileData:
         """获取激活的账号数据。"""
         with self._lock:
-            return self._get_active_unlocked()
+            return self._get_active_unlocked().model_copy(deep=True)
 
     def get_active_profile_name(self) -> str:
         """获取激活的账号名称。"""
@@ -139,13 +186,14 @@ class ProfileManager:
             ValueError: 如果名称无效。
         """
         with self._lock:
+            collection = self._collection.model_copy(deep=True)
             name = self._validate_profile_name(name)
-            if name not in self._collection.profiles:
-                self._collection.profiles[name] = ProfileData(name=name)
-            self._collection.active_profile = name
-            self._save_unlocked()
+            if name not in collection.profiles:
+                collection.profiles[name] = ProfileData(name=name)
+            collection.active_profile = name
+            self._commit_collection_unlocked(collection)
             logger.info("切换到账号: {}", name)
-            return self._collection.profiles[name]
+            return collection.profiles[name].model_copy(deep=True)
 
     @staticmethod
     def _validate_profile_name(name: str) -> str:
@@ -192,22 +240,23 @@ class ProfileManager:
             ValueError: 如果 old_name 不存在、new_name 已被占用或 new_name 无效。
         """
         with self._lock:
-            if old_name not in self._collection.profiles:
+            collection = self._collection.model_copy(deep=True)
+            if old_name not in collection.profiles:
                 raise ValueError(f"账号 '{old_name}' 不存在")
             new_name = self._validate_profile_name(new_name)
-            if new_name in self._collection.profiles:
+            if new_name in collection.profiles:
                 raise ValueError(f"账号 '{new_name}' 已存在")
 
-            profile = self._collection.profiles.pop(old_name)
+            profile = collection.profiles.pop(old_name)
             profile.name = new_name
-            self._collection.profiles[new_name] = profile
+            collection.profiles[new_name] = profile
 
-            if self._collection.active_profile == old_name:
-                self._collection.active_profile = new_name
+            if collection.active_profile == old_name:
+                collection.active_profile = new_name
 
-            self._save_unlocked()
+            self._commit_collection_unlocked(collection)
             logger.info("重命名账号: {} -> {}", old_name, new_name)
-            return profile
+            return profile.model_copy(deep=True)
 
     def delete_profile(self, name: str) -> None:
         """删除账号。
@@ -221,15 +270,16 @@ class ProfileManager:
             ValueError: 如果账号是 'default'、是激活账号或不存在。
         """
         with self._lock:
+            collection = self._collection.model_copy(deep=True)
             if name == "default":
                 raise ValueError("不能删除默认账号")
-            if name not in self._collection.profiles:
+            if name not in collection.profiles:
                 raise ValueError(f"账号 '{name}' 不存在")
-            if self._collection.active_profile == name:
+            if collection.active_profile == name:
                 raise ValueError("不能删除当前正在使用的账号")
 
-            del self._collection.profiles[name]
-            self._save_unlocked()
+            del collection.profiles[name]
+            self._commit_collection_unlocked(collection)
             logger.info("删除账号: {}", name)
 
     def update_treasure_matrix(self, entries: list[TreasureMatrixEntry]) -> ProfileData:
@@ -242,13 +292,14 @@ class ProfileManager:
             更新后的 ProfileData。
         """
         with self._lock:
-            profile = self._get_active_unlocked()
-            profile.treasure_matrix = entries
-            for entry in entries:
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
+            profile.treasure_matrix = [entry.model_copy(deep=True) for entry in entries]
+            for entry in profile.treasure_matrix:
                 if entry.priority > 0:
                     profile.weapon_priorities[entry.weapon_id] = entry.priority
-            self._save_unlocked()
-            return profile
+            self._commit_collection_unlocked(collection)
+            return profile.model_copy(deep=True)
 
     def add_treasure_matrix_entry(self, entry: TreasureMatrixEntry) -> ProfileData:
         """添加或更新单个宝藏基质条目。
@@ -262,7 +313,9 @@ class ProfileManager:
             更新后的 ProfileData。
         """
         with self._lock:
-            profile = self._get_active_unlocked()
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
+            entry = entry.model_copy(deep=True)
             if entry.weapon_id in profile.weapon_priorities:
                 entry.priority = profile.weapon_priorities[entry.weapon_id]
             elif entry.priority > 0:
@@ -271,8 +324,8 @@ class ProfileManager:
                 e for e in profile.treasure_matrix if e.weapon_id != entry.weapon_id
             ]
             profile.treasure_matrix.append(entry)
-            self._save_unlocked()
-            return profile
+            self._commit_collection_unlocked(collection)
+            return profile.model_copy(deep=True)
 
     def sync_treasure_matrix_entries(
         self, entries: list[TreasureMatrixEntry]
@@ -284,7 +337,8 @@ class ProfileManager:
         在确实有变更时统一保存。
         """
         with self._lock:
-            profile = self._get_active_unlocked()
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
             existing_by_weapon_id = {
                 entry.weapon_id: entry for entry in profile.treasure_matrix
             }
@@ -292,6 +346,7 @@ class ProfileManager:
             updated: list[TreasureMatrixEntry] = []
 
             for incoming in entries:
+                incoming = incoming.model_copy(deep=True)
                 existing = existing_by_weapon_id.get(incoming.weapon_id)
                 if existing is None:
                     if incoming.weapon_id in profile.weapon_priorities:
@@ -335,12 +390,12 @@ class ProfileManager:
                     updated.append(existing)
 
             if added or updated:
-                self._save_unlocked()
+                self._commit_collection_unlocked(collection)
 
             return TreasureMatrixSyncResult(
-                profile=profile,
-                added=added,
-                updated=updated,
+                profile=profile.model_copy(deep=True),
+                added=[entry.model_copy(deep=True) for entry in added],
+                updated=[entry.model_copy(deep=True) for entry in updated],
             )
 
     def remove_treasure_matrix_entry(self, weapon_id: str) -> ProfileData:
@@ -353,12 +408,13 @@ class ProfileManager:
             更新后的 ProfileData。
         """
         with self._lock:
-            profile = self._get_active_unlocked()
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
             profile.treasure_matrix = [
                 e for e in profile.treasure_matrix if e.weapon_id != weapon_id
             ]
-            self._save_unlocked()
-            return profile
+            self._commit_collection_unlocked(collection)
+            return profile.model_copy(deep=True)
 
     def update_weapon_overview_filters(self, filters: dict[str, bool]) -> ProfileData:
         """更新激活账号的武器总览过滤器配置。
@@ -370,10 +426,11 @@ class ProfileManager:
             更新后的 ProfileData。
         """
         with self._lock:
-            profile = self._get_active_unlocked()
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
             profile.weapon_overview_filters = filters
-            self._save_unlocked()
-            return profile
+            self._commit_collection_unlocked(collection)
+            return profile.model_copy(deep=True)
 
     def update_weapon_priority(self, weapon_id: str, priority: int) -> ProfileData:
         """更新单个武器优先级，未拥有宝藏基质的武器也会保存。
@@ -386,7 +443,8 @@ class ProfileManager:
             更新后的 ProfileData。
         """
         with self._lock:
-            profile = self._get_active_unlocked()
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
             if priority > 0:
                 profile.weapon_priorities[weapon_id] = priority
             else:
@@ -397,5 +455,5 @@ class ProfileManager:
                     entry.priority = priority
                     break
 
-            self._save_unlocked()
-            return profile
+            self._commit_collection_unlocked(collection)
+            return profile.model_copy(deep=True)

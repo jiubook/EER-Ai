@@ -6,7 +6,7 @@ dist/
 wheels/
 *.egg-info
 
-# Rust build artifacts
+# Rust 构建产物
 target/
 
 # Virtual environments

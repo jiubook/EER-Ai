@@ -46,7 +46,7 @@ class ProfileData(BaseModel):
     name: str = "default"
     """账号显示名称。"""
 
-    treasure_matrix: list[TreasureMatrixEntry] = []
+    treasure_matrix: list[TreasureMatrixEntry] = Field(default_factory=list)
     """此账号保存的宝藏基质配置。"""
 
     weapon_overview_filters: dict[str, bool] = Field(

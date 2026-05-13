@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from endfield_essence_recognizer.core.farming_calculator import (
     FarmingRecommendation,
@@ -36,7 +36,7 @@ _profile_manager: ProfileManager | None = None
 def get_profile_manager() -> ProfileManager:
     """获取全局账号管理器实例。"""
     if _profile_manager is None:
-        raise RuntimeError("ProfileManager not initialized")
+        raise HTTPException(status_code=503, detail="Profile manager not initialized")
     return _profile_manager
 
 
@@ -66,6 +66,8 @@ async def get_active_profile(
 
 
 class SwitchProfileRequest(BaseModel):
+    """切换账号请求体。"""
+
     name: str
 
 
@@ -82,6 +84,8 @@ async def switch_profile(
 
 
 class RenameProfileRequest(BaseModel):
+    """重命名账号请求体。"""
+
     old_name: str
     new_name: str
 
@@ -99,6 +103,8 @@ async def rename_profile(
 
 
 class DeleteProfileRequest(BaseModel):
+    """删除账号请求体。"""
+
     name: str
 
 
@@ -127,6 +133,8 @@ async def get_treasure_matrix(
 
 
 class UpdateTreasureMatrixRequest(BaseModel):
+    """更新完整宝藏基质配置的请求体。"""
+
     entries: list[TreasureMatrixEntry]
 
 
@@ -140,6 +148,8 @@ async def update_treasure_matrix(
 
 
 class AddTreasureMatrixEntryRequest(BaseModel):
+    """新增或更新单个宝藏基质条目的请求体。"""
+
     weapon_id: str
     weapon_name: str = ""
     affix1_level: int = Field(default=1, ge=1, le=6)
@@ -166,6 +176,8 @@ async def add_treasure_matrix_entry(
 
 
 class RemoveTreasureMatrixEntryRequest(BaseModel):
+    """移除单个宝藏基质条目的请求体。"""
+
     weapon_id: str
 
 
@@ -182,6 +194,8 @@ async def remove_treasure_matrix_entry(
 
 
 class FarmingRequest(BaseModel):
+    """计算单把武器刷取建议的请求体。"""
+
     weapon_id: str
     current_levels: tuple[int, int, int] = Field(
         default=(1, 1, 1),
@@ -215,41 +229,82 @@ async def get_farming_recommendation(
 
 
 class BatchFarmingRequest(BaseModel):
+    """批量计算刷取建议的请求体。"""
+
     items: list[FarmingRequest]
+
+
+class BatchFarmingItemResult(BaseModel):
+    """单个批量刷取建议的计算结果。"""
+
+    weapon_id: str
+    recommendation: FarmingRecommendation | None = None
+    error: str | None = None
 
 
 @router.post("/farming_recommendations")
 async def get_batch_farming_recommendations(
     request: BatchFarmingRequest,
     static_data: StaticGameData = Depends(get_static_game_data),
-) -> list[FarmingRecommendation]:
+) -> list[BatchFarmingItemResult]:
     """批量计算多个武器的刷取建议。"""
-    results = []
+    results: list[BatchFarmingItemResult] = []
     for item in request.items:
         weapon = static_data.get_weapon(item.weapon_id)
-        if weapon:
-            try:
-                results.append(
-                    compute_farming_recommendation(
-                        weapon_id=item.weapon_id,
-                        weapon_name=weapon.name,
-                        current_levels=item.current_levels,
-                        target_levels=item.target_levels,
-                    )
+        if not weapon:
+            results.append(
+                BatchFarmingItemResult(
+                    weapon_id=item.weapon_id,
+                    error="Weapon not found",
                 )
-            except ValueError as e:
-                logger.warning("Skipping invalid batch entry {}: {}", item.weapon_id, e)
-                continue
+            )
+            continue
+
+        try:
+            recommendation = compute_farming_recommendation(
+                weapon_id=item.weapon_id,
+                weapon_name=weapon.name,
+                current_levels=item.current_levels,
+                target_levels=item.target_levels,
+            )
+            results.append(
+                BatchFarmingItemResult(
+                    weapon_id=item.weapon_id,
+                    recommendation=recommendation,
+                )
+            )
+        except ValueError as e:
+            logger.warning("Invalid batch entry {}: {}", item.weapon_id, e)
+            results.append(
+                BatchFarmingItemResult(
+                    weapon_id=item.weapon_id,
+                    error=str(e),
+                )
+            )
     return results
 
 
 # --- 武器总览过滤器 ---
 
 
+VALID_RARITY_FILTERS = ("3star", "4star", "5star", "6star")
+
+
 class UpdateWeaponOverviewFiltersRequest(BaseModel):
+    """更新武器总览星级过滤器的请求体。"""
+
     filters: dict[str, bool] = Field(
-        default_factory=lambda: {"3star": True, "4star": True, "5star": True}
+        default_factory=lambda: dict.fromkeys(VALID_RARITY_FILTERS, True)
     )
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, value: dict[str, bool]) -> dict[str, bool]:
+        """校验并补齐星级过滤器配置。"""
+        unknown = set(value) - set(VALID_RARITY_FILTERS)
+        if unknown:
+            raise ValueError(f"未知星级过滤器: {sorted(unknown)}")
+        return {key: bool(value.get(key, True)) for key in VALID_RARITY_FILTERS}
 
 
 @router.post("/weapon_overview_filters")
@@ -262,6 +317,8 @@ async def update_weapon_overview_filters(
 
 
 class UpdateWeaponPriorityRequest(BaseModel):
+    """更新单把武器优先级的请求体。"""
+
     weapon_id: str
     priority: int = Field(default=0, ge=0, le=9)
 

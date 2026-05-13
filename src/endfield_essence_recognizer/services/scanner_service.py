@@ -81,6 +81,7 @@ class ScannerService:
         self._current_engine: AutomationEngine | None = None
         self._last_weapon_essence_counts: dict[WeaponId, int] = {}
         self._last_weapon_essence_levels: dict[WeaponId, tuple[int, int, int]] = {}
+        self._stopping = False
 
     def start_scan(self, scanner_factory: Callable[[], AutomationEngine]) -> None:
         """
@@ -93,6 +94,9 @@ class ScannerService:
             scanner_factory: A callable that returns an AutomationEngine instance.
         """
         with self._lock:
+            if self._stopping:
+                logger.warning("扫描正在停止中。")
+                return
             if self.is_running():
                 logger.warning("扫描已在运行中。")
                 return
@@ -152,8 +156,6 @@ class ScannerService:
             logger.debug(
                 f"从引擎获取的数据 - counts: {len(data.counts)}, levels: {len(data.levels)}"
             )
-            logger.debug(f"counts 内容: {data.counts}")
-            logger.debug(f"levels 内容: {data.levels}")
         except Exception as e:
             logger.error(f"获取扫描数据失败: {e}", exc_info=True)
             return
@@ -193,15 +195,20 @@ class ScannerService:
                 return
 
             logger.debug("正在停止扫描服务...")
+            self._stopping = True
             self._stop_event.set()
             thread_to_join = self._thread
-            self._thread = None
-            self._current_engine = None
 
         # 在锁外等待线程结束，避免死锁
         if thread_to_join is not None:
             thread_to_join.join()
             logger.debug("Scanner thread joined.")
+
+        with self._lock:
+            if self._thread is thread_to_join:
+                self._thread = None
+                self._current_engine = None
+            self._stopping = False
 
         if self._audio_service:
             self._audio_service.play_disable()
@@ -214,7 +221,9 @@ class ScannerService:
             True if the thread is active, False otherwise.
         """
         with self._lock:
-            return self._thread is not None and self._thread.is_alive()
+            return self._stopping or (
+                self._thread is not None and self._thread.is_alive()
+            )
 
     def get_current_engine(self) -> AutomationEngine | None:
         """
