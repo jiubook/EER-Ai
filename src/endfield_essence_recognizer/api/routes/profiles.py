@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from endfield_essence_recognizer.core.farming_calculator import (
     FarmingRecommendation,
@@ -36,7 +36,7 @@ _profile_manager: ProfileManager | None = None
 def get_profile_manager() -> ProfileManager:
     """获取全局账号管理器实例。"""
     if _profile_manager is None:
-        raise RuntimeError("ProfileManager not initialized")
+        raise HTTPException(status_code=503, detail="Profile manager not initialized")
     return _profile_manager
 
 
@@ -218,38 +218,72 @@ class BatchFarmingRequest(BaseModel):
     items: list[FarmingRequest]
 
 
+class BatchFarmingItemResult(BaseModel):
+    weapon_id: str
+    recommendation: FarmingRecommendation | None = None
+    error: str | None = None
+
+
 @router.post("/farming_recommendations")
 async def get_batch_farming_recommendations(
     request: BatchFarmingRequest,
     static_data: StaticGameData = Depends(get_static_game_data),
-) -> list[FarmingRecommendation]:
+) -> list[BatchFarmingItemResult]:
     """批量计算多个武器的刷取建议。"""
-    results = []
+    results: list[BatchFarmingItemResult] = []
     for item in request.items:
         weapon = static_data.get_weapon(item.weapon_id)
-        if weapon:
-            try:
-                results.append(
-                    compute_farming_recommendation(
-                        weapon_id=item.weapon_id,
-                        weapon_name=weapon.name,
-                        current_levels=item.current_levels,
-                        target_levels=item.target_levels,
-                    )
+        if not weapon:
+            results.append(
+                BatchFarmingItemResult(
+                    weapon_id=item.weapon_id,
+                    error="Weapon not found",
                 )
-            except ValueError as e:
-                logger.warning("Skipping invalid batch entry {}: {}", item.weapon_id, e)
-                continue
+            )
+            continue
+
+        try:
+            recommendation = compute_farming_recommendation(
+                weapon_id=item.weapon_id,
+                weapon_name=weapon.name,
+                current_levels=item.current_levels,
+                target_levels=item.target_levels,
+            )
+            results.append(
+                BatchFarmingItemResult(
+                    weapon_id=item.weapon_id,
+                    recommendation=recommendation,
+                )
+            )
+        except ValueError as e:
+            logger.warning("Invalid batch entry {}: {}", item.weapon_id, e)
+            results.append(
+                BatchFarmingItemResult(
+                    weapon_id=item.weapon_id,
+                    error=str(e),
+                )
+            )
     return results
 
 
 # --- 武器总览过滤器 ---
 
 
+VALID_RARITY_FILTERS = ("3star", "4star", "5star", "6star")
+
+
 class UpdateWeaponOverviewFiltersRequest(BaseModel):
     filters: dict[str, bool] = Field(
-        default_factory=lambda: {"3star": True, "4star": True, "5star": True}
+        default_factory=lambda: dict.fromkeys(VALID_RARITY_FILTERS, True)
     )
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, value: dict[str, bool]) -> dict[str, bool]:
+        unknown = set(value) - set(VALID_RARITY_FILTERS)
+        if unknown:
+            raise ValueError(f"未知星级过滤器: {sorted(unknown)}")
+        return {key: bool(value.get(key, True)) for key in VALID_RARITY_FILTERS}
 
 
 @router.post("/weapon_overview_filters")

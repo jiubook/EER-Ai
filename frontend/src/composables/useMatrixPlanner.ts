@@ -4,9 +4,10 @@
  * 改编自 ef-frontend-v1 的基质计算器逻辑，帮助用户找到刷取所需基质的最佳位置。
  */
 
-import { computed, ref, type Ref, watch } from 'vue'
+import { computed, onUnmounted, ref, type Ref, watch } from 'vue'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
+import { safeLoadJson, safeSetJson } from '@/utils/safeStorage'
 
 let _nextId = 1
 
@@ -240,21 +241,37 @@ export function useMatrixPlanner() {
     return rows
   })
 
-  // 从localStorage加载保存的状态
-  const savedStats = localStorage.getItem('matrixPlannerStats')
-  const initialStats: PlannerEssenceStat[] = savedStats ? JSON.parse(savedStats) : []
+  // 从localStorage加载保存的状态；坏缓存会被清理，避免页面初始化白屏。
+  const initialStats = safeLoadJson<PlannerEssenceStat[]>('matrixPlannerStats', [])
+  _nextId = Math.max(
+    _nextId,
+    Math.max(
+      0,
+      ...initialStats
+        .map((stat) => stat.id)
+        .filter((id): id is number => typeof id === 'number'),
+    ) + 1,
+  )
 
   const requiredEssenceStats = ref<PlannerEssenceStat[]>(initialStats)
   const lastSelectedWeaponId = ref<string | null>(null)
+  let saveStatsTimer: number | undefined
 
   // 监听变化并保存到localStorage
   watch(
     requiredEssenceStats,
     (newStats) => {
-      localStorage.setItem('matrixPlannerStats', JSON.stringify(newStats))
+      window.clearTimeout(saveStatsTimer)
+      saveStatsTimer = window.setTimeout(() => {
+        safeSetJson('matrixPlannerStats', newStats)
+      }, 300)
     },
     { deep: true },
   )
+
+  onUnmounted(() => {
+    window.clearTimeout(saveStatsTimer)
+  })
 
   function addStatFromWeapon(weaponId: string) {
     const weapon = weaponsMap.value.get(weaponId)

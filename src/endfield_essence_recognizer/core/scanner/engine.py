@@ -311,8 +311,8 @@ class ScannerEngine:
             for entry in profile.treasure_matrix:
                 if entry.weapon_id in weapon_ids:
                     priority_map.setdefault(entry.weapon_id, entry.priority or 0)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("未能加载武器优先级配置，使用默认排序: {}", exc)
 
         def get_priority(weapon_id: str) -> int:
             user_priority = priority_map.get(weapon_id, 0)
@@ -337,8 +337,8 @@ class ScannerEngine:
                     entry.affix2_level,
                     entry.affix3_level,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("未能从账号配置初始化武器等级: {}", exc)
 
     def _get_stat_tuple(self, weapon_ids: set[str]) -> tuple:
         """获取一组武器的属性组合作为 hashable key。"""
@@ -386,9 +386,10 @@ class ScannerEngine:
         # 同等级跳过：已有 N 把武器拥有相同等级，前 N 次跳过
         if exact_match_count > 0:
             stat_key = self._get_stat_tuple(matched_weapon_ids)
-            skip_count = self._skip_exact_level_counts.get(stat_key, 0)
+            skip_key = (stat_key, current_levels)
+            skip_count = self._skip_exact_level_counts.get(skip_key, 0)
             if skip_count < exact_match_count:
-                self._skip_exact_level_counts[stat_key] = skip_count + 1
+                self._skip_exact_level_counts[skip_key] = skip_count + 1
                 logger.debug(
                     f"基质等级{current_levels}与{exact_match_count}把同属性武器相同，"
                     f"已跳过{skip_count + 1}/{exact_match_count}次（归属不确定）"
@@ -408,6 +409,7 @@ class ScannerEngine:
             )
 
         # 找到第一个可接受该基质的高优先级武器
+        blocked_by_downgrade = False
         for weapon_id in sorted_weapons:
             existing_levels = self._weapon_essence_levels.get(weapon_id)
 
@@ -417,6 +419,7 @@ class ScannerEngine:
 
             # 非降级检查
             if not can_upgrade(weapon_id):
+                blocked_by_downgrade = True
                 logger.debug(
                     f"武器 {weapon_id} 当前等级 {existing_levels}，"
                     f"基质等级 {current_levels}，不满足非降级原则，跳过"
@@ -439,6 +442,12 @@ class ScannerEngine:
                 self._weapon_essence_levels[weapon_id] = current_levels
 
             return  # 只分配给一把武器
+
+        if blocked_by_downgrade:
+            logger.debug(
+                f"基质等级 {current_levels} 对所有可选武器均不满足非降级原则，已忽略"
+            )
+            return
 
         # 没有可分配的武器，分配给最高优先级的（仅计数）
         if sorted_weapons:

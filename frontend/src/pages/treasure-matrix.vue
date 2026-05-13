@@ -567,7 +567,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import BackToTop from '@/components/BackToTop.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
@@ -576,6 +576,7 @@ import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles
 import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
+import { safeLoadJson, safeSetJson } from '@/utils/safeStorage'
 
 const router = useRouter()
 
@@ -631,11 +632,11 @@ interface Recommendation {
   }>
 }
 
-// 从 localStorage 加载保存的推荐结果
-const savedRecommendations = localStorage.getItem('treasureMatrixRecommendations')
 const recommendations = ref<Recommendation[]>(
-  savedRecommendations ? JSON.parse(savedRecommendations) : []
+  safeLoadJson<Recommendation[]>('treasureMatrixRecommendations', []),
 )
+let saveRecommendationsTimer: number | undefined
+let saveFrozenOrderTimer: number | undefined
 
 // Keep cached recommendations as the only initially open panel to avoid mounting every panel on route enter.
 const openedPanels = ref<number[]>(recommendations.value.length > 0 ? [2] : [0, 1, 2])
@@ -644,9 +645,12 @@ const openedPanels = ref<number[]>(recommendations.value.length > 0 ? [2] : [0, 
 watch(
   recommendations,
   (newValue) => {
-    if (newValue.length > 0) {
-      localStorage.setItem('treasureMatrixRecommendations', JSON.stringify(newValue))
-    }
+    window.clearTimeout(saveRecommendationsTimer)
+    saveRecommendationsTimer = window.setTimeout(() => {
+      if (newValue.length > 0) {
+        safeSetJson('treasureMatrixRecommendations', newValue)
+      }
+    }, 300)
   },
   { deep: true }
 )
@@ -656,22 +660,28 @@ watch(
 const useGreaseForSteps = ref<Record<string, Record<string, boolean>>>({})
 
 // 排序后的推荐列表：初始排序后保持稳定，用户切换冷却脂时不重新排序
-// 从 localStorage 加载保存的排序顺序
-const savedFrozenOrder = localStorage.getItem('treasureMatrixFrozenOrder')
 const frozenSortOrder = ref<string[] | null>(
-  savedFrozenOrder ? JSON.parse(savedFrozenOrder) : null
+  safeLoadJson<string[] | null>('treasureMatrixFrozenOrder', null),
 )
 
 // 保存冻结的排序顺序到 localStorage
 watch(
   frozenSortOrder,
   (newValue) => {
-    if (newValue) {
-      localStorage.setItem('treasureMatrixFrozenOrder', JSON.stringify(newValue))
-    }
+    window.clearTimeout(saveFrozenOrderTimer)
+    saveFrozenOrderTimer = window.setTimeout(() => {
+      if (newValue) {
+        safeSetJson('treasureMatrixFrozenOrder', newValue)
+      }
+    }, 300)
   },
   { deep: true }
 )
+
+onUnmounted(() => {
+  window.clearTimeout(saveRecommendationsTimer)
+  window.clearTimeout(saveFrozenOrderTimer)
+})
 
 // 监听 recommendations 变化，更新冻结顺序
 watch(recommendations, (newRecommendations: Recommendation[]) => {

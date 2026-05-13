@@ -10,7 +10,11 @@ from endfield_essence_recognizer.schemas.profile import (
 from endfield_essence_recognizer.services import (
     profile_manager as profile_manager_module,
 )
-from endfield_essence_recognizer.services.profile_manager import ProfileManager
+from endfield_essence_recognizer.services.profile_manager import (
+    ProfileLoadError,
+    ProfileManager,
+    ProfileSaveError,
+)
 
 
 @pytest.fixture
@@ -36,6 +40,41 @@ def test_load_creates_default_profile(profile_manager: ProfileManager):
     collection = profile_manager.get_collection()
     assert "default" in collection.profiles
     assert collection.active_profile == "default"
+
+
+def test_load_corrupted_profiles_does_not_overwrite_existing_file(
+    temp_profiles_file: Path,
+):
+    """损坏的账号配置不能被默认配置静默覆盖。"""
+    temp_profiles_file.write_text("{bad json", encoding="utf-8")
+
+    manager = ProfileManager(temp_profiles_file)
+
+    with pytest.raises(ProfileLoadError):
+        manager.load()
+
+    broken_files = list(temp_profiles_file.parent.glob("profiles.json.broken*"))
+    assert broken_files
+    assert broken_files[0].read_text(encoding="utf-8") == "{bad json"
+    assert not temp_profiles_file.exists()
+
+
+def test_save_failure_does_not_update_in_memory_collection(
+    profile_manager: ProfileManager, monkeypatch: pytest.MonkeyPatch
+):
+    """保存失败时不能让内存状态伪装成已经切换成功。"""
+    profile_manager.load()
+
+    def fake_save(*args, **kwargs):
+        raise ProfileSaveError("disk full")
+
+    monkeypatch.setattr(profile_manager_module, "_save_profiles_to_file", fake_save)
+
+    with pytest.raises(ProfileSaveError):
+        profile_manager.switch_profile("new_account")
+
+    assert profile_manager.get_active_profile_name() == "default"
+    assert "new_account" not in profile_manager.get_collection().profiles
 
 
 def test_switch_profile_creates_new(profile_manager: ProfileManager):

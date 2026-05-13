@@ -108,6 +108,10 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
+
+  <v-snackbar v-model="showError" color="error" timeout="4000">
+    {{ errorMessage }}
+  </v-snackbar>
 </template>
 
 <script lang="ts" setup>
@@ -126,7 +130,7 @@ const {
 // 账号名称最大长度
 const PROFILE_NAME_MAX_LEN = 32
 // 账号名称非法字符正则表达式
-const PROFILE_NAME_INVALID_RE = /[/\\\u0000\n\r\t]/
+const PROFILE_NAME_INVALID_RE = /[/\\\0\n\r\t]/
 
 const showNewProfileDialog = ref(false)
 const showRenameDialog = ref(false)
@@ -135,6 +139,17 @@ const newProfileName = ref('')
 const renameNewName = ref('')
 const renameOldName = ref('')
 const deleteTargetName = ref('')
+const showError = ref(false)
+const errorMessage = ref('')
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function notifyError(message: string) {
+  errorMessage.value = message
+  showError.value = true
+}
 
 /**
  * 验证账号名称是否合法。
@@ -150,7 +165,9 @@ function validateProfileName(name: string): string | null {
 }
 
 onMounted(() => {
-  fetchProfiles()
+  void fetchProfiles().catch((error: unknown) => {
+    notifyError(getErrorMessage(error, '获取账号列表失败'))
+  })
 })
 
 /**
@@ -159,8 +176,8 @@ onMounted(() => {
 async function onSwitch(name: string) {
   try {
     await switchProfile(name)
-  } catch (error: any) {
-    alert(error.message || '切换失败')
+  } catch (error: unknown) {
+    notifyError(getErrorMessage(error, '切换失败'))
   }
 }
 
@@ -171,15 +188,15 @@ async function onCreate() {
   const name = newProfileName.value.trim()
   const validationError = validateProfileName(name)
   if (validationError) {
-    alert(validationError)
+    notifyError(validationError)
     return
   }
   try {
     await switchProfile(name)
     showNewProfileDialog.value = false
     newProfileName.value = ''
-  } catch (error_: any) {
-    alert(error_.message || '创建失败')
+  } catch (error: unknown) {
+    notifyError(getErrorMessage(error, '创建失败'))
   }
 }
 
@@ -199,14 +216,14 @@ async function onRename() {
   const newName = renameNewName.value.trim()
   const validationError = validateProfileName(newName)
   if (validationError) {
-    alert(validationError)
+    notifyError(validationError)
     return
   }
   try {
     await renameProfile(renameOldName.value, newName)
     showRenameDialog.value = false
-  } catch (error_: any) {
-    alert(error_.message || '重命名失败')
+  } catch (error: unknown) {
+    notifyError(getErrorMessage(error, '重命名失败'))
   }
 }
 
@@ -225,8 +242,8 @@ async function onDelete() {
   try {
     await deleteProfile(deleteTargetName.value)
     showDeleteConfirm.value = false
-  } catch (error: any) {
-    alert(error.message || '删除失败')
+  } catch (error: unknown) {
+    notifyError(getErrorMessage(error, '删除失败'))
   }
 }
 </script>

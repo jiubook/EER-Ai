@@ -1,4 +1,5 @@
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -262,3 +263,47 @@ def test_scanner_engine_screenshot_count(
 
     # 1 call for check_scene + 1 call for recognize_essence
     assert image_source.screenshot.call_count == 2
+
+
+def test_exact_level_skip_isolated_by_level(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    weapon = SimpleNamespace(stat1_id="attr", stat2_id="secondary", stat3_id="skill")
+    mock_scanner_context.static_game_data.get_weapon.return_value = weapon
+    engine._sort_weapons_by_priority = lambda _ids: ["w1", "w2"]
+
+    engine._weapon_essence_levels = {"w1": (1, 1, 1)}
+    engine._assign_essence_to_weapon({"w1", "w2"}, [1, 1, 1])
+    assert engine.get_weapon_essence_counts() == {}
+
+    engine._weapon_essence_levels = {"w1": (1, 1, 1), "w2": (2, 1, 1)}
+    engine._assign_essence_to_weapon({"w1", "w2"}, [2, 1, 1])
+
+    assert engine.get_weapon_essence_counts() == {}
+
+
+def test_downgrade_blocked_essence_is_not_fallback_counted(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    weapon = SimpleNamespace(stat1_id="attr", stat2_id="secondary", stat3_id="skill")
+    mock_scanner_context.static_game_data.get_weapon.return_value = weapon
+    engine._sort_weapons_by_priority = lambda _ids: ["w1"]
+    engine._weapon_essence_levels = {"w1": (3, 3, 2)}
+
+    engine._assign_essence_to_weapon({"w1"}, [2, 3, 1])
+
+    assert engine.get_weapon_essence_counts() == {}

@@ -1,6 +1,7 @@
 <template>
   <v-btn
     v-show="visible"
+    aria-label="回到顶部"
     class="back-to-top-btn"
     color="primary"
     icon="mdi-chevron-up"

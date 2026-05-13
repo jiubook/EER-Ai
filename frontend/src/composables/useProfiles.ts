@@ -35,6 +35,40 @@ export interface ProfileCollection {
   profiles: Record<string, ProfileData>
 }
 
+interface FarmingRecommendation {
+  weapon_id: string
+  weapon_name: string
+  current_levels: [number, number, number]
+  target_levels: [number, number, number]
+  total_expected_runs: number
+  total_expected_essences: number
+  affix_results: Array<{
+    affix_name: string
+    current_level: number
+    target_level: number
+    expected_attempts: number
+    expected_essences_consumed: number
+    expected_grease_gained: number
+    expected_grease_used: number
+    steps: Array<{
+      from_level: number
+      to_level: number
+      success_prob: number
+      grease_threshold: number
+      expected_attempts: number
+      expected_essences: number
+      expected_grease_gained: number
+      expected_grease_used: number
+    }>
+  }>
+}
+
+interface BatchFarmingItemResult {
+  weapon_id: string
+  recommendation: FarmingRecommendation | null
+  error: string | null
+}
+
 const collection = ref<ProfileCollection>({
   version: 1,
   active_profile: 'default',
@@ -71,6 +105,30 @@ function _handleError(context: string, error: unknown): never {
   throw error instanceof Error ? error : new Error(fullMessage)
 }
 
+async function parseJsonResponse<T>(res: Response, fallbackMessage: string): Promise<T> {
+  const text = await res.text()
+  let body: unknown = null
+
+  if (text) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = text
+    }
+  }
+
+  if (!res.ok) {
+    const detail = typeof body === 'object' && body !== null && 'detail' in body
+      ? String((body as { detail?: unknown }).detail)
+      : typeof body === 'string' && body
+        ? body
+        : fallbackMessage
+    throw new Error(detail)
+  }
+
+  return body as T
+}
+
 export function useProfiles() {
   const activeProfileName = computed(() => collection.value.active_profile)
   const activeProfile = computed(() => {
@@ -83,8 +141,7 @@ export function useProfiles() {
   async function fetchProfiles() {
     try {
       const res = await fetch('/api/profiles')
-      const data = await res.json()
-      collection.value = data
+      collection.value = await parseJsonResponse<ProfileCollection>(res, '获取账号列表失败')
       isLoaded.value = true
       lastError.value = null
     } catch (error) {
@@ -100,8 +157,7 @@ export function useProfiles() {
         body: JSON.stringify({ name }),
       })
       if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Failed to switch profile')
+        await parseJsonResponse<never>(res, 'Failed to switch profile')
       }
       await fetchProfiles()
     } catch (error) {
@@ -117,8 +173,7 @@ export function useProfiles() {
         body: JSON.stringify({ old_name: oldName, new_name: newName }),
       })
       if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Failed to rename profile')
+        await parseJsonResponse<never>(res, 'Failed to rename profile')
       }
       await fetchProfiles()
     } catch (error) {
@@ -134,8 +189,7 @@ export function useProfiles() {
         body: JSON.stringify({ name }),
       })
       if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || 'Failed to delete profile')
+        await parseJsonResponse<never>(res, 'Failed to delete profile')
       }
       await fetchProfiles()
     } catch (error) {
@@ -150,8 +204,7 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entries }),
       })
-      if (!res.ok) throw new Error('Failed to update treasure matrix')
-      applyActiveProfile(await res.json())
+      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to update treasure matrix'))
     } catch (error) {
       _handleError('更新宝藏基质失败', error)
     }
@@ -164,8 +217,7 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry),
       })
-      if (!res.ok) throw new Error('Failed to add treasure matrix entry')
-      applyActiveProfile(await res.json())
+      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to add treasure matrix entry'))
     } catch (error) {
       _handleError('添加宝藏基质条目失败', error)
     }
@@ -178,8 +230,7 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weapon_id: weaponId }),
       })
-      if (!res.ok) throw new Error('Failed to remove treasure matrix entry')
-      applyActiveProfile(await res.json())
+      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to remove treasure matrix entry'))
     } catch (error) {
       _handleError('移除宝藏基质条目失败', error)
     }
@@ -198,9 +249,25 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items }),
       })
-      if (!res.ok) throw new Error('Failed to get farming recommendations')
-      lastError.value = null
-      return await res.json()
+      const itemResults = await parseJsonResponse<BatchFarmingItemResult[]>(
+        res,
+        'Failed to get farming recommendations',
+      )
+      const failed = itemResults.filter((item) => item.error)
+      if (failed.length > 0) {
+        lastError.value = failed
+          .map((item) => `${item.weapon_id}: ${item.error}`)
+          .join('\n')
+      } else {
+        lastError.value = null
+      }
+      const recommendations = itemResults
+        .map((item) => item.recommendation)
+        .filter((item): item is FarmingRecommendation => item !== null)
+      if (recommendations.length === 0 && failed.length > 0) {
+        throw new Error(lastError.value ?? 'Failed to get farming recommendations')
+      }
+      return recommendations
     } catch (error) {
       _handleError('批量获取刷取建议失败', error)
     }
@@ -218,8 +285,7 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters }),
       })
-      if (!res.ok) throw new Error('Failed to update weapon overview filters')
-      applyActiveProfile(await res.json())
+      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to update weapon overview filters'))
     } catch (error) {
       _handleError('更新武器总览过滤器失败', error)
     }
@@ -232,8 +298,7 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weapon_id: weaponId, priority }),
       })
-      if (!res.ok) throw new Error('Failed to update weapon priority')
-      applyActiveProfile(await res.json())
+      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to update weapon priority'))
     } catch (error) {
       _handleError('更新武器优先级失败', error)
     }
