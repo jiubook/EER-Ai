@@ -240,6 +240,8 @@ class ProfileManager:
             ValueError: 如果 old_name 不存在、new_name 已被占用或 new_name 无效。
         """
         with self._lock:
+            if old_name == "default":
+                raise ValueError("不能重命名默认账号")
             collection = self._collection.model_copy(deep=True)
             if old_name not in collection.profiles:
                 raise ValueError(f"账号 '{old_name}' 不存在")
@@ -295,9 +297,12 @@ class ProfileManager:
             collection = self._collection.model_copy(deep=True)
             profile = collection.get_active()
             profile.treasure_matrix = [entry.model_copy(deep=True) for entry in entries]
-            for entry in profile.treasure_matrix:
-                if entry.priority > 0:
-                    profile.weapon_priorities[entry.weapon_id] = entry.priority
+            # 重建优先级映射：只保留当前矩阵中 priority > 0 的条目
+            profile.weapon_priorities = {
+                entry.weapon_id: entry.priority
+                for entry in profile.treasure_matrix
+                if entry.priority > 0
+            }
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
 

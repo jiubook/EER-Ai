@@ -28,7 +28,7 @@
               @click.stop="startRename(name)"
             />
             <v-btn
-              v-if="name !== 'default'"
+              v-if="name !== 'default' && name !== activeProfileName"
               color="error"
               icon="mdi-delete"
               size="x-small"
