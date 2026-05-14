@@ -576,7 +576,7 @@ import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles
 import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
-import { safeLoadJson, safeSetJson } from '@/utils/safeStorage'
+import { safeLoadJson, safeRemoveJson, safeSetJson } from '@/utils/safeStorage'
 
 const router = useRouter()
 
@@ -632,36 +632,53 @@ interface Recommendation {
   }>
 }
 
-const recommendations = ref<Recommendation[]>(
-  safeLoadJson<Recommendation[]>('treasureMatrixRecommendations', []),
+// 缓存 key 绑定到账号，避免跨账号数据污染
+const recommendationsKey = computed(
+  () => `treasureMatrixRecommendations:${activeProfileName.value}`,
 )
+const frozenOrderKey = computed(
+  () => `treasureMatrixFrozenOrder:${activeProfileName.value}`,
+)
+
+const recommendations = ref<Recommendation[]>([])
 let saveRecommendationsTimer: number | undefined
 let saveFrozenOrderTimer: number | undefined
-
-// Keep cached recommendations as the only initially open panel to avoid mounting every panel on route enter.
-const openedPanels = ref<number[]>(recommendations.value.length > 0 ? [2] : [0, 1, 2])
-
-// 监听 recommendations 变化，保存到 localStorage
-watch(
-  recommendations,
-  (newValue) => {
-    window.clearTimeout(saveRecommendationsTimer)
-    saveRecommendationsTimer = window.setTimeout(() => {
-      if (newValue.length > 0) {
-        safeSetJson('treasureMatrixRecommendations', newValue)
-      }
-    }, 300)
-  },
-  { deep: true }
-)
 
 // 跟踪每个武器的每个步骤是否使用冷却脂
 // 格式: { weaponId: { 'affixIndex-fromLevel': boolean } }
 const useGreaseForSteps = ref<Record<string, Record<string, boolean>>>({})
 
 // 排序后的推荐列表：初始排序后保持稳定，用户切换冷却脂时不重新排序
-const frozenSortOrder = ref<string[] | null>(
-  safeLoadJson<string[] | null>('treasureMatrixFrozenOrder', null),
+const frozenSortOrder = ref<string[] | null>(null)
+
+// 账号切换时重新加载缓存
+watch(
+  activeProfileName,
+  () => {
+    recommendations.value = safeLoadJson<Recommendation[]>(recommendationsKey.value, [])
+    frozenSortOrder.value = safeLoadJson<string[] | null>(frozenOrderKey.value, null)
+  },
+  { immediate: true },
+)
+
+// Keep cached recommendations as the only initially open panel to avoid mounting every panel on route enter.
+const openedPanels = ref<number[]>([])
+
+// 监听 recommendations 变化，更新面板状态和保存到 localStorage
+watch(
+  recommendations,
+  (newValue) => {
+    openedPanels.value = newValue.length > 0 ? [2] : [0, 1, 2]
+    window.clearTimeout(saveRecommendationsTimer)
+    saveRecommendationsTimer = window.setTimeout(() => {
+      if (newValue.length > 0) {
+        safeSetJson(recommendationsKey.value, newValue)
+      } else {
+        safeRemoveJson(recommendationsKey.value)
+      }
+    }, 300)
+  },
+  { deep: true }
 )
 
 // 保存冻结的排序顺序到 localStorage
@@ -671,7 +688,9 @@ watch(
     window.clearTimeout(saveFrozenOrderTimer)
     saveFrozenOrderTimer = window.setTimeout(() => {
       if (newValue) {
-        safeSetJson('treasureMatrixFrozenOrder', newValue)
+        safeSetJson(frozenOrderKey.value, newValue)
+      } else {
+        safeRemoveJson(frozenOrderKey.value)
       }
     }, 300)
   },
@@ -681,6 +700,10 @@ watch(
 onUnmounted(() => {
   window.clearTimeout(saveRecommendationsTimer)
   window.clearTimeout(saveFrozenOrderTimer)
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
 })
 
 // 监听 recommendations 变化，更新冻结顺序
@@ -877,9 +900,15 @@ function getAdjustedStats(rec: Recommendation) {
   return adjustedStatsByWeaponId.value.get(rec.weapon_id) ?? calculateAdjustedStats(rec)
 }
 
+function persistMatrix(entries: TreasureMatrixEntry[]) {
+  void updateTreasureMatrix(entries).catch(() => {
+    // 错误已由 useProfiles 的 lastError 处理
+  })
+}
+
 function toggleIncludeInCalculation(entry: TreasureMatrixEntry) {
   entry.include_in_calculation = !entry.include_in_calculation
-  updateTreasureMatrix(matrixEntries.value)
+  persistMatrix([...matrixEntries.value])
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -906,7 +935,8 @@ function onEntryChange() {
 
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
-    updateTreasureMatrix([...matrixEntries.value])
+    persistMatrix([...matrixEntries.value])
+    debounceTimer = null
   }, 500)
 }
 
@@ -963,11 +993,11 @@ async function computeAll() {
       }))
     const results = await getBatchFarmingRecommendations(items)
     // Sort by expected runs (ascending - least runs first)
-    results.sort(
+    const sortedResults = results.toSorted(
       (a: Recommendation, b: Recommendation) => a.total_expected_runs - b.total_expected_runs,
     )
     frozenSortOrder.value = null
-    recommendations.value = results
+    recommendations.value = sortedResults
 
     // 计算完成后，折叠武器总览（value=0）和宝藏基质配置面板（value=1）
     // 只保留刷取建议（value=2）展开

@@ -231,7 +231,7 @@ async def get_farming_recommendation(
 class BatchFarmingRequest(BaseModel):
     """批量计算刷取建议的请求体。"""
 
-    items: list[FarmingRequest]
+    items: list[FarmingRequest] = Field(default_factory=list, max_length=100)
 
 
 class BatchFarmingItemResult(BaseModel):

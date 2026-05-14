@@ -46,12 +46,16 @@ export function useRarityFilters() {
       const newSorted = newValue.toSorted().join(',')
       if (oldSorted === newSorted) return
 
-      await updateWeaponOverviewFilters({
-        '3star': newValue.includes('3'),
-        '4star': newValue.includes('4'),
-        '5star': newValue.includes('5'),
-        '6star': newValue.includes('6'),
-      })
+      try {
+        await updateWeaponOverviewFilters({
+          '3star': newValue.includes('3'),
+          '4star': newValue.includes('4'),
+          '5star': newValue.includes('5'),
+          '6star': newValue.includes('6'),
+        })
+      } catch {
+        // 错误已由 useProfiles 的 lastError 处理
+      }
     },
     { deep: true },
   )

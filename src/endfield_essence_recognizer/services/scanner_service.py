@@ -201,7 +201,10 @@ class ScannerService:
 
         # 在锁外等待线程结束，避免死锁
         if thread_to_join is not None:
-            thread_to_join.join()
+            thread_to_join.join(timeout=5.0)
+            if thread_to_join.is_alive():
+                logger.warning("扫描线程未在超时时间内停止")
+                return
             logger.debug("Scanner thread joined.")
 
         with self._lock:

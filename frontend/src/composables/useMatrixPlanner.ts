@@ -5,9 +5,10 @@
  */
 
 import { computed, onUnmounted, ref, type Ref, watch } from 'vue'
+import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
-import { safeLoadJson, safeSetJson } from '@/utils/safeStorage'
+import { safeLoadJson, safeRemoveJson, safeSetJson } from '@/utils/safeStorage'
 
 let _nextId = 1
 
@@ -238,6 +239,10 @@ function findMatchingWeapons(
 
 export function useMatrixPlanner() {
   const { weaponsMap } = useStaticData()
+  const { activeProfileName } = useProfiles()
+
+  // 缓存 key 绑定到账号，避免跨账号数据污染
+  const statsKey = computed(() => `matrixPlannerStats:${activeProfileName.value}`)
 
   // 规划计算会反复按词条匹配武器，先把武器 ID 转成显示词条，避免在每个方案里重复转换。
   const weaponPlannerStats = computed<PlannerWeaponStats[]>(() => {
@@ -252,21 +257,28 @@ export function useMatrixPlanner() {
     return rows
   })
 
-  // 从localStorage加载保存的状态；坏缓存会被清理，避免页面初始化白屏。
-  const initialStats = safeLoadJson<PlannerEssenceStat[]>('matrixPlannerStats', [])
-  _nextId = Math.max(
-    _nextId,
-    Math.max(
-      0,
-      ...initialStats
-        .map((stat) => stat.id)
-        .filter((id): id is number => typeof id === 'number'),
-    ) + 1,
-  )
-
-  const requiredEssenceStats = ref<PlannerEssenceStat[]>(initialStats)
+  const requiredEssenceStats = ref<PlannerEssenceStat[]>([])
   const lastSelectedWeaponId = ref<string | null>(null)
   let saveStatsTimer: number | undefined
+
+  // 账号切换时重新加载缓存
+  watch(
+    activeProfileName,
+    () => {
+      const initialStats = safeLoadJson<PlannerEssenceStat[]>(statsKey.value, [])
+      _nextId = Math.max(
+        _nextId,
+        Math.max(
+          0,
+          ...initialStats
+            .map((stat) => stat.id)
+            .filter((id): id is number => typeof id === 'number'),
+        ) + 1,
+      )
+      requiredEssenceStats.value = initialStats
+    },
+    { immediate: true },
+  )
 
   // 监听变化并保存到localStorage
   watch(
@@ -274,7 +286,11 @@ export function useMatrixPlanner() {
     (newStats) => {
       window.clearTimeout(saveStatsTimer)
       saveStatsTimer = window.setTimeout(() => {
-        safeSetJson('matrixPlannerStats', newStats)
+        if (newStats.length > 0) {
+          safeSetJson(statsKey.value, newStats)
+        } else {
+          safeRemoveJson(statsKey.value)
+        }
       }, 300)
     },
     { deep: true },
@@ -438,7 +454,7 @@ export function useMatrixPlanner() {
         .map(stat => stat.weaponId!)
     )
 
-    filtered.sort((a, b) => {
+    return filtered.toSorted((a, b) => {
       // 优先：满足更多需求
       if (b.matchedSelectedIndices.length !== a.matchedSelectedIndices.length) {
         return b.matchedSelectedIndices.length - a.matchedSelectedIndices.length
@@ -454,7 +470,6 @@ export function useMatrixPlanner() {
       // 最后：匹配武器总数
       return b.matchedWeaponIds.length - a.matchedWeaponIds.length
     })
-    return filtered
   })
 
   /** 最优的前 5 个方案（使用预刻券模式） */

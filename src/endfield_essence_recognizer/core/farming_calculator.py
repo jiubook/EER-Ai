@@ -140,9 +140,6 @@ class FarmingRecommendation:
     total_expected_essences: float = 0.0
     """所有词条所需的总预期基质数量。"""
 
-    total_expected_desired_essences: float = 0.0
-    """总预期所需基质数量（总数的 1/24）。"""
-
     total_expected_runs: float = 0.0
     """所需的总预期刷取次数。"""
 
@@ -375,7 +372,6 @@ def compute_farming_recommendation(
         for affix_result in recommendation.affix_results
     )
     recommendation.total_expected_essences = total_essences
-    recommendation.total_expected_desired_essences = total_essences
 
     # 刷取次数：每次刷取掉落 ESSENCES_PER_RUN 个完美基质，可以直接用于强化
     # 假设用户已经拥有该武器的宝藏基质，只需要任意基质来强化
