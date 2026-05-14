@@ -218,12 +218,17 @@ class ProfileManager:
             raise ValueError("账号名称不能为空")
         if len(stripped) > 32:
             raise ValueError("账号名称不能超过 32 个字符")
-        forbidden = set("/\\\x00\n\r\t")
-        bad_chars = forbidden & set(stripped)
+        forbidden = {
+            "/": "正斜杠(/)",
+            "\\": "反斜杠(\\)",
+            "\x00": "空字节",
+            "\n": "换行符",
+            "\r": "回车符",
+            "\t": "制表符",
+        }
+        bad_chars = [forbidden[c] for c in stripped if c in forbidden]
         if bad_chars:
-            raise ValueError(
-                f"账号名称包含非法字符: {''.join(sorted(repr(c) for c in bad_chars))}"
-            )
+            raise ValueError(f"账号名称包含非法字符: {', '.join(sorted(bad_chars))}")
         return stripped
 
     def rename_profile(self, old_name: str, new_name: str) -> ProfileData:

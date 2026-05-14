@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 # --- 常量 ---
@@ -232,8 +233,6 @@ def _compute_upgrade_steps(
     Returns:
         包含每个步骤详细分解的 AffixUpgradeResult。
     """
-    import math
-
     result = AffixUpgradeResult(
         affix_name=affix_name,
         current_level=current,

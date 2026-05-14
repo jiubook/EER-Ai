@@ -43,7 +43,7 @@ class ScreenshotService:
             quality: The quality of the encoded image (for lossy formats).
 
         Returns:
-            A data URI string or None if the window is not active.
+            A data URI string or None if the target window does not exist.
         """
         # 只检查窗口是否存在
         if not self._window_manager.target_exists:
