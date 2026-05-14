@@ -19,3 +19,13 @@ class WeaponEssenceCounts(BaseModel):
 
     counts: dict[WeaponId, int]
     """各武器 ID 对应的匹配基质数量"""
+
+
+class WeaponEssenceData(BaseModel):
+    """武器基质完整数据"""
+
+    counts: dict[WeaponId, int]
+    """各武器 ID 对应的匹配基质数量"""
+
+    levels: dict[WeaponId, tuple[int, int, int]]
+    """各武器 ID 对应的最高等级 (affix1, affix2, affix3)"""
