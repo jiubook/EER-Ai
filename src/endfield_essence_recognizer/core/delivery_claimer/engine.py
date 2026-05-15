@@ -129,17 +129,9 @@ class DeliveryClaimerEngine(AutomationEngine):
         """
         Verify that we are in the correct scene.
 
-        Logs warnings if:
-        -   The window resolution does not match the profile.
-        -   The current scene is not the delivery jobs list.
+        Resolution is checked by the caller (_check_window_and_scene);
+        this method only verifies the UI scene.
         """
-        client_size = self._image_source.get_client_size()
-        if client_size != self._profile.RESOLUTION:
-            logger.warning(
-                f"窗口分辨率 {client_size} 与配置 {self._profile.RESOLUTION} 不符。"
-            )
-            return False
-
         screenshot = self._image_source.screenshot(
             self._profile.LIST_OF_DELIVERY_JOBS_SCENE_CHECK_ROI
         )
