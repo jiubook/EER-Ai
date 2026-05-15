@@ -14,7 +14,11 @@ from endfield_essence_recognizer.dependencies import (
     require_game_or_webview_is_active,
     require_game_window_exists,
 )
-from endfield_essence_recognizer.schemas.scanner import TaskType, WeaponEssenceCounts
+from endfield_essence_recognizer.schemas.scanner import (
+    TaskType,
+    WeaponEssenceCounts,
+    WeaponEssenceData,
+)
 from endfield_essence_recognizer.services.scanner_service import ScannerService
 
 router = APIRouter(prefix="", tags=["scanner"])
@@ -87,6 +91,18 @@ async def get_weapon_essence_counts(
     -> WeaponEssenceCounts(counts: dict[武器ID, 数量])
     """
     return WeaponEssenceCounts(counts=scanner_service.get_weapon_essence_counts())
+
+
+@router.get("/weapon_essence_data")
+async def get_weapon_essence_data(
+    scanner_service: ScannerService = Depends(get_scanner_service),
+) -> WeaponEssenceData:
+    """
+    获取武器基质完整数据（包括等级）
+
+    -> WeaponEssenceData(counts: dict[武器ID, 数量], levels: dict[武器ID, (等级1, 等级2, 等级3)])
+    """
+    return scanner_service.get_weapon_essence_data()
 
 
 @router.get("/scanning_status")
