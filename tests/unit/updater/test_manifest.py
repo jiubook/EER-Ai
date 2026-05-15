@@ -13,6 +13,10 @@ _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from scripts.generate_incremental_package import (  # noqa: E402
+    INCREMENTAL_METADATA_RELATIVE_PATH,
+    generate_incremental_package,
+)
 from scripts.generate_manifest import (  # noqa: E402
     MANIFEST_RELATIVE_PATH,
     PROTECTED_PATHS,
@@ -332,6 +336,109 @@ class TestCopyListExcludesProtected:
         copy_files = _compute_copy_list(manifest)
 
         assert MANIFEST_RELATIVE_PATH in copy_files
+
+
+class TestIncrementalPackage:
+    """增量更新包生成与安装计划测试。"""
+
+    def test_incremental_package_contains_only_changed_files(
+        self, tmp_path: Path
+    ) -> None:
+        old_dist = tmp_path / "old"
+        new_dist = tmp_path / "new"
+        for dist in (old_dist, new_dist):
+            (dist / "_internal").mkdir(parents=True)
+
+        (old_dist / "app.exe").write_text("old")
+        (old_dist / "same.dll").write_text("same")
+        (old_dist / "removed.dll").write_text("removed")
+        (old_dist / "_internal" / "eer_updater.exe").write_text("updater")
+        old_manifest = generate_manifest(old_dist, "1.0.0")
+        (old_dist / MANIFEST_RELATIVE_PATH).write_text(
+            json.dumps(old_manifest), encoding="utf-8"
+        )
+
+        (new_dist / "app.exe").write_text("new")
+        (new_dist / "same.dll").write_text("same")
+        (new_dist / "added.dll").write_text("added")
+        (new_dist / "_internal" / "eer_updater.exe").write_text("updater")
+        new_manifest = generate_manifest(new_dist, "1.1.0")
+        (new_dist / MANIFEST_RELATIVE_PATH).write_text(
+            json.dumps(new_manifest), encoding="utf-8"
+        )
+
+        package_path = tmp_path / "delta.zip"
+        metadata = generate_incremental_package(
+            old_dist,
+            new_dist,
+            package_path,
+            from_version="1.0.0",
+            to_version="1.1.0",
+        )
+
+        assert package_path.is_file()
+        assert "app.exe" in metadata["files"]
+        assert "added.dll" in metadata["files"]
+        assert "same.dll" not in metadata["files"]
+        assert "removed.dll" in metadata["remove"]
+        assert MANIFEST_RELATIVE_PATH in metadata["files"]
+
+        import zipfile
+
+        with zipfile.ZipFile(package_path) as zf:
+            names = set(zf.namelist())
+
+        assert "app.exe" in names
+        assert "added.dll" in names
+        assert "same.dll" not in names
+        assert INCREMENTAL_METADATA_RELATIVE_PATH in names
+
+    def test_incremental_copy_list_uses_metadata_files(self) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            _compute_incremental_copy_list,
+            _compute_incremental_delete_list,
+        )
+
+        manifest = {
+            "version": "1.1.0",
+            "files": ["app.exe", "same.dll", "added.dll", MANIFEST_RELATIVE_PATH],
+            "protected": ["config.json", "logs/"],
+        }
+        metadata = {
+            "files": ["app.exe", "added.dll", MANIFEST_RELATIVE_PATH],
+            "remove": ["old.dll", "logs/app.log"],
+        }
+
+        assert _compute_incremental_copy_list(metadata, manifest) == [
+            MANIFEST_RELATIVE_PATH,
+            "added.dll",
+            "app.exe",
+        ]
+        assert _compute_incremental_delete_list(metadata, manifest) == ["old.dll"]
+
+    def test_incremental_package_requires_matching_installed_version(
+        self, tmp_path: Path
+    ) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            _validate_incremental_package,
+        )
+
+        installed_manifest_path = tmp_path / MANIFEST_RELATIVE_PATH
+        installed_manifest_path.parent.mkdir()
+        installed_manifest_path.write_text(
+            json.dumps({"version": "1.0.0", "files": []}), encoding="utf-8"
+        )
+
+        assert _validate_incremental_package(
+            tmp_path,
+            {"version": "1.1.0"},
+            {"from_version": "1.0.0", "to_version": "1.1.0"},
+        )
+        assert not _validate_incremental_package(
+            tmp_path,
+            {"version": "1.1.0"},
+            {"from_version": "0.9.0", "to_version": "1.1.0"},
+        )
 
 
 class TestProtectedBackupList:

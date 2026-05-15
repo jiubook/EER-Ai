@@ -8,6 +8,8 @@
 - WebSocket 实时下载进度
 - 更新包 SHA-256 校验（当发布资产提供 digest 时）
 - 基于 manifest 的文件级更新
+- 基于旧/新 dist 对比生成增量包，只下载变更文件
+- 增量包基线不匹配或预安装校验失败时自动回退全量包
 - 独立 Rust 更新器 `_internal/eer_updater.exe`
 - 更新器随 manifest 复制并可被后续更新替换
 - 失败时尽力回滚到旧版本文件
@@ -43,6 +45,7 @@
 ### 发布辅助
 
 - `scripts/generate_manifest.py`：扫描 PyInstaller 产物并生成 `_internal/manifest.json`。
+- `scripts/generate_incremental_package.py`：对比旧/新 PyInstaller 产物并生成文件级增量 zip。
 - `main.spec`：PyInstaller 打包脚本，会在本地存在 release updater 时复制 `_internal/eer_updater.exe` 到 dist 的 `_internal` 目录。
 
 ## Manifest 与 Plan
@@ -88,6 +91,31 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 
 协议要求：`_plan.json` 是 Python installer 与 Rust updater 之间的协议。新增字段应优先保持可选，避免破坏双方调用关系。
 
+### `_internal/incremental_update.json`
+
+增量包额外包含该文件，用于声明包内有哪些可复制文件、需要删除哪些旧文件，以及该包只能从哪个版本升级：
+
+```json
+{
+  "format": 1,
+  "package_type": "incremental",
+  "from_version": "0.8.0",
+  "to_version": "0.9.2",
+  "target_manifest": "_internal/manifest.json",
+  "files": [
+    "endfield-essence-recognizer.exe",
+    "_internal/manifest.json",
+    "_internal/endfield_essence_recognizer/webui_dist/assets/index-BDeaBJ68.js"
+  ],
+  "remove": [
+    "_internal/endfield_essence_recognizer/webui_dist/assets/index-D32FmWFi.js"
+  ],
+  "protected": ["config.json", "profiles.json", "logs/", "screenshots/", ".env"]
+}
+```
+
+增量包仍然必须包含目标版本的 `_internal/manifest.json`，这样安装完成后本地 manifest 会收敛到新版本完整状态。
+
 ## 更新流程
 
 1. 用户点击“一键更新”。
@@ -95,18 +123,19 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 3. `download_update()` 下载 zip 到 `_updates/`，前端通过 WebSocket 显示进度。
 4. 如果可获得 SHA-256，`UpdateManager` 校验下载包完整性。
 5. `install_update()` 解压 zip 到系统临时目录中的独立更新目录，并校验 zip 条目不能路径穿越。
-6. Python 读取 `_internal/manifest.json`，计算 `remove_list`、`copy_list`、`protected_list`。
-7. Python 写入临时解压目录中的 `_plan.json`。
-8. Python 优先启动临时解压目录中的 `_internal/eer_updater.exe`；如果更新包没有 updater，才回退到安装目录中的 `_internal/eer_updater.exe`。
-9. 当前主程序延迟退出，Rust updater 等待父进程退出。
-10. Rust updater 拒绝安装在盘符根目录的场景，并校验 plan 中所有路径不能越界。
-11. 需要删除或覆盖的旧文件先移动到安装目录同盘的 `_update_backup_{pid}/`，避免 Windows 跨盘 `rename` 失败。
-12. Rust updater 按 `copy_list` 从临时解压目录复制新文件到安装目录。
-13. 如果复制失败、源文件缺失或路径非法，Rust updater 删除本次新增文件并从 `_update_backup_{pid}/` 恢复旧文件。
-14. 更新成功后写入 `logs/{旧版本}_{新版本}_updater_success.txt`，删除同版本失败状态文件、更新包，并重启主程序。
-15. 如果 updater 正从临时解压目录运行，会在退出后延迟删除该目录；`_updates/` 在更新包删除后也会尝试删除空目录。
-16. `_update_backup_{pid}/` 会在更新成功或失败回滚后删除；如果 Windows 暂时拒绝访问，会安排延迟重试，并在下次更新开始前再次清理遗留目录。
-17. 每次更新使用 `update-{时间戳}-{进程ID}` 形式的唯一临时目录，并在开始前清理超过 24 小时的旧更新临时目录。
+6. Python 读取 `_internal/manifest.json`；如果同时存在 `_internal/incremental_update.json`，先校验本地 manifest 版本必须等于 `from_version`。
+7. 全量包根据目标 manifest 计算完整 `remove_list` / `copy_list`；增量包只复制 metadata 中声明的变更文件，并只删除 metadata 中声明的旧文件。
+8. Python 写入临时解压目录中的 `_plan.json`。
+9. Python 优先启动临时解压目录中的 `_internal/eer_updater.exe`；如果更新包没有 updater，才回退到安装目录中的 `_internal/eer_updater.exe`。
+10. 当前主程序延迟退出，Rust updater 等待父进程退出。
+11. Rust updater 拒绝安装在盘符根目录的场景，并校验 plan 中所有路径不能越界。
+12. 需要删除或覆盖的旧文件先移动到安装目录同盘的 `_update_backup_{pid}/`，避免 Windows 跨盘 `rename` 失败。
+13. Rust updater 按 `copy_list` 从临时解压目录复制新文件到安装目录。
+14. 如果复制失败、源文件缺失或路径非法，Rust updater 删除本次新增文件并从 `_update_backup_{pid}/` 恢复旧文件。
+15. 更新成功后写入 `logs/{旧版本}_{新版本}_updater_success.txt`，删除同版本失败状态文件、更新包，并重启主程序。
+16. 如果 updater 正从临时解压目录运行，会在退出后延迟删除该目录；`_updates/` 在更新包删除后也会尝试删除空目录。
+17. `_update_backup_{pid}/` 会在更新成功或失败回滚后删除；如果 Windows 暂时拒绝访问，会安排延迟重试，并在下次更新开始前再次清理遗留目录。
+18. 每次更新使用 `update-{时间戳}-{进程ID}` 形式的唯一临时目录，并在开始前清理超过 24 小时的旧更新临时目录。
 
 ## 更新器位置与运行方式
 
@@ -185,6 +214,40 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 }
 ```
 
+## 版本源 JSON
+
+`checker.py` 兼容原有全量字段，并会优先选择与当前版本精确匹配的增量包：
+
+```json
+{
+  "latestVersion": "0.9.2",
+  "downloadUrl": "https://github.com/owner/repo/releases/download/v0.9.2/endfield-essence-recognizer-v0.9.2-windows.zip",
+  "sha256": "full-package-sha256",
+  "size": 16777216,
+  "mirrors": {
+    "cn": {
+      "downloadUrl": "https://cdn.example.com/endfield-essence-recognizer-v0.9.2-windows.zip"
+    }
+  },
+  "incrementalPackages": [
+    {
+      "fromVersion": "0.8.0",
+      "toVersion": "0.9.2",
+      "downloadUrl": "https://cdn.example.com/endfield-essence-recognizer-0.8.0-to-0.9.2-windows-delta.zip",
+      "sha256": "delta-package-sha256",
+      "size": 1441792,
+      "mirrors": {
+        "cn": {
+          "downloadUrl": "https://cdn.example.com/endfield-essence-recognizer-0.8.0-to-0.9.2-windows-delta.zip"
+        }
+      }
+    }
+  ]
+}
+```
+
+兼容别名：增量列表也可使用 `incremental_packages`、`deltaPackages` 或 `patches`；包内字段也兼容 `from_version` / `to_version` / `download_url` / `url`。
+
 ## 本地开发与验证
 
 ```bash
@@ -192,7 +255,7 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 uv run pytest tests/unit/updater/test_manifest.py
 
 # Python 侧 lint
-uv run ruff check scripts/generate_manifest.py src/endfield_essence_recognizer/updater/installer.py tests/unit/updater/test_manifest.py
+uv run ruff check scripts/generate_manifest.py scripts/generate_incremental_package.py src/endfield_essence_recognizer/updater/installer.py tests/unit/updater/test_manifest.py
 
 # Rust updater
 cargo fmt --manifest-path updater/Cargo.toml --check
@@ -207,13 +270,25 @@ cargo test --manifest-path updater/Cargo.toml
 3. 构建 release updater：`cargo build --release --manifest-path updater/Cargo.toml`。
 4. 使用 PyInstaller 构建应用，`main.spec` 会复制 release updater 到 dist 的 `_internal` 目录。
 5. 执行 `scripts/generate_manifest.py` 写入 `_internal/manifest.json`。
-6. 打包 zip 并创建 GitHub Release。
-7. 用户端检查到新版本后即可应用内更新。
+6. 打包全量 zip 并创建 GitHub Release。
+7. 如需增量包，保留上一版本解压后的 dist 目录，并执行 `scripts/generate_incremental_package.py` 生成 delta zip。
+8. 在版本源 JSON 中增加 `incrementalPackages`，用户端检查到匹配当前版本的增量包后会优先下载；不匹配则仍走全量包。
 
 本地生成 manifest：
 
 ```bash
 uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-recognizer
+```
+
+本地生成 `0.8.0 -> 0.9.2` 增量包：
+
+```bash
+uv run python scripts/generate_incremental_package.py \
+  --old-dist-dir dist/endfield-essence-recognizer-0.8.0 \
+  --new-dist-dir dist/endfield-essence-recognizer \
+  --from-version 0.8.0 \
+  --to-version 0.9.2 \
+  --output dist/endfield-essence-recognizer-0.8.0-to-0.9.2-windows-delta.zip
 ```
 
 ## 常见问题

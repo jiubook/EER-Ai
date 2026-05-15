@@ -29,6 +29,9 @@ STALE_UPDATE_TEMP_SECONDS = 24 * 60 * 60
 # manifest 在安装目录中的相对路径（与 generate_manifest.py 保持一致）
 MANIFEST_RELATIVE_PATH = "_internal/manifest.json"
 
+# 增量包元数据只用于 Python 侧安装前校验，不会复制到安装目录。
+INCREMENTAL_METADATA_RELATIVE_PATH = "_internal/incremental_update.json"
+
 # updater 可执行文件名
 UPDATER_EXE_NAME = "eer_updater.exe"
 UPDATER_RELATIVE_PATH = f"_internal/{UPDATER_EXE_NAME}"
@@ -96,13 +99,13 @@ def _load_manifest(temp_dir: Path) -> dict | None:
 
 
 def _safe_status_version(value: object) -> str:
-    """Return a filesystem-safe version fragment for updater status files."""
+    """将版本号转换为可安全用于状态文件名的片段。"""
     text = str(value or "unknown").strip() or "unknown"
     return "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in text)
 
 
 def _load_installed_manifest_version(current_dir: Path) -> str:
-    """Read the installed version from the current manifest when available."""
+    """从当前已安装的 manifest 中读取版本号。"""
     for manifest_path in (
         current_dir / MANIFEST_RELATIVE_PATH,
         current_dir / "manifest.json",
@@ -117,12 +120,53 @@ def _load_installed_manifest_version(current_dir: Path) -> str:
     return "unknown"
 
 
+def _load_installed_manifest(current_dir: Path) -> dict | None:
+    """读取当前已安装的 manifest，供增量包校验基线版本。"""
+    for manifest_path in (
+        current_dir / MANIFEST_RELATIVE_PATH,
+        current_dir / "manifest.json",
+    ):
+        if not manifest_path.is_file():
+            continue
+        try:
+            return json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning(f"无法读取已安装 manifest: {manifest_path} ({exc})")
+    return None
+
+
+def _load_incremental_metadata(temp_dir: Path) -> dict | None:
+    """如果当前 zip 是增量包，则加载增量包元数据。"""
+    metadata_path = temp_dir / INCREMENTAL_METADATA_RELATIVE_PATH
+    if not metadata_path.is_file():
+        return None
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("package_type") != "incremental":
+            logger.error("incremental_update.json 的 package_type 不是 incremental")
+            return None
+        if "from_version" not in metadata or "to_version" not in metadata:
+            logger.error("incremental_update.json 缺少 from_version 或 to_version")
+            return None
+        if "files" not in metadata or "remove" not in metadata:
+            logger.error("incremental_update.json 缺少 files 或 remove")
+            return None
+        logger.info(
+            f"加载增量包元数据: {metadata['from_version']} -> {metadata['to_version']}, "
+            f"files={len(metadata['files'])}, remove={len(metadata['remove'])}"
+        )
+        return metadata
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.error(f"加载 incremental_update.json 失败: {exc}")
+        return None
+
+
 def _build_status_file_paths(
     current_dir: Path,
     old_version: str,
     new_version: str,
 ) -> tuple[Path, Path]:
-    """Build logs/{old}_{new}_updater_success|failure.txt status paths."""
+    """生成 logs/{旧版本}_{新版本}_updater_success|failure.txt 状态文件路径。"""
     prefix = f"{_safe_status_version(old_version)}_{_safe_status_version(new_version)}"
     logs_dir = current_dir / STATUS_DIR_NAME
     return (
@@ -132,7 +176,7 @@ def _build_status_file_paths(
 
 
 def _cleanup_legacy_install_temp_dir(current_dir: Path) -> None:
-    """Remove the old install-root _update_temp directory if present."""
+    """清理旧方案遗留在安装根目录下的 _update_temp 目录。"""
     legacy_temp_dir = current_dir / "_update_temp"
     if not legacy_temp_dir.exists():
         return
@@ -148,7 +192,7 @@ def _cleanup_stale_update_temp_dirs(
     now: float | None = None,
     stale_seconds: int = STALE_UPDATE_TEMP_SECONDS,
 ) -> None:
-    """Best-effort cleanup for stale external update temp directories."""
+    """尽力清理系统临时目录中已过期的更新解压目录。"""
     import shutil
 
     parent = Path(tempfile.gettempdir()) / UPDATE_TEMP_PARENT_NAME
@@ -173,7 +217,7 @@ def _cleanup_stale_update_temp_dirs(
 
 
 def _build_update_temp_dir(current_dir: Path) -> Path:
-    """Build a per-install external temp directory for extracted update files."""
+    """为本次安装生成唯一的外部更新解压目录。"""
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     return (
         Path(tempfile.gettempdir())
@@ -187,7 +231,7 @@ def _protect_installed_updater_when_package_lacks_it(
     remove_list: list[str],
     protected_list: list[str],
 ) -> tuple[list[str], list[str]]:
-    """Keep the installed updater when the downloaded package has no updater."""
+    """当更新包缺少 updater 时，保留安装目录中已有的 updater。"""
     if (temp_dir / UPDATER_RELATIVE_PATH).is_file():
         return remove_list, protected_list
 
@@ -310,6 +354,76 @@ def _compute_copy_list(manifest: dict) -> list[str]:
         and "/resources/.git" not in f
     ]
     return sorted(copy_files)
+
+
+def _compute_incremental_delete_list(metadata: dict, manifest: dict) -> list[str]:
+    """返回增量包元数据中显式声明的删除清单。"""
+    protected = set(manifest["protected"])
+    return sorted(
+        {
+            file_path
+            for file_path in metadata.get("remove", [])
+            if isinstance(file_path, str) and not _is_protected(file_path, protected)
+        }
+    )
+
+
+def _compute_incremental_copy_list(metadata: dict, manifest: dict) -> list[str] | None:
+    """根据增量包元数据生成复制清单。
+
+    增量包只携带元数据声明的文件；这些文件必须属于目标 manifest。
+    元数据文件本身仅用于安装前校验，不会复制到安装目录。
+    """
+    protected = set(manifest["protected"])
+    manifest_files = set(manifest["files"])
+    copy_files: set[str] = set()
+
+    for raw_file in metadata.get("files", []):
+        if not isinstance(raw_file, str):
+            logger.error("增量包 files 中存在非字符串条目")
+            return None
+        if raw_file == INCREMENTAL_METADATA_RELATIVE_PATH:
+            continue
+        if raw_file not in manifest_files:
+            logger.error(f"增量包声明了不在目标 manifest 中的文件: {raw_file}")
+            return None
+        if _is_protected(raw_file, protected):
+            continue
+        copy_files.add(raw_file)
+
+    copy_files.add(MANIFEST_RELATIVE_PATH)
+    return sorted(copy_files)
+
+
+def _validate_incremental_package(
+    current_dir: Path,
+    manifest: dict,
+    metadata: dict,
+) -> bool:
+    """校验增量包是否能应用到当前已安装版本。"""
+    installed_manifest = _load_installed_manifest(current_dir)
+    if installed_manifest is None:
+        logger.error("当前安装目录没有 manifest，不能应用增量包")
+        return False
+
+    installed_version = str(installed_manifest.get("version", ""))
+    expected_from = str(metadata.get("from_version", ""))
+    if installed_version != expected_from:
+        logger.error(
+            f"增量包基线版本不匹配: 当前 {installed_version}, 需要 {expected_from}"
+        )
+        return False
+
+    to_version = str(metadata.get("to_version", ""))
+    manifest_version = str(manifest.get("version", ""))
+    if manifest_version != to_version:
+        logger.error(
+            f"增量包目标版本与 manifest 不一致: metadata={to_version}, "
+            f"manifest={manifest_version}"
+        )
+        return False
+
+    return True
 
 
 def _compute_protected_list(manifest: dict) -> list[str]:
@@ -441,21 +555,52 @@ def install_update(zip_path: Path) -> bool:
         manifest = _load_manifest(temp_dir)
 
         if manifest is not None:
-            # Manifest 模式：精确删除 + 排除 protected 的复制
-            logger.info("使用 manifest 模式进行更新")
-            remove_list = _compute_delete_list(current_dir, manifest)
-            copy_list = _compute_copy_list(manifest)
+            incremental_metadata = _load_incremental_metadata(temp_dir)
+            if (
+                incremental_metadata is None
+                and (temp_dir / INCREMENTAL_METADATA_RELATIVE_PATH).is_file()
+            ):
+                return False
             protected_list = _compute_protected_list(manifest)
-            remove_list, protected_list = (
-                _protect_installed_updater_when_package_lacks_it(
-                    temp_dir,
-                    remove_list,
-                    protected_list,
+
+            if incremental_metadata is not None:
+                if not _validate_incremental_package(
+                    current_dir,
+                    manifest,
+                    incremental_metadata,
+                ):
+                    return False
+
+                logger.info("使用增量包模式进行更新")
+                # 增量包不含未变化文件，只按 metadata 声明生成最小复制/删除清单。
+                remove_list = _compute_incremental_delete_list(
+                    incremental_metadata,
+                    manifest,
                 )
-            )
+                copy_list = _compute_incremental_copy_list(
+                    incremental_metadata,
+                    manifest,
+                )
+                if copy_list is None:
+                    return False
+                package_type = "incremental"
+            else:
+                # Manifest 模式：精确删除 + 排除 protected 的复制
+                logger.info("使用 manifest 模式进行更新")
+                remove_list = _compute_delete_list(current_dir, manifest)
+                copy_list = _compute_copy_list(manifest)
+                remove_list, protected_list = (
+                    _protect_installed_updater_when_package_lacks_it(
+                        temp_dir,
+                        remove_list,
+                        protected_list,
+                    )
+                )
+                package_type = "manifest"
+
             new_version = _safe_status_version(manifest.get("version"))
             plan_path = _generate_plan_json(
-                temp_dir, "manifest", remove_list, copy_list, protected_list
+                temp_dir, package_type, remove_list, copy_list, protected_list
             )
         else:
             # 回退模式：兼容无 manifest 的旧版更新包

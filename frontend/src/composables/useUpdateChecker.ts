@@ -3,6 +3,9 @@ import { ref, watch } from 'vue'
 export interface UpdateInfo {
   latestVersion: string
   downloadUrl: string
+  packageType?: string
+  size?: number | null
+  fullSize?: number | null
 }
 
 const hasNewVersionDialog = ref<boolean>(false)
@@ -96,6 +99,9 @@ export function useUpdateChecker() {
         updateInfo.value = {
           latestVersion: result.update_info.version,
           downloadUrl: result.update_info.download_url,
+          packageType: result.update_info.package_type,
+          size: result.update_info.size,
+          fullSize: result.update_info.full_size,
         }
         // 如果 API 返回了 CN 镜像，默认使用 CN 镜像
         if (result.update_info.mirrors?.cn?.downloadUrl) {
