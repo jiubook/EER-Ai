@@ -171,9 +171,9 @@
                 当前效果：如果基质的基础属性等级 ≥{{
                   highLevelTreasureAttributeThreshold
                 }}，或者附加属性等级 ≥{{ highLevelTreasureSecondaryThreshold }}，或者技能属性等级
-                ≥{{ highLevelTreasureSkillThreshold }}，并符合"{{
+                ≥{{ highLevelTreasureSkillThreshold }}，并符合“{{
                   matchModeText(highLevelTreasureMatchMode)
-                }}"规则，则也将其视为宝藏。若下方设置了指定属性，则仅对下方指定属性生效。
+                }}”规则，则也将其视为宝藏。若下方设置了指定属性，则仅对下方指定属性生效。
               </v-alert>
             </v-col>
           </v-row>
