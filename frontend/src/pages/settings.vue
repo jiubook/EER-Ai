@@ -1,6 +1,7 @@
 <template>
   <v-container>
-    <v-expansion-panels color="primary-darken-1" :model-value="[0, 1, 2]" multiple>
+    <v-expansion-panels color="primary-darken-1" :model-value="[0, 1, 2, 3, 4]" multiple>
+      <!-- Panel 0: 武器基质预设 -->
       <v-expansion-panel :value="0">
         <v-expansion-panel-title>武器基质预设</v-expansion-panel-title>
         <v-expansion-panel-text>
@@ -86,9 +87,12 @@
           </template>
         </v-expansion-panel-text>
       </v-expansion-panel>
+
+      <!-- Panel 1: 宝藏基质判定规则 -->
       <v-expansion-panel :value="1">
-        <v-expansion-panel-title>自定义宝藏基质</v-expansion-panel-title>
+        <v-expansion-panel-title>宝藏基质判定规则</v-expansion-panel-title>
         <v-expansion-panel-text>
+          <!-- 1-A: 高等级属性判定 -->
           <h2>如果基质的某个词条初始属性较高，也将其视为宝藏</h2>
           <v-row align="center" class="my-4">
             <v-col cols="12" md="4">
@@ -167,17 +171,22 @@
                 当前效果：如果基质的基础属性等级 ≥{{
                   highLevelTreasureAttributeThreshold
                 }}，或者附加属性等级 ≥{{ highLevelTreasureSecondaryThreshold }}，或者技能属性等级
-                ≥{{ highLevelTreasureSkillThreshold }}，并符合“{{
+                ≥{{ highLevelTreasureSkillThreshold }}，并符合"{{
                   matchModeText(highLevelTreasureMatchMode)
-                }}”规则，则也将其视为宝藏。若下方设置了指定属性，则仅对下方指定属性生效。
+                }}"规则，则也将其视为宝藏。若下方设置了指定属性，则仅对下方指定属性生效。
               </v-alert>
             </v-col>
           </v-row>
+
           <h3>仅将以下高等级属性视为宝藏</h3>
           <v-alert border="start" class="my-4" type="info" variant="tonal">
             不添加指定属性时，对所有同槽位属性按上方等级阈值判定；添加后，仅当下方基础属性、附加属性、技能属性及各自等级符合满足方式时才视为宝藏。
           </v-alert>
-          <v-row v-for="(essenceStat, index) in highLevelTreasureStats" :key="index" align="center">
+          <v-row
+            v-for="(essenceStat, index) in highLevelTreasureStats"
+            :key="index"
+            align="center"
+          >
             <v-col cols="12" md="4">
               <v-select
                 v-model="essenceStat.attribute"
@@ -280,7 +289,10 @@
           >
             添加指定高等级属性
           </v-btn>
+
           <v-divider class="my-4" />
+
+          <!-- 1-B: 额外属性匹配 -->
           <h2>额外将以下属性的基质视为宝藏</h2>
           <v-radio-group
             v-model="treasureEssenceMatchMode"
@@ -293,10 +305,11 @@
             <v-radio label="和：1、2、3 项全部匹配" value="all" />
             <v-radio label="或：任一设置项匹配" value="any" />
           </v-radio-group>
-          <v-alert v-if="false" border="start" class="my-4" type="info" variant="tonal">
-            请点击右侧（或者下方）的加号按钮添加新的基质属性行，点击删除按钮删除对应行。上下箭头按钮可调整行顺序。
-          </v-alert>
-          <v-row v-for="(essenceStat, index) in treasureEssenceStats" :key="index" align="center">
+          <v-row
+            v-for="(essenceStat, index) in treasureEssenceStats"
+            :key="index"
+            align="center"
+          >
             <v-col cols="12" md="3" sm="6">
               <v-select
                 v-model="essenceStat.attribute"
@@ -389,7 +402,7 @@
             </v-col>
           </v-row>
           <v-row v-if="treasureEssenceStats.length === 0" class="my-4">
-            <v-col cols="12" md="9" sm="6">
+            <v-col cols="12">
               <v-btn
                 color="primary"
                 prepend-icon="mdi-plus"
@@ -416,39 +429,11 @@
           </v-row>
         </v-expansion-panel-text>
       </v-expansion-panel>
+
+      <!-- Panel 2: 扫描行为设置 -->
       <v-expansion-panel :value="2">
-        <v-expansion-panel-title>操作设置</v-expansion-panel-title>
+        <v-expansion-panel-title>扫描行为设置</v-expansion-panel-title>
         <v-expansion-panel-text>
-          <h2>界面设置</h2>
-          <v-row class="my-4">
-            <v-col cols="12" md="6">
-              <v-switch
-                v-model="statusPollingEnabled"
-                color="primary"
-                density="comfortable"
-                hide-details
-                label="启用轮询状态更新"
-                @update:model-value="onStatusPollingToggle"
-              />
-              <v-alert border="start" class="mt-2" type="info" variant="tonal">
-                启用后，前端会轮询更新扫描状态和基质数量。禁用可减少网络请求以避免日志膨胀。
-                <!-- [TODO] uvicorn 日志改等级? 之后默认启用 -->
-              </v-alert>
-            </v-col>
-          </v-row>
-          <v-divider class="my-4" />
-          <h2>扫描时自动翻页</h2>
-          <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            启用后，扫描完当前页会自动拖动翻页继续扫描，直到滚动条到达底部。
-          </v-alert>
-          <v-switch
-            v-model="autoPageFlip"
-            color="primary"
-            density="comfortable"
-            hide-details
-            label="启用自动翻页扫描"
-          />
-          <v-divider class="my-4" />
           <h2>遇到非无瑕基质（即遇到非橙色基质）时，该如何操作？</h2>
           <v-radio-group v-model="nonFiveStarBehavior" color="primary" density="comfortable" inline>
             <v-radio label="跳过对它的操作" value="skip" />
@@ -456,10 +441,12 @@
             <v-radio label="结束本次扫描" value="stop" />
           </v-radio-group>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            “跳过对它的操作”只是不锁定/解锁/弃用该基质，扫描会继续前往下一个基质；“结束本次扫描”等同于再次按下
+            "跳过对它的操作"只是不锁定/解锁/弃用该基质，扫描会继续前往下一个基质；"结束本次扫描"等同于再次按下
             ] 中断扫描，并会保留已扫描到的统计数据。
           </v-alert>
+
           <v-divider class="my-4" />
+
           <h2>同类型宝藏基质达到指定数量后，该如何处理？</h2>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
             启用后，扫描中同一组基础属性、附加属性、技能属性的宝藏基质达到上限后，后续同类型基质会视为养成材料并执行养成材料操作。
@@ -487,10 +474,30 @@
               />
             </v-col>
           </v-row>
+
           <v-divider class="my-4" />
+
+          <h2>扫描时自动翻页</h2>
+          <v-alert border="start" class="mb-4" type="info" variant="tonal">
+            启用后，扫描完当前页会自动拖动翻页继续扫描，直到滚动条到达底部。
+          </v-alert>
+          <v-switch
+            v-model="autoPageFlip"
+            color="primary"
+            density="comfortable"
+            hide-details
+            label="启用自动翻页扫描"
+          />
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+
+      <!-- Panel 3: 基质操作规则 -->
+      <v-expansion-panel :value="3">
+        <v-expansion-panel-title>基质操作规则</v-expansion-panel-title>
+        <v-expansion-panel-text>
           <h2>遇到宝藏基质或者养成材料时，该如何操作？</h2>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            “宝藏基质”和“养成材料”仅为分类简称，不是宝藏的基质都视为养成材料。
+            "宝藏基质"和"养成材料"仅为分类简称，不是宝藏的基质都视为养成材料。
           </v-alert>
           <v-row>
             <v-col cols="12" md="6">
@@ -520,7 +527,33 @@
               </v-radio-group>
             </v-col>
           </v-row>
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+
+      <!-- Panel 4: 通用与更新设置 -->
+      <v-expansion-panel :value="4">
+        <v-expansion-panel-title>通用与更新设置</v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <h2>界面设置</h2>
+          <v-row class="my-4">
+            <v-col cols="12" md="6">
+              <v-switch
+                v-model="statusPollingEnabled"
+                color="primary"
+                density="comfortable"
+                hide-details
+                label="启用轮询状态更新"
+                @update:model-value="onStatusPollingToggle"
+              />
+              <v-alert border="start" class="mt-2" type="info" variant="tonal">
+                启用后，前端会轮询更新扫描状态和基质数量。禁用可减少网络请求以避免日志膨胀。
+                <!-- [TODO] uvicorn 日志改等级? 之后默认启用 -->
+              </v-alert>
+            </v-col>
+          </v-row>
+
           <v-divider class="my-4" />
+
           <h2>更新设置</h2>
           <v-row class="my-4">
             <v-col cols="12" md="6">
@@ -552,6 +585,8 @@
                   hide-details
                   label="代理端口"
                   placeholder="7890"
+                  :min="1"
+                  :max="65535"
                   type="number"
                   variant="outlined"
                 />
