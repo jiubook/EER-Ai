@@ -2,6 +2,7 @@
 Windows OS-specific window utilities.
 """
 
+import time
 from collections.abc import Callable, Sequence
 
 import numpy as np
@@ -205,8 +206,6 @@ def progressive_drag_on_window(
     Returns:
         (total_distance, stopped_early) 总拖动距离和是否提前停止
     """
-    import time
-
     (left, top), (_right, _bottom) = _get_client_rect(window)
 
     # 计算屏幕坐标
