@@ -25,6 +25,7 @@ from .res_1080p import Resolution1080p
 
 _BASE = Resolution1080p()
 _BASE_WIDTH = 1920
+_BASE_HEIGHT = 1080
 
 # 物品网格卡片参数（1080p 高度下的固定值）
 _CARD_SIZE = 145
@@ -238,14 +239,14 @@ class DynamicResolutionProfile(ResolutionProfile):
     @property
     def DRAG_START_POS(self) -> Point:
         base = _BASE.DRAG_START_POS
-        return Point(base.x, round(base.y * self._height / 1080))
+        return Point(base.x, round(base.y * self._height / _BASE_HEIGHT))
 
     @property
     def DRAG_END_POS(self) -> Point:
         base = _BASE.DRAG_END_POS
-        return Point(base.x, round(base.y * self._height / 1080))
+        return Point(base.x, round(base.y * self._height / _BASE_HEIGHT))
 
     @property
     def SCROLLBAR_CHECK_POS(self) -> Point:
         base = _BASE.SCROLLBAR_CHECK_POS
-        return Point(base.x, round(base.y * self._height / 1080))
+        return Point(base.x, round(base.y * self._height / _BASE_HEIGHT))

@@ -1,6 +1,8 @@
 import itertools
 import threading
 
+import numpy as np
+
 from endfield_essence_recognizer.core.interfaces import ImageSource, WindowActions
 from endfield_essence_recognizer.core.layout.base import (
     Point,
@@ -885,17 +887,11 @@ class DraggableScannerEngine(ScannerEngine):
             )
             screenshot = self._image_source.screenshot(roi)
 
-            # 在区域内查找是否有亮点（RGB 都高于 100）
-            height, width = screenshot.shape[:2]
-            for y in range(height):
-                for x in range(width):
-                    pixel = screenshot[y, x]
-                    b, g, r = int(pixel[0]), int(pixel[1]), int(pixel[2])
-                    if r > 100 and g > 100 and b > 100:
-                        logger.info(
-                            f"检测到滚动条亮点 at ({check_pos.x - radius + x}, {check_pos.y - radius + y}): RGB({r}, {g}, {b})"
-                        )
-                        return True
+            # 在区域内查找是否有亮点（BGR 三通道都高于 100）
+            has_bright = bool(np.any(np.all(screenshot[:, :, :3] > 100, axis=2)))
+            if has_bright:
+                logger.info(f"检测到滚动条亮点 at ({check_pos.x}, {check_pos.y})")
+                return True
 
             logger.debug(f"未检测到滚动条亮点 at ({check_pos.x}, {check_pos.y})")
             return False

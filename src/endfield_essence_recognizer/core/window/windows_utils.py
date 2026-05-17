@@ -2,6 +2,7 @@
 Windows OS-specific window utilities.
 """
 
+import time
 from collections.abc import Callable, Sequence
 
 import numpy as np
@@ -88,32 +89,32 @@ def _screenshot_by_win32ui(scope: Region) -> MatLike:
     bitmap.CreateCompatibleBitmap(img_dc, width, height)
     mem_dc.SelectObject(bitmap)
 
-    # 复制屏幕区域到位图
-    mem_dc.BitBlt((0, 0), (width, height), img_dc, (left, top), win32con.SRCCOPY)
+    try:
+        # 复制屏幕区域到位图
+        mem_dc.BitBlt((0, 0), (width, height), img_dc, (left, top), win32con.SRCCOPY)
 
-    # 读取位图像素数据
-    bmpinfo = bitmap.GetInfo()
-    bpp = bmpinfo["bmBitsPixel"] // 8  # 每像素字节数（通常为3或4）
-    stride = ((width * bpp + 3) // 4) * 4  # 4字节对齐的行宽
-    raw = bitmap.GetBitmapBits(True)
+        # 读取位图像素数据
+        bmpinfo = bitmap.GetInfo()
+        bpp = bmpinfo["bmBitsPixel"] // 8  # 每像素字节数（通常为3或4）
+        stride = ((width * bpp + 3) // 4) * 4  # 4字节对齐的行宽
+        raw = bitmap.GetBitmapBits(True)
 
-    # 转换为 numpy 数组
-    arr = np.frombuffer(raw, dtype=np.uint8)
-    arr = arr.reshape((height, stride))
-    arr = arr[:, : width * bpp]  # 移除对齐填充
-    arr = arr.reshape((height, width, bpp))
+        # 转换为 numpy 数组
+        arr = np.frombuffer(raw, dtype=np.uint8)
+        arr = arr.reshape((height, stride))
+        arr = arr[:, : width * bpp]  # 移除对齐填充
+        arr = arr.reshape((height, width, bpp))
 
-    # 如果是 BGRA 格式，转换为 BGR
-    if bpp == 4:
-        arr = arr[:, :, :3]  # 丢弃 alpha 通道
+        # 如果是 BGRA 格式，转换为 BGR
+        if bpp == 4:
+            arr = arr[:, :, :3]  # 丢弃 alpha 通道
 
-    # 释放 GDI 资源
-    mem_dc.DeleteDC()
-    img_dc.DeleteDC()
-    win32gui.ReleaseDC(0, screen_dc)
-    win32gui.DeleteObject(bitmap.GetHandle())
-
-    return arr.copy()
+        return arr.copy()
+    finally:
+        mem_dc.DeleteDC()
+        img_dc.DeleteDC()
+        win32gui.ReleaseDC(0, screen_dc)
+        win32gui.DeleteObject(bitmap.GetHandle())
 
 
 def screenshot_window(
@@ -205,8 +206,6 @@ def progressive_drag_on_window(
     Returns:
         (total_distance, stopped_early) 总拖动距离和是否提前停止
     """
-    import time
-
     (left, top), (_right, _bottom) = _get_client_rect(window)
 
     # 计算屏幕坐标
