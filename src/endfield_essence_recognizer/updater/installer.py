@@ -13,6 +13,8 @@ manifest.json 存放在 ``_internal/manifest.json``，随更新包一起被复�
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -26,17 +28,26 @@ UPDATE_TEMP_PARENT_NAME = "endfield-essence-recognizer"
 UPDATE_TEMP_PREFIX = "update-"
 STALE_UPDATE_TEMP_SECONDS = 24 * 60 * 60
 
-# manifest 在安装目录中的相对路径（与 generate_manifest.py 保持一致）
+# 清单文件在安装目录中的相对路径（与生成脚本保持一致）
 MANIFEST_RELATIVE_PATH = "_internal/manifest.json"
 
 # 增量包元数据只用于 Python 侧安装前校验，不会复制到安装目录。
 INCREMENTAL_METADATA_RELATIVE_PATH = "_internal/incremental_update.json"
 
-# updater 可执行文件名
+# 独立更新器可执行文件名
 UPDATER_EXE_NAME = "eer_updater.exe"
 UPDATER_RELATIVE_PATH = f"_internal/{UPDATER_EXE_NAME}"
 
 STATUS_DIR_NAME = "logs"
+
+# 运行时只信任这些用户数据路径，避免被篡改的 manifest 保护程序文件。
+ALLOWED_PROTECTED_PATHS = {
+    "config.json",
+    "profiles.json",
+    "logs/",
+    "screenshots/",
+    ".env",
+}
 
 
 def _is_path_traversal(temp_dir: Path, member: str) -> bool:
@@ -161,6 +172,37 @@ def _load_incremental_metadata(temp_dir: Path) -> dict | None:
         return None
 
 
+def _safe_rmtree(path: Path, allowed_parent: Path, label: str) -> bool:
+    """仅在目录仍位于预期父目录内时递归删除它。"""
+    import shutil
+
+    if not path.exists():
+        return True
+    try:
+        if path.is_symlink():
+            logger.warning(f"跳过符号链接目录清理: {path}")
+            return False
+        resolved_parent = allowed_parent.resolve()
+        resolved_path = path.resolve()
+        if resolved_path == resolved_parent or not resolved_path.is_relative_to(
+            resolved_parent
+        ):
+            logger.warning(f"跳过越界目录清理: {path} -> {resolved_path}")
+            return False
+        if not path.is_dir():
+            return True
+        # 删除前再次检查，降低检查后被替换成链接的竞态风险。
+        if path.is_symlink():
+            logger.warning(f"跳过符号链接目录清理: {path}")
+            return False
+        shutil.rmtree(path)
+        logger.info(f"已清理{label}: {path}")
+        return True
+    except OSError as exc:
+        logger.warning(f"清理{label}失败: {path} ({exc})")
+        return False
+
+
 def _build_status_file_paths(
     current_dir: Path,
     old_version: str,
@@ -178,14 +220,7 @@ def _build_status_file_paths(
 def _cleanup_legacy_install_temp_dir(current_dir: Path) -> None:
     """清理旧方案遗留在安装根目录下的 _update_temp 目录。"""
     legacy_temp_dir = current_dir / "_update_temp"
-    if not legacy_temp_dir.exists():
-        return
-    import shutil
-
-    try:
-        shutil.rmtree(legacy_temp_dir)
-    except OSError as exc:
-        logger.warning(f"清理旧临时目录失败: {legacy_temp_dir} ({exc})")
+    _safe_rmtree(legacy_temp_dir, current_dir, "旧临时目录")
 
 
 def _cleanup_stale_update_temp_dirs(
@@ -193,15 +228,15 @@ def _cleanup_stale_update_temp_dirs(
     stale_seconds: int = STALE_UPDATE_TEMP_SECONDS,
 ) -> None:
     """尽力清理系统临时目录中已过期的更新解压目录。"""
-    import shutil
-
     parent = Path(tempfile.gettempdir()) / UPDATE_TEMP_PARENT_NAME
-    if not parent.is_dir():
+    if parent.is_symlink() or not parent.is_dir():
         return
 
     current_time = time.time() if now is None else now
     for path in parent.iterdir():
-        if not path.is_dir() or not path.name.startswith(UPDATE_TEMP_PREFIX):
+        if not path.name.startswith(UPDATE_TEMP_PREFIX):
+            continue
+        if path.is_symlink() or not path.is_dir():
             continue
         try:
             age = current_time - path.stat().st_mtime
@@ -209,20 +244,17 @@ def _cleanup_stale_update_temp_dirs(
             continue
         if age < stale_seconds:
             continue
-        try:
-            shutil.rmtree(path)
-            logger.info(f"已清理过期更新临时目录: {path}")
-        except OSError as exc:
-            logger.warning(f"清理过期更新临时目录失败: {path} ({exc})")
+        _safe_rmtree(path, parent, "过期更新临时目录")
 
 
 def _build_update_temp_dir(current_dir: Path) -> Path:
     """为本次安装生成唯一的外部更新解压目录。"""
     timestamp = time.strftime("%Y%m%d-%H%M%S")
+    random_suffix = secrets.token_hex(8)
     return (
         Path(tempfile.gettempdir())
         / UPDATE_TEMP_PARENT_NAME
-        / f"{UPDATE_TEMP_PREFIX}{timestamp}-{subprocess.os.getpid()}"
+        / f"{UPDATE_TEMP_PREFIX}{timestamp}-{subprocess.os.getpid()}-{random_suffix}"
     )
 
 
@@ -245,7 +277,7 @@ def _is_protected(file_path: str, protected: set[str]) -> bool:
     """判断文件是否被 protected 列表保护（精确匹配或前缀目录匹配）。"""
     if file_path in protected:
         return True
-    return any(file_path.startswith(p) for p in protected)
+    return any(p.endswith("/") and file_path.startswith(p) for p in protected)
 
 
 def _compute_delete_list(
@@ -427,15 +459,25 @@ def _validate_incremental_package(
 
 
 def _compute_protected_list(manifest: dict) -> list[str]:
-    """计算 protected 文件列表（仅具体文件，排除目录条目）。
+    """计算 updater 允许信任的 protected 路径列表。
 
     Args:
         manifest: manifest 字典。
 
     Returns:
-        protected 文件相对路径列表（正斜杠格式）。
+        protected 相对路径列表（正斜杠格式）。
     """
-    return sorted(p for p in manifest["protected"] if not p.endswith("/"))
+    protected: set[str] = set()
+    for raw_path in manifest["protected"]:
+        if not isinstance(raw_path, str):
+            logger.warning(f"忽略非字符串 protected 条目: {raw_path!r}")
+            continue
+        normalized = raw_path.replace("\\", "/")
+        if normalized in ALLOWED_PROTECTED_PATHS:
+            protected.add(normalized)
+        else:
+            logger.warning(f"忽略未在白名单内的 protected 条目: {normalized}")
+    return sorted(protected)
 
 
 def _generate_plan_json(
@@ -464,10 +506,12 @@ def _generate_plan_json(
         "protected_list": protected_list,
     }
     plan_path = temp_dir / "_plan.json"
-    plan_path.write_text(
+    tmp_path = temp_dir / f"._plan.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    tmp_path.write_text(
         json.dumps(plan, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    os.replace(tmp_path, plan_path)
     logger.info(
         f"生成 plan JSON: remove={len(remove_list)}, "
         f"copy={len(copy_list)}, protected={len(protected_list)}"
@@ -534,9 +578,7 @@ def install_update(zip_path: Path) -> bool:
         _cleanup_stale_update_temp_dirs()
         temp_dir = _build_update_temp_dir(current_dir)
         if temp_dir.exists():
-            import shutil
-
-            shutil.rmtree(temp_dir)
+            _safe_rmtree(temp_dir, temp_dir.parent, "本次更新临时目录")
         temp_dir.mkdir(parents=True)
 
         # 解压更新包
@@ -585,7 +627,7 @@ def install_update(zip_path: Path) -> bool:
                     return False
                 package_type = "incremental"
             else:
-                # Manifest 模式：精确删除 + 排除 protected 的复制
+                # 清单模式：精确删除，并在复制时排除受保护路径
                 logger.info("使用 manifest 模式进行更新")
                 remove_list = _compute_delete_list(current_dir, manifest)
                 copy_list = _compute_copy_list(manifest)
@@ -618,7 +660,7 @@ def install_update(zip_path: Path) -> bool:
                 temp_dir, "fallback", remove_list, copy_list, protected_list
             )
 
-        # updater 固定放在 _internal，避免用户在安装根目录误启动。
+        # 独立更新器固定放在 _internal，避免用户在安装根目录误启动。
         packaged_updater = temp_dir / UPDATER_RELATIVE_PATH
         installed_updater = current_dir / UPDATER_RELATIVE_PATH
         updater_exe = (
@@ -658,6 +700,7 @@ def install_update(zip_path: Path) -> bool:
 
         # 延迟退出，确保响应返回给前端
         def delayed_exit() -> None:
+            """稍后强制退出当前进程，让独立 updater 接管文件替换。"""
             import os
             import time
 

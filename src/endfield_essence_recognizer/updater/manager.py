@@ -19,6 +19,7 @@ class UpdateManager:
     """更新管理器。"""
 
     def __init__(self, download_dir: Path | None = None):
+        """初始化更新状态、下载目录和并发控制对象。"""
         self.download_dir = download_dir or Path.cwd() / "_updates"
         self.update_info: dict | None = None
         self.cancel_event = asyncio.Event()

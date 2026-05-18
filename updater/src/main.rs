@@ -13,10 +13,12 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
@@ -34,9 +36,11 @@ const PARENT_WAIT_TIMEOUT_MS: u32 = 100;
 const BACKUP_DIR_PREFIX: &str = "_update_backup_";
 #[cfg(windows)]
 const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
+#[cfg(windows)]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 
 // ---------------------------------------------------------------------------
-// Plan JSON 结构
+// 更新计划 Plan JSON 结构
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -64,6 +68,7 @@ struct Logger {
 }
 
 impl Logger {
+    /// 初始化更新器日志文件，并在日志过大时轮转为备份文件。
     fn init(log_path: &Path) -> Self {
         // 轮转：如果日志超过 4MB，重命名为 .bak
         if log_path.exists()
@@ -81,6 +86,7 @@ impl Logger {
         Logger { file }
     }
 
+    /// 同时向控制台和日志文件写入一行带时间戳的消息。
     fn log(&mut self, msg: &str) {
         let ts = chrono_free_timestamp();
         let line = format!("[{ts}] {msg}\n");
@@ -111,6 +117,7 @@ fn chrono_free_timestamp() -> String {
     format!("{y:04}-{mo:02}-{d:02} {h:02}:{m:02}:{s:02}")
 }
 
+/// 将 Unix epoch 后的天数转换为公历年月日。
 fn days_to_ymd(mut days: u32) -> (u32, u32, u32) {
     days += 719468;
     let era = days / 146097;
@@ -181,9 +188,11 @@ fn try_resolve_path_under_root(root: &Path, relative: &str) -> Option<PathBuf> {
         Ok(p) => p,
         Err(_) => root.to_path_buf(),
     };
+    if has_link_like_component(&root_canonical, &safe_relative) {
+        return None;
+    }
     let combined = root.join(&safe_relative);
-    // Existing paths can be canonicalized directly. Missing copy targets are
-    // resolved from the canonical root to avoid case/prefix mismatches on Windows.
+    // 已存在路径直接规范化；缺失的复制目标从规范化后的根目录拼接，避免 Windows 大小写差异。
     let canonical = match fs::canonicalize(&combined) {
         Ok(p) => p,
         Err(_) => root_canonical.join(&safe_relative),
@@ -196,10 +205,47 @@ fn try_resolve_path_under_root(root: &Path, relative: &str) -> Option<PathBuf> {
     }
 }
 
+/// 判断路径本身是否为符号链接或 Windows 重解析点。
+fn is_link_like_path(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// 检查 root/relative 中所有已存在的路径组件是否包含链接类对象。
+fn has_link_like_component(root: &Path, relative: &Path) -> bool {
+    let mut current = root.to_path_buf();
+    if is_link_like_path(&current) {
+        return true;
+    }
+    for component in relative.components() {
+        let Component::Normal(part) = component else {
+            return true;
+        };
+        current.push(part);
+        if is_link_like_path(&current) {
+            return true;
+        }
+    }
+    false
+}
+
 // ---------------------------------------------------------------------------
 // 等待父进程退出
 // ---------------------------------------------------------------------------
 
+/// 等待主程序进程退出，避免 Windows 文件锁阻止覆盖。
 fn wait_for_parent_process(parent_pid: u32) {
     unsafe {
         let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, parent_pid);
@@ -209,11 +255,11 @@ fn wait_for_parent_process(parent_pid: u32) {
         }
         loop {
             let result = WaitForSingleObject(handle, PARENT_WAIT_TIMEOUT_MS);
+            // WAIT_OBJECT_0 (等待对象已触发) → 进程已退出
             if result == 0 {
-                // WAIT_OBJECT_0: 进程已退出
                 break;
             }
-            // WAIT_TIMEOUT (258) → 继续等待
+            // WAIT_TIMEOUT (258) → 等待超时、继续轮询等待
             // 其他错误 → 退出循环
             if result != 258 {
                 break;
@@ -229,7 +275,11 @@ fn wait_for_parent_process(parent_pid: u32) {
 
 #[cfg(windows)]
 #[allow(clippy::permissions_set_readonly_false)]
+/// 递归清除只读属性，便于删除 Windows 上的只读文件。
 fn clear_readonly_recursive(path: &Path) {
+    if is_link_like_path(path) {
+        return;
+    }
     if path.is_dir()
         && let Ok(entries) = fs::read_dir(path)
     {
@@ -241,7 +291,7 @@ fn clear_readonly_recursive(path: &Path) {
     if let Ok(metadata) = fs::metadata(path) {
         let mut permissions = metadata.permissions();
         if permissions.readonly() {
-            // Windows read-only files can make remove_dir_all return access denied.
+            // 在 Windows 上，只读文件(read-only files)可能导致递归删除返回“拒绝访问(access denied)”
             permissions.set_readonly(false);
             let _ = fs::set_permissions(path, permissions);
         }
@@ -249,12 +299,27 @@ fn clear_readonly_recursive(path: &Path) {
 }
 
 #[cfg(not(windows))]
+/// 非 Windows 平台无需清除只读属性。
 fn clear_readonly_recursive(_path: &Path) {}
 
 /// 递归删除目录（忽略错误）
 fn remove_dir_all_safe(path: &Path, logger: &mut Logger) -> bool {
     if !path.exists() {
         return true;
+    }
+
+    if is_link_like_path(path) {
+        let removed = fs::remove_file(path).or_else(|_| fs::remove_dir(path));
+        return match removed {
+            Ok(_) => {
+                logger.log(&format!("已删除链接/重解析点: {}", path.display()));
+                true
+            }
+            Err(e) => {
+                logger.log(&format!("删除链接/重解析点失败: {} ({e})", path.display()));
+                false
+            }
+        };
     }
 
     clear_readonly_recursive(path);
@@ -285,6 +350,7 @@ fn try_remove_empty_dir(path: &Path) {
 }
 
 #[cfg(windows)]
+/// 在 Windows 上启动后台命令，等待 updater 退出后重试删除目录。
 fn schedule_remove_dir_after_exit(path: &Path, logger: &mut Logger) {
     let dir = path.to_string_lossy();
     let script = format!(
@@ -301,10 +367,12 @@ fn schedule_remove_dir_after_exit(path: &Path, logger: &mut Logger) {
 }
 
 #[cfg(not(windows))]
+/// 非 Windows 平台暂不支持退出后延迟删除目录。
 fn schedule_remove_dir_after_exit(path: &Path, logger: &mut Logger) {
     logger.log(&format!("当前平台不支持延迟清理目录: {}", path.display()));
 }
 
+/// 在安装目录同盘生成本次更新的备份目录。
 fn build_backup_dir(root_dir: &Path) -> PathBuf {
     let pid = std::process::id();
     for index in 0..=999 {
@@ -321,8 +389,10 @@ fn build_backup_dir(root_dir: &Path) -> PathBuf {
     root_dir.join(format!("{BACKUP_DIR_PREFIX}{pid}_fallback"))
 }
 
+/// 判断路径是否为 updater 遗留的备份目录。
 fn is_update_backup_dir(path: &Path) -> bool {
     path.is_dir()
+        && !is_link_like_path(path)
         && path
             .file_name()
             .and_then(|name| name.to_str())
@@ -330,6 +400,7 @@ fn is_update_backup_dir(path: &Path) -> bool {
             .unwrap_or(false)
 }
 
+/// 优先直接删除目录；失败时安排后台延迟清理。
 fn remove_dir_all_or_schedule(path: &Path, logger: &mut Logger) {
     if !remove_dir_all_safe(path, logger) && path.exists() {
         logger.log("目录直接清理未完成，安排延迟重试");
@@ -337,6 +408,7 @@ fn remove_dir_all_or_schedule(path: &Path, logger: &mut Logger) {
     }
 }
 
+/// 清理上次更新可能遗留的备份目录。
 fn cleanup_stale_backup_dirs(root_dir: &Path, logger: &mut Logger) {
     let Ok(entries) = fs::read_dir(root_dir) else {
         return;
@@ -374,6 +446,7 @@ fn clean_empty_dirs_recursive(dir: &Path) {
 /// 回滚不能保证覆盖所有外部错误（例如权限或磁盘故障），但必须避免把
 /// 已经备份的旧文件遗留在临时目录中而导致安装目录不可运行。
 fn restore_backup_recursive(root: &Path, backup_root: &Path, logger: &mut Logger) -> u32 {
+    /// 递归恢复单个备份目录下的文件。
     fn restore_dir(root: &Path, backup_root: &Path, current: &Path, logger: &mut Logger) -> u32 {
         let mut restored = 0;
         let entries = match fs::read_dir(current) {
@@ -448,10 +521,61 @@ fn move_to_backup(source: &Path, backup: &Path) -> std::io::Result<()> {
     fs::rename(source, &final_backup)
 }
 
+/// 为目标文件生成位于同一目录下的临时复制文件路径。
+fn temp_copy_path_for_target(target: &Path, index: u32) -> io::Result<PathBuf> {
+    let file_name = target
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "目标路径缺少文件名"))?
+        .to_string_lossy();
+    let temp_name = format!(".{file_name}.update-tmp-{}-{index}", std::process::id());
+    Ok(target.with_file_name(temp_name))
+}
+
+/// 先把源文件完整复制到目标目录旁的唯一临时文件，成功后返回临时文件路径。
+fn copy_file_to_unique_temp(source: &Path, target: &Path) -> io::Result<PathBuf> {
+    let mut last_exists = false;
+    for index in 0..=999 {
+        let temp_path = temp_copy_path_for_target(target, index)?;
+        let mut output = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                last_exists = true;
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+
+        let copy_result = (|| -> io::Result<()> {
+            let mut input = fs::File::open(source)?;
+            io::copy(&mut input, &mut output)?;
+            output.sync_all()?;
+            Ok(())
+        })();
+
+        if let Err(e) = copy_result {
+            let _ = fs::remove_file(&temp_path);
+            return Err(e);
+        }
+        return Ok(temp_path);
+    }
+
+    let reason = if last_exists {
+        "所有临时复制文件名均已存在"
+    } else {
+        "无法分配临时复制文件路径"
+    };
+    Err(io::Error::new(io::ErrorKind::AlreadyExists, reason))
+}
+
 // ---------------------------------------------------------------------------
 // 主逻辑
 // ---------------------------------------------------------------------------
 
+/// 按命令行协议执行一次更新流程，并返回进程退出码。
 fn run_with_args(args: Vec<String>) -> i32 {
     // 命令行参数是 updater 和 Python installer 之间的兼容协议。
     // 如需扩展，只能新增可选参数或 plan 字段，避免旧主程序无法调用新版 updater。
@@ -535,12 +659,11 @@ fn run_with_args(args: Vec<String>) -> i32 {
     // 阶段 4：执行更新
     cleanup_stale_backup_dirs(&root_dir, &mut logger);
 
-    // Backup must stay on the same drive as root_dir because Windows cannot
-    // rename files across drives. The extract dir may live in the system temp
-    // directory on a different drive.
+    // 备份目录必须与安装目录同盘，因为 Windows 不能跨盘 rename。
+    // 解压目录可能位于系统临时目录，和安装目录不一定在同一个盘。
     let backup_dir = build_backup_dir(&root_dir);
     let _ = fs::create_dir_all(&backup_dir);
-    logger.log(&format!("BackupDir: {}", backup_dir.display()));
+    logger.log(&format!("备份目录: {}", backup_dir.display()));
 
     let protected_normalized: Vec<String> = plan
         .protected_list
@@ -646,12 +769,24 @@ fn run_with_args(args: Vec<String>) -> i32 {
         if let Some(parent) = target.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        // 如果目标已存在，先备份
         let target_existed = target.exists();
+        let temp_target = match copy_file_to_unique_temp(&source, &target) {
+            Ok(path) => path,
+            Err(e) => {
+                logger.log(&format!("  复制到临时文件失败: {rel_normalized} ({e})"));
+                success = false;
+                if failure_reason.is_empty() {
+                    failure_reason = format!("复制文件失败: {rel_normalized} ({e})");
+                }
+                continue;
+            }
+        };
+        // 先完整写入新文件，再移动旧目标到备份目录，避免目标文件半写。
         if target.exists() {
             let backup_target = backup_dir.join(&rel_normalized);
             if let Err(e) = move_to_backup(&target, &backup_target) {
                 logger.log(&format!("  备份失败: {rel_normalized} ({e})"));
+                remove_file_safe(&temp_target);
                 success = false;
                 if failure_reason.is_empty() {
                     failure_reason = format!("备份文件失败: {rel_normalized} ({e})");
@@ -659,11 +794,12 @@ fn run_with_args(args: Vec<String>) -> i32 {
                 continue;
             }
         }
-        if let Err(e) = fs::copy(&source, &target) {
-            logger.log(&format!("  复制失败: {rel_normalized} ({e})"));
+        if let Err(e) = fs::rename(&temp_target, &target) {
+            logger.log(&format!("  原子替换失败: {rel_normalized} ({e})"));
+            remove_file_safe(&temp_target);
             success = false;
             if failure_reason.is_empty() {
-                failure_reason = format!("复制文件失败: {rel_normalized} ({e})");
+                failure_reason = format!("替换文件失败: {rel_normalized} ({e})");
             }
         } else {
             if !target_existed {
@@ -765,6 +901,7 @@ fn is_protected(file_path: &str, protected: &HashSet<&str>) -> bool {
     false
 }
 
+/// 写入成功或失败状态文件，供 Python/前端侧诊断更新结果。
 fn write_status_file(path: &Path, content: &str) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -772,6 +909,7 @@ fn write_status_file(path: &Path, content: &str) {
     let _ = fs::write(path, content);
 }
 
+/// 程序入口：执行更新流程并使用流程结果作为退出码。
 fn main() {
     let code = run_with_args(env::args().collect());
     std::process::exit(code);
@@ -782,6 +920,7 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// 创建带进程号和时间戳的测试临时目录。
     fn test_dir(name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -797,6 +936,7 @@ mod tests {
     }
 
     #[test]
+    /// 路径解析应拒绝所有父目录穿越片段。
     fn resolve_rejects_parent_dir_segments() {
         let root = Path::new(r"C:\app");
 
@@ -807,6 +947,7 @@ mod tests {
     }
 
     #[test]
+    /// 路径解析应接受普通相对路径。
     fn resolve_accepts_normal_relative_path() {
         let root = Path::new(r"C:\app");
         let resolved = try_resolve_path_under_root(root, r"_internal\app.dll").unwrap();
@@ -816,6 +957,7 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
+    /// 在 Windows 下根目录大小写不一致时，缺失目标仍应解析到规范根目录内。
     fn resolve_accepts_missing_file_when_root_casing_differs() {
         let base = test_dir("case-root");
         let root = base.join("MixedCaseRoot");
@@ -832,6 +974,7 @@ mod tests {
     }
 
     #[test]
+    /// 缺少复制源文件时，更新应失败并移除本次已新增文件。
     fn missing_copy_source_fails_and_removes_new_files() {
         let base = test_dir("missing-source");
         let root = base.join("root");
@@ -875,6 +1018,7 @@ mod tests {
     }
 
     #[test]
+    /// 复制阶段失败时，应从备份恢复已存在的旧文件。
     fn copy_failure_rolls_back_existing_file() {
         let base = test_dir("rollback-existing");
         let root = base.join("root");
@@ -917,6 +1061,64 @@ mod tests {
     }
 
     #[test]
+    /// 临时复制文件应位于目标目录，rename 后不应残留。
+    fn copy_to_temp_uses_target_directory_and_cleans_on_rename() {
+        // 验证临时文件与目标文件同目录，便于后续 rename 保持原子性。
+        let base = test_dir("atomic-copy");
+        let source = base.join("source.dll");
+        let target = base.join("nested").join("app.dll");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&source, "new").unwrap();
+
+        let temp = copy_file_to_unique_temp(&source, &target).unwrap();
+        assert_eq!(temp.parent(), target.parent());
+        assert!(
+            temp.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("update-tmp")
+        );
+        fs::rename(&temp, &target).unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert!(!temp.exists());
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    /// 如环境允许创建符号链接，链接目录下的缺失目标应被拒绝。
+    fn resolve_rejects_missing_target_under_symlink_dir_when_possible() {
+        // 验证符号链接目录下的缺失目标不会被解析为可写入路径。
+        let base = test_dir("symlink-dir");
+        let root = base.join("root");
+        let outside = base.join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let link = root.join("linked");
+
+        #[cfg(windows)]
+        {
+            if std::os::windows::fs::symlink_dir(&outside, &link).is_err() {
+                let _ = fs::remove_dir_all(base);
+                return;
+            }
+        }
+        #[cfg(unix)]
+        {
+            if std::os::unix::fs::symlink(&outside, &link).is_err() {
+                let _ = fs::remove_dir_all(base);
+                return;
+            }
+        }
+
+        assert!(try_resolve_path_under_root(&root, r"linked\new.dll").is_none());
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    /// 清理遗留备份目录时，应能处理只读文件。
     fn stale_backup_cleanup_removes_backup_dirs() {
         let base = test_dir("stale-backup");
         let root = base.join("root");

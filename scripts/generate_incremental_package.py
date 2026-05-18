@@ -139,11 +139,11 @@ def generate_incremental_package(
             f"旧 manifest 版本 {old_manifest['version']} != {from_version}"
         )
     if new_manifest.get("version") and new_manifest["version"] != to_version:
-        raise ValueError(
-            f"新 manifest 版本 {new_manifest['version']} != {to_version}"
-        )
+        raise ValueError(f"新 manifest 版本 {new_manifest['version']} != {to_version}")
 
-    files = _changed_or_new_files(old_dist_dir, new_dist_dir, old_manifest, new_manifest)
+    files = _changed_or_new_files(
+        old_dist_dir, new_dist_dir, old_manifest, new_manifest
+    )
     removed = _removed_files(old_manifest, new_manifest)
     # 元数据由 Python 安装器读取；Rust updater 仍只消费转换后的 _plan.json。
     metadata = {

@@ -445,24 +445,33 @@ class TestProtectedBackupList:
     """protected 文件备份清单测试。"""
 
     def test_protected_files_list(self) -> None:
-        """应包含非目录的 protected 条目。"""
+        """只信任白名单内的 protected 条目。"""
         from src.endfield_essence_recognizer.updater.installer import (
+            UPDATER_RELATIVE_PATH,
             _compute_protected_list,
         )
 
         manifest = {
             "version": "0.9.0",
             "files": ["app.exe", "config.json"],
-            "protected": ["config.json", "logs/", ".env"],
+            "protected": [
+                "config.json",
+                "logs/",
+                ".env",
+                UPDATER_RELATIVE_PATH,
+                "_internal/evil.dll",
+            ],
         }
 
         entries = _compute_protected_list(manifest)
 
-        # 目录条目（logs/）不应在列表中
-        assert "logs/" not in entries
-        # 文件条目应在列表中
+        # 允许的用户数据路径应进入 plan，目录前缀也由 Rust updater 二次保护。
         assert "config.json" in entries
+        assert "logs/" in entries
         assert ".env" in entries
+        # 程序文件不能被 manifest 注入 protected，避免阻止更新/删除。
+        assert UPDATER_RELATIVE_PATH not in entries
+        assert "_internal/evil.dll" not in entries
 
 
 class TestStatusFilePaths:
@@ -573,7 +582,27 @@ class TestUpdateTempDir:
         temp_dir = _build_update_temp_dir(tmp_path)
 
         assert not temp_dir.is_relative_to(tmp_path)
-        assert temp_dir.name == "update-20260510-143601-12345"
+        assert temp_dir.name.startswith("update-20260510-143601-12345-")
+        assert len(temp_dir.name.rsplit("-", maxsplit=1)[-1]) == 16
+
+    def test_plan_json_is_written_atomically(self, tmp_path: Path) -> None:
+        """plan JSON 应通过临时文件原子替换写入。"""
+        from src.endfield_essence_recognizer.updater.installer import (
+            _generate_plan_json,
+        )
+
+        plan_path = _generate_plan_json(
+            tmp_path,
+            "manifest",
+            ["old.dll"],
+            ["new.dll"],
+            ["config.json"],
+        )
+
+        assert plan_path == tmp_path / "_plan.json"
+        data = json.loads(plan_path.read_text(encoding="utf-8"))
+        assert data["remove_list"] == ["old.dll"]
+        assert not list(tmp_path.glob("._plan.*.tmp"))
 
     def test_legacy_install_temp_dir_is_cleaned(self, tmp_path: Path) -> None:
         from src.endfield_essence_recognizer.updater.installer import (
@@ -622,6 +651,36 @@ class TestUpdateTempDir:
         assert not stale.exists()
         assert fresh.exists()
         assert unrelated.exists()
+
+    def test_stale_external_update_temp_symlink_is_not_followed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """清理过期临时目录时不应跟随符号链接删除外部目录。"""
+        import os
+
+        from src.endfield_essence_recognizer.updater.installer import (
+            UPDATE_TEMP_PARENT_NAME,
+            _cleanup_stale_update_temp_dirs,
+        )
+
+        monkeypatch.setattr(
+            "src.endfield_essence_recognizer.updater.installer.tempfile.gettempdir",
+            lambda: str(tmp_path),
+        )
+        parent = tmp_path / UPDATE_TEMP_PARENT_NAME
+        parent.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("keep")
+        link = parent / "update-20260509-010101-link"
+        try:
+            os.symlink(outside, link, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"当前环境无法创建符号链接: {exc}")
+
+        _cleanup_stale_update_temp_dirs(now=2000.0, stale_seconds=0)
+
+        assert (outside / "keep.txt").exists()
 
 
 class TestPathTraversalProtection:

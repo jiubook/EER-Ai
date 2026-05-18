@@ -19,8 +19,8 @@
 热更新的第一目标不是“尽快覆盖文件”，而是“安全地把安装目录收敛到目标版本”。因此需要遵守以下原则：
 
 1. **目标状态明确**：发布包中的 `_internal/manifest.json` 声明该版本应包含的文件和 protected 路径。
-2. **用户数据不动**：`config.json`、`profiles.json`、`logs/`、`screenshots/`、`.env` 等路径不会被删除或覆盖；`_updates/` 和系统临时目录中的更新解压目录会在更新完成后尽量清理。
-3. **路径不可越界**：Python 解压阶段和 Rust 执行阶段都会拒绝路径穿越。
+2. **用户数据不动**：`config.json`、`profiles.json`、`logs/`、`screenshots/`、`.env` 等白名单路径不会被删除或覆盖；`_updates/` 和系统临时目录中的更新解压目录会在更新完成后尽量清理。
+3. **路径不可越界**：Python 解压阶段和 Rust 执行阶段都会拒绝路径穿越；Rust 侧还会拒绝经过符号链接/重解析点的更新路径。
 4. **失败优先保旧版本可用**：删除或覆盖旧文件前先备份；复制失败、源文件缺失或路径非法时写入失败状态并尽力回滚。
 5. **更新器放在内部目录**：`eer_updater.exe` 固定放在 `_internal/` 下，避免用户在安装根目录误启动。
 
@@ -85,7 +85,7 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
   "package_type": "manifest",
   "remove_list": ["_internal/old.dll"],
   "copy_list": ["endfield-essence-recognizer.exe", "_internal/eer_updater.exe"],
-  "protected_list": ["config.json", ".env"]
+  "protected_list": ["config.json", "profiles.json", "logs/", "screenshots/", ".env"]
 }
 ```
 
@@ -135,7 +135,7 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 15. 更新成功后写入 `logs/{旧版本}_{新版本}_updater_success.txt`，删除同版本失败状态文件、更新包，并重启主程序。
 16. 如果 updater 正从临时解压目录运行，会在退出后延迟删除该目录；`_updates/` 在更新包删除后也会尝试删除空目录。
 17. `_update_backup_{pid}/` 会在更新成功或失败回滚后删除；如果 Windows 暂时拒绝访问，会安排延迟重试，并在下次更新开始前再次清理遗留目录。
-18. 每次更新使用 `update-{时间戳}-{进程ID}` 形式的唯一临时目录，并在开始前清理超过 24 小时的旧更新临时目录。
+18. 每次更新使用 `update-{时间戳}-{进程ID}-{随机后缀}` 形式的唯一临时目录，并在开始前清理超过 24 小时的旧更新临时目录；清理时会跳过符号链接/越界目录。
 
 ## 更新器位置与运行方式
 
@@ -163,15 +163,16 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 - `_update_backup_{pid}/`：安装目录同盘的临时回滚备份；更新结束后会尽量删除，失败时会延迟重试并在下次更新前清理
 - `.env`：环境变量配置
 
-修改 protected 列表时，请同步更新单元测试。
+运行时只信任 installer 侧硬编码白名单内的 protected 路径；manifest 中额外声明的程序文件（例如 `_internal/eer_updater.exe`）不会被加入 `protected_list`。修改 protected 白名单时，请同步更新单元测试。
 
 ### 路径穿越防护
 
 - Python 解压 zip 前使用 `Path.resolve()` 与 `relative_to()` 拒绝 `../`、绝对路径等可疑条目。
-- Rust updater 执行 plan 时再次拒绝绝对路径、盘符路径、根路径、`..` 和空路径。
+- Rust updater 执行 plan 时再次拒绝绝对路径、盘符路径、根路径、`..`、空路径，以及路径中已存在的符号链接/Windows 重解析点。
 
 ### 回滚策略
 
+- 新文件会先复制到目标目录旁的临时文件，再移动旧文件到 `_update_backup_{pid}/`，最后用 rename 完成替换，避免直接写目标文件导致半写损坏。
 - 删除和覆盖前先移动到 `_update_backup_{pid}/`。
 - 若 copy 阶段失败，先删除本次新增文件，再把 `_update_backup_{pid}/` 中的旧文件恢复到原位置。
 - `_update_backup_{pid}/` 删除前会清理只读属性；若被杀毒软件或系统短暂占用导致删除失败，会安排后台延迟重试。

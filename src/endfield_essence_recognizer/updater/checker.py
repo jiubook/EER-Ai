@@ -34,6 +34,7 @@ class UpdateCheckError(Exception):
     """更新检查失败（网络、解析、源站等错误）。"""
 
     def __init__(self, message: str) -> None:
+        """保存可展示给调用方的更新检查失败原因。"""
         super().__init__(message)
         self.message = message
 
