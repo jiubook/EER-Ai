@@ -50,7 +50,7 @@ jobs:
         if: always() # Always run to report formatting issues
 
   updater-lint:
-    name: Lint Rust updater
+    name: Check Rust updater
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -65,6 +65,9 @@ jobs:
 
       - name: fmt check
         run: cargo fmt --manifest-path updater/Cargo.toml --check
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path updater/Cargo.toml
 
   backend-test:
     name: Run tests
