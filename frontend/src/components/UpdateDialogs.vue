@@ -70,7 +70,12 @@
           </div>
         </div>
 
+        <v-alert class="mb-3" type="info" variant="tonal">
+          当前更新流程：{{ selectedFlowName }}
+        </v-alert>
+
         <v-select
+          v-if="selectedFlow === 'github'"
           v-model="selectedMirror"
           class="mb-3"
           density="comfortable"
@@ -179,6 +184,7 @@ const {
   downloadedSize,
   totalSize,
   totalKnown,
+  selectedFlow,
   selectedMirror,
   proxyEnabled,
   proxyPort,
@@ -199,6 +205,12 @@ const { mirrorOptions } = useUpdateMirrors()
 const selectedMirrorName = computed(() => {
   const mirror = mirrorOptions.value.find((m) => m.value === selectedMirror.value)
   return mirror ? mirror.title : 'GitHub 官方'
+})
+
+const selectedFlowName = computed(() => {
+  if (selectedFlow.value === 'cn_yituliu') return '一图流 API (CN 镜像)'
+  if (selectedFlow.value === 'cn_mirrorchyan') return 'Mirror 酱'
+  return 'GitHub Release'
 })
 
 function formatSize(bytes: number): string {

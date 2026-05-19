@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import zipfile
 from pathlib import Path
@@ -30,6 +31,17 @@ except ModuleNotFoundError:  # pragma: no cover - 作为包导入时使用
 
 # 增量包元数据固定放在 _internal 下，避免污染安装根目录。
 INCREMENTAL_METADATA_RELATIVE_PATH = "_internal/incremental_update.json"
+
+
+def _compute_manifest_sha256(manifest: dict) -> str:
+    """计算清单的稳定内容哈希，用于绑定增量包基线和目标。"""
+    canonical = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _is_protected(file_path: str, protected: set[str]) -> bool:
@@ -147,10 +159,13 @@ def generate_incremental_package(
     removed = _removed_files(old_manifest, new_manifest)
     # 元数据由 Python 安装器读取；Rust updater 仍只消费转换后的 _plan.json。
     metadata = {
+        "schema_version": 2,
         "format": 1,
         "package_type": "incremental",
         "from_version": from_version,
         "to_version": to_version,
+        "base_manifest_sha256": _compute_manifest_sha256(old_manifest),
+        "target_manifest_sha256": _compute_manifest_sha256(new_manifest),
         "target_manifest": MANIFEST_RELATIVE_PATH,
         "files": files,
         "remove": removed,

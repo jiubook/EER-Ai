@@ -5,8 +5,9 @@
 应用内更新用于让用户在不手动重新下载完整压缩包的情况下升级到新版本。当前方案支持：
 
 - 多镜像源下载与代理配置
+- Mirror 酱 CDK 下载源与 `changes.json` 增量包兼容
 - WebSocket 实时下载进度
-- 更新包 SHA-256 校验（当发布资产提供 digest 时）
+- 更新包 SHA-256 校验（当 Release asset 提供 digest 时）
 - 基于 manifest 的文件级更新
 - 基于旧/新 dist 对比生成增量包，只下载变更文件
 - 增量包基线不匹配或预安装校验失败时自动回退全量包
@@ -28,11 +29,12 @@
 
 ### 后端
 
-- `src/endfield_essence_recognizer/updater/checker.py`：检查版本、解析下载地址、获取 GitHub asset digest。
+- `src/endfield_essence_recognizer/updater/checker.py`：按启用顺序检查版本、解析下载地址、获取 GitHub asset digest，并兼容 Mirror 酱最新版本接口。
 - `src/endfield_essence_recognizer/updater/downloader.py`：下载更新包并回调进度。
-- `src/endfield_essence_recognizer/updater/installer.py`：解压更新包、读取 manifest、生成 `_plan.json`、启动 updater。
+- `src/endfield_essence_recognizer/updater/installer.py`：解压更新包、读取 manifest 或增量元数据、生成 `_plan.json`、启动 updater。
 - `src/endfield_essence_recognizer/updater/manager.py`：串联检查、下载、校验和安装流程。
-- `src/endfield_essence_recognizer/updater/mirrors.py`：维护镜像源模板。
+- `src/endfield_essence_recognizer/updater/sources.py`：维护更新流程开关、默认流程和检查失败后的回退顺序。
+- `src/endfield_essence_recognizer/updater/mirrors.py`：维护 GitHub 下载镜像模板和展示名称。
 - `src/endfield_essence_recognizer/api/routes/update.py`：更新相关 HTTP API。
 - `src/endfield_essence_recognizer/api/websockets/update_progress.py`：下载进度 WebSocket。
 
@@ -97,10 +99,13 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 
 ```json
 {
+  "schema_version": 2,
   "format": 1,
   "package_type": "incremental",
   "from_version": "0.8.0",
   "to_version": "0.9.2",
+  "base_manifest_sha256": "old-manifest-sha256",
+  "target_manifest_sha256": "new-manifest-sha256",
   "target_manifest": "_internal/manifest.json",
   "files": [
     "endfield-essence-recognizer.exe",
@@ -114,28 +119,61 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 }
 ```
 
-增量包仍然必须包含目标版本的 `_internal/manifest.json`，这样安装完成后本地 manifest 会收敛到新版本完整状态。
+增量包仍然必须包含目标版本的 `_internal/manifest.json`，这样安装完成后本地 manifest 会收敛到新版本完整状态。安装前还会重新计算本地已安装 manifest 和包内目标 manifest 的 sha256，分别匹配 `base_manifest_sha256` 与 `target_manifest_sha256` 后才允许应用增量包。
+
+### Mirror 酱 `changes.json`
+
+Mirror 酱生成的增量包根目录可包含 `changes.json`。安装器会把它转换为与 updater 兼容的 plan：
+
+```json
+{
+  "added": ["_internal/new.dll"],
+  "modified": ["endfield-essence-recognizer.exe"],
+  "deleted": ["_internal/old.dll"],
+  "added_dir": ["_internal/new_assets/"],
+  "deleted_dir": ["_internal/old_assets/"]
+}
+```
+
+转换规则：
+
+- `added`、`modified` 和 `added_dir` 会进入复制清单；如果 `added/modified` 缺失，则兜底扫描包内全部文件。
+- `deleted` 和 `deleted_dir` 会进入删除清单。
+- 不复制 `changes.json`、`_plan.json`、`_internal/incremental_update.json` 等安装协议文件。
+- 删除和复制仍会经过 protected 路径过滤，以及 Python/Rust 双层路径穿越校验。
+- 如果包内包含 `_internal/incremental_update.json`，优先按本项目自定义增量格式处理，而不是按 Mirror 酱 `changes.json` 处理。
+
+protected 来源优先级：
+
+1. 包内 `_internal/manifest.json` 的 `protected`。
+2. 本地已安装 `_internal/manifest.json` 的 `protected`。
+3. 内置白名单：`config.json`、`profiles.json`、`logs/`、`screenshots/`、`.env`。
+
+建议 Mirror 酱增量包仍包含目标版本 `_internal/manifest.json`，否则更新后本地 manifest 可能停留在旧版本，影响下一次增量基线判断。
 
 ## 更新流程
 
 1. 用户点击“一键更新”。
-2. 后端检查版本并确定下载地址。
-3. `download_update()` 下载 zip 到 `_updates/`，前端通过 WebSocket 显示进度。
-4. 如果可获得 SHA-256，`UpdateManager` 校验下载包完整性。
+2. 后端按用户选择的更新流程检查版本；该流程失败时，按 `UPDATE_FLOW_ENABLED` 中启用的顺序继续尝试后续流程，直到某个流程返回“有更新”或“已是最新”。
+3. `download_update()` 下载 zip 到 `_updates/`，前端通过 WebSocket 显示进度；Mirror 酱返回的是带时效的下载 URL，下载阶段不再携带 CDK。
+4. 如果可获得 SHA-256，`UpdateManager` 校验下载包完整性；Mirror 酱 API 当前没有 sha256 字段，因此会跳过外部哈希校验。
 5. `install_update()` 解压 zip 到系统临时目录中的独立更新目录，并校验 zip 条目不能路径穿越。
-6. Python 读取 `_internal/manifest.json`；如果同时存在 `_internal/incremental_update.json`，先校验本地 manifest 版本必须等于 `from_version`。
-7. 全量包根据目标 manifest 计算完整 `remove_list` / `copy_list`；增量包只复制 metadata 中声明的变更文件，并只删除 metadata 中声明的旧文件。
-8. Python 写入临时解压目录中的 `_plan.json`。
-9. Python 优先启动临时解压目录中的 `_internal/eer_updater.exe`；如果更新包没有 updater，才回退到安装目录中的 `_internal/eer_updater.exe`。
-10. 当前主程序延迟退出，Rust updater 等待父进程退出。
-11. Rust updater 拒绝安装在盘符根目录的场景，并校验 plan 中所有路径不能越界。
-12. 需要删除或覆盖的旧文件先移动到安装目录同盘的 `_update_backup_{pid}/`，避免 Windows 跨盘 `rename` 失败。
-13. Rust updater 按 `copy_list` 从临时解压目录复制新文件到安装目录。
-14. 如果复制失败、源文件缺失或路径非法，Rust updater 删除本次新增文件并从 `_update_backup_{pid}/` 恢复旧文件。
-15. 更新成功后写入 `logs/{旧版本}_{新版本}_updater_success.txt`，删除同版本失败状态文件、更新包，并重启主程序。
-16. 如果 updater 正从临时解压目录运行，会在退出后延迟删除该目录；`_updates/` 在更新包删除后也会尝试删除空目录。
-17. `_update_backup_{pid}/` 会在更新成功或失败回滚后删除；如果 Windows 暂时拒绝访问，会安排延迟重试，并在下次更新开始前再次清理遗留目录。
-18. 每次更新使用 `update-{时间戳}-{进程ID}-{随机后缀}` 形式的唯一临时目录，并在开始前清理超过 24 小时的旧更新临时目录；清理时会跳过符号链接/越界目录。
+6. Python 读取 `_internal/manifest.json`；如果同时存在 `_internal/incremental_update.json`，先校验本地 manifest 版本必须等于 `from_version`，并校验本地/目标 manifest sha256 必须匹配元数据。
+7. 全量包根据目标 manifest 计算完整 `remove_list` / `copy_list`；本项目增量包只复制 metadata 中声明的变更文件，并只删除 metadata 中声明的旧文件。
+8. 如果包内没有 `_internal/incremental_update.json`，但根目录存在 Mirror 酱 `changes.json`，则按 `added` / `modified` / `deleted` / `deleted_dir` 生成 plan。
+9. Python 写入临时解压目录中的 `_plan.json`。
+10. Python 优先启动临时解压目录中的 `_internal/eer_updater.exe`；如果更新包没有 updater，才回退到安装目录中的 `_internal/eer_updater.exe`。
+11. 当前主程序延迟退出，Rust updater 等待父进程退出。
+12. Rust updater 拒绝安装在盘符根目录的场景，并校验 plan 中所有路径不能越界。
+13. 需要删除或覆盖的旧文件先移动到安装目录同盘的 `_update_backup_{pid}/`，避免 Windows 跨盘 `rename` 失败。
+14. Rust updater 按 `copy_list` 从临时解压目录复制新文件到安装目录。
+15. 如果复制失败、源文件缺失或路径非法，Rust updater 删除本次新增文件并从 `_update_backup_{pid}/` 恢复旧文件。
+16. 更新成功后写入 `logs/{旧版本}_{新版本}_updater_success.txt`，删除同版本失败状态文件、更新包，并重启主程序。
+17. 如果 updater 正从临时解压目录运行，会在退出后延迟删除该目录；`_updates/` 在更新包删除后也会尝试删除空目录。
+18. `_update_backup_{pid}/` 会在更新成功或失败回滚后删除；如果 Windows 暂时拒绝访问，会安排延迟重试，并在下次更新开始前再次清理遗留目录。
+19. 每次更新使用 `update-{时间戳}-{进程ID}-{随机后缀}` 形式的唯一临时目录，并在开始前清理超过 24 小时的旧更新临时目录；清理时会跳过符号链接/越界目录。
+20. Rust updater 在安全检查失败、plan 文件读取/解析失败、回滚完成后，也会清理解压目录、更新包和 plan 文件；如果立即删除失败，会安排延迟重试。
+21. Python installer 在启动 updater 之前的任何阶段失败（如解压、校验、plan 生成），会通过 `finally` 块清理本次临时文件（plan 文件、解压目录、更新包）；如果立即删除失败，同样会安排延迟重试。
 
 ## 更新器位置与运行方式
 
@@ -198,9 +236,13 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 
 取消当前下载任务。
 
+### `GET /api/update/flows`
+
+获取后端已启用的更新流程列表。该列表由 `UPDATE_FLOW_ENABLED` 控制，前端只能展示并保存启用的流程。
+
 ### `GET /api/update/mirrors`
 
-获取可用镜像源列表。
+获取 GitHub 流程可用的下载镜像列表。该列表只在本次检查成功的流程为 `github` 时用于下载 URL 改写；一图流和 Mirror 酱流程不会使用这些镜像。
 
 ### `WebSocket /ws/update/progress`
 
@@ -215,9 +257,51 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 }
 ```
 
-## 版本源 JSON
+## 更新流程开关
 
-`checker.py` 兼容原有全量字段，并会优先选择与当前版本精确匹配的增量包：
+更新流程和 GitHub 下载镜像是两层概念：
+
+- 更新流程决定从哪里检查版本、拿到哪个下载 URL。
+- GitHub 下载镜像只在 `github` 流程内生效，用于把 GitHub 官方下载地址改写为代理镜像地址。
+
+`src/endfield_essence_recognizer/updater/sources.py` 中的核心配置：
+
+```python
+UPDATE_FLOW_ENABLED = {
+    "cn_yituliu": True,
+    "cn_mirrorchyan": True,
+    "github": True,
+}
+
+DEFAULT_UPDATE_FLOW = "cn_yituliu"
+```
+
+规则：
+
+- `UPDATE_FLOW_ENABLED` 的字典顺序就是检查失败后的回退顺序，当前为一图流 → Mirror 酱 → GitHub。
+- `DEFAULT_UPDATE_FLOW` 只表示启动自动检查和无效配置时的首选流程；该流程失败时仍会继续尝试其他已启用流程。
+- 用户可以在前端选择已启用的流程；后端不会返回被禁用的流程。
+- 某个流程一旦成功返回“有更新”或“已是最新”，本轮检查立即停止，不再访问后续流程。
+- 某个流程返回网络错误、接口错误、配置缺失或解析失败时，才会继续尝试后续流程。
+- 下载阶段锁定本次检查成功的 `source`，不跨流程改写下载地址；只有 GitHub 流程允许在 GitHub 官方与 GitHub 代理镜像之间切换。
+
+配置字段：
+
+```json
+{
+  "update_flow": "cn_yituliu",
+  "update_github_mirror": "github",
+  "update_mirror": "github"
+}
+```
+
+- `update_flow`：用户选择的更新流程，支持 `cn_yituliu`、`cn_mirrorchyan`、`github`。
+- `update_github_mirror`：GitHub 流程使用的下载镜像，支持 `github`、`ghproxy`、`ghfast` 等。
+- `update_mirror`：兼容旧字段，当前仍写入 GitHub 下载镜像；旧值 `cn` 会在 v5 内自动归一为 `update_flow = "cn_yituliu"`。
+
+## 一图流版本源 JSON
+
+`cn_yituliu` 流程只访问一图流版本源，并会优先选择与当前版本精确匹配的增量包：
 
 ```json
 {
@@ -226,7 +310,7 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
   "sha256": "full-package-sha256",
   "size": 16777216,
   "mirrors": {
-    "cn": {
+    "cn_yituliu": {
       "downloadUrl": "https://cdn.example.com/endfield-essence-recognizer-v0.9.2-windows.zip"
     }
   },
@@ -238,7 +322,7 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
       "sha256": "delta-package-sha256",
       "size": 1441792,
       "mirrors": {
-        "cn": {
+        "cn_yituliu": {
           "downloadUrl": "https://cdn.example.com/endfield-essence-recognizer-0.8.0-to-0.9.2-windows-delta.zip"
         }
       }
@@ -247,7 +331,90 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 }
 ```
 
-兼容别名：增量列表也可使用 `incremental_packages`、`deltaPackages` 或 `patches`；包内字段也兼容 `from_version` / `to_version` / `download_url` / `url`。
+兼容别名：一图流镜像 key 仍兼容旧的 `cn`；增量列表也可使用 `incremental_packages`、`deltaPackages` 或 `patches`；包内字段也兼容 `from_version` / `to_version` / `download_url` / `url`。
+
+一图流流程不会使用顶层 GitHub 下载地址作为实际下载地址；如果版本源缺少 `mirrors.cn_yituliu.downloadUrl`（或兼容旧 key `mirrors.cn.downloadUrl`），该流程会视为检查失败，并按启用顺序尝试后续流程。
+
+## GitHub Release 流程
+
+`github` 流程只访问 GitHub Releases API：
+
+```text
+GET https://api.github.com/repos/Logical-Byte/endfield-essence-recognizer/releases/latest
+```
+
+选择策略：
+
+- 使用 `tag_name` 与当前版本比较。
+- 优先匹配文件名中同时包含当前版本、目标版本和 `delta` / `incremental` / `patch` 标记的 Windows zip 增量包。
+- 找不到匹配增量包时，使用 Windows zip 全量包。
+- 如果 GitHub asset 带有 `digest: sha256:...`，下载后会进行 SHA-256 校验。
+- 安装阶段可以使用用户选择的 GitHub 下载镜像改写下载 URL，但仍属于 GitHub 流程，不会切换到一图流或 Mirror 酱。
+
+## Mirror 酱更新源兼容
+
+Mirror 酱用于支持 CDK 下载和托管增量包。`cn_mirrorchyan` 流程只访问 Mirror 酱接口；如果该流程检查失败，外层流程调度器才会按 `UPDATE_FLOW_ENABLED` 顺序尝试后续启用流程。
+
+### 检查更新接口
+
+Mirror 酱最新版本接口：
+
+```text
+GET https://mirrorchyan.com/api/resources/{res_id}/latest
+```
+
+常用请求参数：
+
+- `current_version`：当前本地版本，建议传入 `v{当前版本}`，例如 `v0.9.2`。
+- `cdk`：用户 CDK，可选；有 CDK 且有效时才会返回带时效的下载 URL。
+- `user_agent`：来源统计标识，不是 HTTP User-Agent，而是 Mirror 酱统计面板里的来源字段，默认使用 `EER_APP`。
+
+成功响应 `code == 0` 时，主要读取 `data.version_name`、`data.url` 和 `data.release_note`。失败响应 `code != 0` 时，应把 `code/msg` 作为该流程失败原因记录；如果还有后续启用流程，则继续尝试后续流程，否则展示给用户。
+
+### 选择策略
+
+`cn_mirrorchyan` 的检查流程：
+
+1. 不读取一图流版本源，也不访问 GitHub Releases API。
+2. 当用户选择 `cn_mirrorchyan` 且配置了 `update_mirrorchyan_res_id` 时，调用 Mirror 酱最新版本接口。
+3. 如果 `version_name` 大于当前版本且返回 `url`，使用该 URL 下载，并把 `source` 标记为 `cn_mirrorchyan`。
+4. 如果 Mirror 酱没有返回 `url`，通常表示没有 CDK 或 CDK 不满足下载条件，该流程检查失败，由外层调度器决定是否尝试后续流程。
+5. 如果 Mirror 酱返回业务错误，该流程检查失败；只有所有启用流程都失败时，才把错误信息展示给用户。
+
+### 配置字段
+
+用户配置中新增：
+
+```json
+{
+  "update_flow": "cn_mirrorchyan",
+  "update_mirrorchyan_res_id": "由 Mirror 酱分配的资源 ID",
+  "update_mirrorchyan_cdk": "用户 CDK",
+  "update_mirrorchyan_user_agent": "EER_APP"
+}
+```
+
+注意事项：
+
+- `update_mirrorchyan_res_id` 为空时，Mirror 酱流程会检查失败；如果后续流程启用，则继续尝试后续流程。
+- CDK 会保存在本地配置中；日志、错误信息和前端提示不得输出 CDK 明文。
+- 前端选择 Mirror 酱更新流程时，应显示资源 ID、CDK、来源标识输入框。
+
+### 安全边界
+
+Mirror 酱 API 当前没有 sha256 字段，因此无法复用本项目原有“下载后外部 sha256 校验”。Mirror 酱链路的安全性主要来自：
+
+- HTTPS 下载和 Mirror 酱 CDK 权限控制。
+- 安装器路径穿越检查和 protected 路径保护。
+- Rust updater 的备份、失败回滚和越界路径拒绝。
+- Mirror 酱下载阶段不会跨流程回退到一图流或 GitHub 全量包；如需切换流程，需要重新检查更新。
+- 如果包内包含本项目 `_internal/incremental_update.json`，仍可获得 manifest sha256 强校验。
+
+推荐顺序：
+
+1. Mirror 酱托管本项目自定义增量包：安全性最好。
+2. Mirror 酱 `changes.json` 增量包，并包含新版本 `_internal/manifest.json`：可兼容，下一次更新仍较稳定。
+3. Mirror 酱 `changes.json` 增量包但无 manifest：仅作为兼容兜底，不建议长期使用。
 
 ## 本地开发与验证
 
@@ -268,12 +435,13 @@ cargo test --manifest-path updater/Cargo.toml
 
 1. 更新 `pyproject.toml` 中的版本号。
 2. 构建前端产物。
-3. 构建 release updater：`cargo build --release --manifest-path updater/Cargo.toml`。
-4. 使用 PyInstaller 构建应用，`main.spec` 会复制 release updater 到 dist 的 `_internal` 目录。
+3. 构建发布版 updater：`cargo build --release --manifest-path updater/Cargo.toml`。
+4. 使用 PyInstaller 构建应用，`main.spec` 会复制发布版 updater 到 dist 的 `_internal` 目录。
 5. 执行 `scripts/generate_manifest.py` 写入 `_internal/manifest.json`。
 6. 打包全量 zip 并创建 GitHub Release。
-7. 如需增量包，保留上一版本解压后的 dist 目录，并执行 `scripts/generate_incremental_package.py` 生成 delta zip。
+7. 如需增量包，保留上一版本解压后的 dist 目录，并执行 `scripts/generate_incremental_package.py` 生成增量 zip。
 8. 在版本源 JSON 中增加 `incrementalPackages`，用户端检查到匹配当前版本的增量包后会优先下载；不匹配则仍走全量包。
+9. 如需发布到 Mirror 酱，优先上传本项目脚本生成的增量包；如果只能使用 Mirror 酱自动生成的 `changes.json` 增量包，也应确保包内包含新版本 `_internal/manifest.json`，并避免把用户数据文件加入 `added` / `modified` / `deleted`。
 
 本地生成 manifest：
 

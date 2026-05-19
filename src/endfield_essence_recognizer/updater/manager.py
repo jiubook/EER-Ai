@@ -28,14 +28,25 @@ class UpdateManager:
         self.download_task: asyncio.Task | None = None
 
     async def check_and_prompt(
-        self, proxy: str | None = None
+        self,
+        proxy: str | None = None,
+        update_flow: str | None = None,
+        mirror_chyan_res_id: str | None = None,
+        mirror_chyan_cdk: str | None = None,
+        mirror_chyan_user_agent: str | None = None,
     ) -> dict | NoUpdateAvailable | UpdateCheckError:
         """检查更新并返回更新信息。
 
         返回值由 checker 的三种类型决定，调用方必须按类型分派。
         如果发现新版本，会缓存 update_info，供后续下载和安装使用。
         """
-        result = await check_for_updates(proxy=proxy)
+        result = await check_for_updates(
+            proxy=proxy,
+            update_flow=update_flow,
+            mirror_chyan_res_id=mirror_chyan_res_id,
+            mirror_chyan_cdk=mirror_chyan_cdk,
+            mirror_chyan_user_agent=mirror_chyan_user_agent,
+        )
         if isinstance(result, dict):
             self.update_info = result
         return result
@@ -149,11 +160,13 @@ class UpdateManager:
                 full_url = self.update_info.get("full_download_url")
                 # 仅在增量包的普通安装失败时回退全量包；哈希不匹配必须显式提示用户。
                 should_fallback = (
-                    package_type == "incremental"
+                    package_type in {"incremental"}
                     and result.get("error") != "sha256_mismatch"
                     and isinstance(full_url, str)
                     and full_url
                     and full_url != url
+                    and self.update_info.get("source")
+                    == self.update_info.get("full_source")
                     and not self.cancel_event.is_set()
                 )
                 if not should_fallback:

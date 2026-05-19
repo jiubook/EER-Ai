@@ -12,6 +12,7 @@ manifest.json 存放在 ``_internal/manifest.json``，随更新包一起被复�
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -34,6 +35,9 @@ MANIFEST_RELATIVE_PATH = "_internal/manifest.json"
 # 增量包元数据只用于 Python 侧安装前校验，不会复制到安装目录。
 INCREMENTAL_METADATA_RELATIVE_PATH = "_internal/incremental_update.json"
 
+# Mirror 酱增量包使用的差异描述文件。
+MIRROR_CHYAN_CHANGES_RELATIVE_PATH = "changes.json"
+
 # 独立更新器可执行文件名
 UPDATER_EXE_NAME = "eer_updater.exe"
 UPDATER_RELATIVE_PATH = f"_internal/{UPDATER_EXE_NAME}"
@@ -48,6 +52,17 @@ ALLOWED_PROTECTED_PATHS = {
     "screenshots/",
     ".env",
 }
+
+
+def _compute_manifest_sha256(manifest: dict) -> str:
+    """计算清单的稳定内容哈希，用于绑定增量包。"""
+    canonical = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _is_path_traversal(temp_dir: Path, member: str) -> bool:
@@ -156,8 +171,17 @@ def _load_incremental_metadata(temp_dir: Path) -> dict | None:
         if metadata.get("package_type") != "incremental":
             logger.error("incremental_update.json 的 package_type 不是 incremental")
             return None
+        if metadata.get("schema_version") != 2:
+            logger.error("incremental_update.json 的 schema_version 必须为 2")
+            return None
         if "from_version" not in metadata or "to_version" not in metadata:
             logger.error("incremental_update.json 缺少 from_version 或 to_version")
+            return None
+        if (
+            "base_manifest_sha256" not in metadata
+            or "target_manifest_sha256" not in metadata
+        ):
+            logger.error("incremental_update.json 缺少清单 sha256 绑定字段")
             return None
         if "files" not in metadata or "remove" not in metadata:
             logger.error("incremental_update.json 缺少 files 或 remove")
@@ -169,6 +193,35 @@ def _load_incremental_metadata(temp_dir: Path) -> dict | None:
         return metadata
     except (json.JSONDecodeError, OSError) as exc:
         logger.error(f"加载 incremental_update.json 失败: {exc}")
+        return None
+
+
+def _load_mirror_chyan_changes(temp_dir: Path) -> dict | None:
+    """读取 Mirror 酱增量包的 changes.json 差异描述。"""
+    changes_path = temp_dir / MIRROR_CHYAN_CHANGES_RELATIVE_PATH
+    if not changes_path.is_file():
+        return None
+    try:
+        changes = json.loads(changes_path.read_text(encoding="utf-8"))
+        if not isinstance(changes, dict):
+            logger.error("changes.json 必须是 JSON 对象")
+            return None
+        for key in ("added", "modified", "deleted", "added_dir", "deleted_dir"):
+            value = changes.get(key, [])
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) for item in value
+            ):
+                logger.error(f"changes.json 的 {key} 字段必须是字符串数组")
+                return None
+        logger.info(
+            "加载 Mirror 酱增量差异: "
+            f"added={len(changes.get('added', []))}, "
+            f"modified={len(changes.get('modified', []))}, "
+            f"deleted={len(changes.get('deleted', []))}"
+        )
+        return changes
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.error(f"加载 changes.json 失败: {exc}")
         return None
 
 
@@ -201,6 +254,81 @@ def _safe_rmtree(path: Path, allowed_parent: Path, label: str) -> bool:
     except OSError as exc:
         logger.warning(f"清理{label}失败: {path} ({exc})")
         return False
+
+
+def _safe_unlink(path: Path, label: str) -> bool:
+    """删除指定文件；清理失败时只记录日志，不中断主流程。"""
+    try:
+        if path.is_file():
+            path.unlink()
+            logger.info(f"已清理{label}: {path}")
+        return True
+    except OSError as exc:
+        logger.warning(f"清理{label}失败: {path} ({exc})")
+        return False
+
+
+def _schedule_remove_dir_after_exit(path: Path, label: str) -> None:
+    """在当前进程返回后，让 Windows 后台重试删除目录。"""
+    if os.name != "nt":
+        logger.warning(f"当前平台不支持延迟清理{label}: {path}")
+        return
+    script = (
+        f'for /l %i in (1,1,20) do (rmdir /s /q "{path}" 2>NUL '
+        "&& exit /b 0 & ping 127.0.0.1 -n 2 >NUL)"
+    )
+    try:
+        subprocess.Popen(
+            ["cmd", "/C", script],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info(f"已安排延迟清理{label}: {path}")
+    except OSError as exc:
+        logger.warning(f"安排延迟清理{label}失败: {path} ({exc})")
+
+
+def _schedule_remove_file_after_exit(path: Path, label: str) -> None:
+    """在当前进程返回后，让 Windows 后台重试删除文件。"""
+    if os.name != "nt":
+        logger.warning(f"当前平台不支持延迟清理{label}: {path}")
+        return
+    script = (
+        f'for /l %i in (1,1,20) do (del /f /q "{path}" 2>NUL '
+        "&& exit /b 0 & ping 127.0.0.1 -n 2 >NUL)"
+    )
+    try:
+        subprocess.Popen(
+            ["cmd", "/C", script],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info(f"已安排延迟清理{label}: {path}")
+    except OSError as exc:
+        logger.warning(f"安排延迟清理{label}失败: {path} ({exc})")
+
+
+def _cleanup_failed_install_artifacts(
+    *,
+    temp_dir: Path | None,
+    plan_path: Path | None,
+    package_path: Path,
+) -> None:
+    """清理 Rust 更新器接管前失败路径产生的本次更新临时文件。"""
+    if plan_path is not None and not _safe_unlink(plan_path, "本次计划文件"):
+        _schedule_remove_file_after_exit(plan_path, "本次计划文件")
+    if temp_dir is not None and temp_dir.exists():
+        if not _safe_rmtree(temp_dir, temp_dir.parent, "本次更新临时目录"):
+            _schedule_remove_dir_after_exit(temp_dir, "本次更新临时目录")
+    if package_path.exists() and not _safe_unlink(package_path, "更新包"):
+        _schedule_remove_file_after_exit(package_path, "更新包")
+    if package_path.parent.exists():
+        try:
+            package_path.parent.rmdir()
+        except OSError:
+            pass
 
 
 def _build_status_file_paths(
@@ -427,6 +555,79 @@ def _compute_incremental_copy_list(metadata: dict, manifest: dict) -> list[str] 
     return sorted(copy_files)
 
 
+def _build_mirror_chyan_protected_manifest(
+    current_dir: Path,
+    package_manifest: dict | None,
+) -> dict:
+    """为 Mirror 酱增量包选择 protected 来源，优先使用包内新清单。"""
+    if package_manifest is not None and isinstance(
+        package_manifest.get("protected"), list
+    ):
+        return package_manifest
+
+    installed_manifest = _load_installed_manifest(current_dir)
+    if installed_manifest is not None and isinstance(
+        installed_manifest.get("protected"),
+        list,
+    ):
+        return installed_manifest
+
+    return {"files": [], "protected": sorted(ALLOWED_PROTECTED_PATHS)}
+
+
+def _compute_mirror_chyan_delete_list(changes: dict, protected: list[str]) -> list[str]:
+    """根据 Mirror 酱 changes.json 生成删除清单。"""
+    protected_set = set(protected)
+    delete_candidates = [
+        *changes.get("deleted", []),
+        *changes.get("deleted_dir", []),
+    ]
+    return sorted(
+        {
+            file_path
+            for file_path in delete_candidates
+            if isinstance(file_path, str)
+            and not _is_protected(file_path, protected_set)
+        }
+    )
+
+
+def _compute_mirror_chyan_copy_list(
+    temp_dir: Path,
+    changes: dict,
+    protected: list[str],
+) -> list[str]:
+    """根据 Mirror 酱 changes.json 和解压内容生成复制清单。"""
+    protected_set = set(protected)
+    changed_files = {
+        file_path
+        for key in ("added", "modified")
+        for file_path in changes.get(key, [])
+        if isinstance(file_path, str)
+    }
+    if not changed_files:
+        changed_files = {
+            str(path.relative_to(temp_dir).as_posix())
+            for path in temp_dir.rglob("*")
+            if path.is_file()
+        }
+
+    ignored_files = {
+        MIRROR_CHYAN_CHANGES_RELATIVE_PATH,
+        INCREMENTAL_METADATA_RELATIVE_PATH,
+        "_plan.json",
+    }
+    return sorted(
+        {
+            file_path
+            for file_path in changed_files
+            if file_path not in ignored_files
+            and (temp_dir / file_path).is_file()
+            and not _is_protected(file_path, protected_set)
+        }
+    )
+
+
 def _validate_incremental_package(
     current_dir: Path,
     manifest: dict,
@@ -446,12 +647,36 @@ def _validate_incremental_package(
         )
         return False
 
+    expected_base_sha256 = metadata.get("base_manifest_sha256")
+    actual_base_sha256 = _compute_manifest_sha256(installed_manifest)
+    if (
+        not isinstance(expected_base_sha256, str)
+        or actual_base_sha256 != expected_base_sha256
+    ):
+        logger.error(
+            f"增量包基线清单 sha256 不匹配: 当前={actual_base_sha256}, "
+            f"期望={expected_base_sha256}"
+        )
+        return False
+
     to_version = str(metadata.get("to_version", ""))
     manifest_version = str(manifest.get("version", ""))
     if manifest_version != to_version:
         logger.error(
             f"增量包目标版本与 manifest 不一致: metadata={to_version}, "
             f"manifest={manifest_version}"
+        )
+        return False
+
+    expected_target_sha256 = metadata.get("target_manifest_sha256")
+    actual_target_sha256 = _compute_manifest_sha256(manifest)
+    if (
+        not isinstance(expected_target_sha256, str)
+        or actual_target_sha256 != expected_target_sha256
+    ):
+        logger.error(
+            f"增量包目标清单 sha256 不匹配: 包内={actual_target_sha256}, "
+            f"期望={expected_target_sha256}"
         )
         return False
 
@@ -566,6 +791,10 @@ def install_update(zip_path: Path) -> bool:
     """
     import zipfile
 
+    zip_path = Path(zip_path)
+    temp_dir: Path | None = None
+    plan_path: Path | None = None
+    updater_started = False
     try:
         # 获取当前程序目录
         if getattr(sys, "frozen", False):
@@ -595,8 +824,37 @@ def install_update(zip_path: Path) -> bool:
 
         # 尝试加载 manifest
         manifest = _load_manifest(temp_dir)
+        mirror_chyan_changes = _load_mirror_chyan_changes(temp_dir)
+        if (
+            mirror_chyan_changes is None
+            and (temp_dir / MIRROR_CHYAN_CHANGES_RELATIVE_PATH).is_file()
+        ):
+            return False
 
-        if manifest is not None:
+        if mirror_chyan_changes is not None:
+            logger.info("使用 Mirror 酱增量包模式进行更新")
+            protected_manifest = _build_mirror_chyan_protected_manifest(
+                current_dir,
+                manifest,
+            )
+            protected_list = _compute_protected_list(protected_manifest)
+            remove_list = _compute_mirror_chyan_delete_list(
+                mirror_chyan_changes,
+                protected_list,
+            )
+            copy_list = _compute_mirror_chyan_copy_list(
+                temp_dir,
+                mirror_chyan_changes,
+                protected_list,
+            )
+            package_type = "mirror_chyan_incremental"
+            new_version = _safe_status_version(
+                manifest.get("version") if manifest is not None else "unknown"
+            )
+            plan_path = _generate_plan_json(
+                temp_dir, package_type, remove_list, copy_list, protected_list
+            )
+        elif manifest is not None:
             incremental_metadata = _load_incremental_metadata(temp_dir)
             if (
                 incremental_metadata is None
@@ -697,6 +955,7 @@ def install_update(zip_path: Path) -> bool:
             args,
             creationflags=subprocess.CREATE_NEW_CONSOLE,
         )
+        updater_started = True
 
         # 延迟退出，确保响应返回给前端
         def delayed_exit() -> None:
@@ -714,3 +973,10 @@ def install_update(zip_path: Path) -> bool:
     except Exception as exc:
         logger.error(f"安装更新失败: {exc}")
         return False
+    finally:
+        if not updater_started:
+            _cleanup_failed_install_artifacts(
+                temp_dir=temp_dir,
+                plan_path=plan_path,
+                package_path=zip_path,
+            )

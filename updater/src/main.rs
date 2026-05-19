@@ -372,6 +372,29 @@ fn schedule_remove_dir_after_exit(path: &Path, logger: &mut Logger) {
     logger.log(&format!("当前平台不支持延迟清理目录: {}", path.display()));
 }
 
+#[cfg(windows)]
+/// 更新器退出后在隐藏后台进程中重试删除文件。
+fn schedule_remove_file_after_exit(path: &Path, logger: &mut Logger) {
+    let file = path.to_string_lossy();
+    let script = format!(
+        "for /l %i in (1,1,20) do (del /f /q \"{file}\" 2>NUL && exit /b 0 & ping 127.0.0.1 -n 2 >NUL)"
+    );
+    match Command::new("cmd")
+        .args(["/C", &script])
+        .creation_flags(CREATE_NO_WINDOW_FLAG)
+        .spawn()
+    {
+        Ok(_) => logger.log(&format!("已安排延迟清理文件: {}", path.display())),
+        Err(e) => logger.log(&format!("安排延迟清理文件失败: {} ({e})", path.display())),
+    }
+}
+
+#[cfg(not(windows))]
+/// 非 Windows 平台暂不实现延迟文件删除。
+fn schedule_remove_file_after_exit(path: &Path, logger: &mut Logger) {
+    logger.log(&format!("当前平台不支持延迟清理文件: {}", path.display()));
+}
+
 /// 在安装目录同盘生成本次更新的备份目录。
 fn build_backup_dir(root_dir: &Path) -> PathBuf {
     let pid = std::process::id();
@@ -405,6 +428,44 @@ fn remove_dir_all_or_schedule(path: &Path, logger: &mut Logger) {
     if !remove_dir_all_safe(path, logger) && path.exists() {
         logger.log("目录直接清理未完成，安排延迟重试");
         schedule_remove_dir_after_exit(path, logger);
+    }
+}
+
+/// 删除文件；如果立即删除失败，则安排更新器退出后重试。
+fn remove_file_or_schedule(path: &Path, logger: &mut Logger) {
+    if !path.exists() {
+        return;
+    }
+    remove_file_safe(path);
+    if path.exists() {
+        logger.log("文件未能立即清理完成，安排延迟重试");
+        schedule_remove_file_after_exit(path, logger);
+    }
+}
+
+/// 清理本次更新的解压目录、更新包和计划文件。
+fn cleanup_update_artifacts(
+    extract_dir: &Path,
+    package_path: &Path,
+    plan_file: &Path,
+    logger: &mut Logger,
+) {
+    logger.log("清理本次更新临时文件...");
+    remove_file_or_schedule(plan_file, logger);
+
+    let running_from_extract = env::current_exe()
+        .map(|p| p.starts_with(extract_dir))
+        .unwrap_or(false);
+    if running_from_extract {
+        logger.log("更新器正在解压目录中运行，安排退出后延迟清理临时目录");
+        schedule_remove_dir_after_exit(extract_dir, logger);
+    } else {
+        remove_dir_all_or_schedule(extract_dir, logger);
+    }
+
+    remove_file_or_schedule(package_path, logger);
+    if let Some(package_dir) = package_path.parent() {
+        try_remove_empty_dir(package_dir);
     }
 }
 
@@ -626,6 +687,7 @@ fn run_with_args(args: Vec<String>) -> i32 {
                       Detected installation in drive root. Update blocked.";
         logger.log(&format!("安全检查失败: {reason}"));
         write_status_file(&failure_file, reason);
+        cleanup_update_artifacts(&extract_dir, &package_path, &plan_file, &mut logger);
         return 2;
     }
 
@@ -636,6 +698,7 @@ fn run_with_args(args: Vec<String>) -> i32 {
             let reason = format!("无法读取 plan 文件: {e}");
             logger.log(&reason);
             write_status_file(&failure_file, &reason);
+            cleanup_update_artifacts(&extract_dir, &package_path, &plan_file, &mut logger);
             return 2;
         }
     };
@@ -645,6 +708,7 @@ fn run_with_args(args: Vec<String>) -> i32 {
             let reason = format!("plan JSON 解析失败: {e}");
             logger.log(&reason);
             write_status_file(&failure_file, &reason);
+            cleanup_update_artifacts(&extract_dir, &package_path, &plan_file, &mut logger);
             return 2;
         }
     };
@@ -818,6 +882,7 @@ fn run_with_args(args: Vec<String>) -> i32 {
         logger.log("开始回滚已备份文件...");
         let restored = restore_backup_recursive(&root_dir, &backup_dir, &mut logger);
         logger.log(&format!("已回滚 {restored} 个文件"));
+        cleanup_update_artifacts(&extract_dir, &package_path, &plan_file, &mut logger);
         remove_dir_all_or_schedule(&backup_dir, &mut logger);
         write_status_file(&failure_file, &failure_reason);
         return 2;

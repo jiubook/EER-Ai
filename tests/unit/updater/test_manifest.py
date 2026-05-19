@@ -382,6 +382,9 @@ class TestIncrementalPackage:
         assert "same.dll" not in metadata["files"]
         assert "removed.dll" in metadata["remove"]
         assert MANIFEST_RELATIVE_PATH in metadata["files"]
+        assert metadata["schema_version"] == 2
+        assert len(metadata["base_manifest_sha256"]) == 64
+        assert len(metadata["target_manifest_sha256"]) == 64
 
         import zipfile
 
@@ -416,29 +419,105 @@ class TestIncrementalPackage:
         ]
         assert _compute_incremental_delete_list(metadata, manifest) == ["old.dll"]
 
+    def test_mirror_chyan_changes_generates_copy_and_delete_lists(
+        self, tmp_path: Path
+    ) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            MIRROR_CHYAN_CHANGES_RELATIVE_PATH,
+            _compute_mirror_chyan_copy_list,
+            _compute_mirror_chyan_delete_list,
+            _load_mirror_chyan_changes,
+        )
+
+        changes = {
+            "added": ["app.exe"],
+            "modified": ["_internal/manifest.json", "logs/app.log"],
+            "deleted": ["old.dll", "config.json"],
+            "deleted_dir": ["old_dir"],
+        }
+        (tmp_path / "_internal").mkdir()
+        (tmp_path / "app.exe").write_text("new", encoding="utf-8")
+        (tmp_path / "_internal" / "manifest.json").write_text("{}", encoding="utf-8")
+        (tmp_path / MIRROR_CHYAN_CHANGES_RELATIVE_PATH).write_text(
+            json.dumps(changes),
+            encoding="utf-8",
+        )
+
+        loaded = _load_mirror_chyan_changes(tmp_path)
+
+        assert loaded == changes
+        assert _compute_mirror_chyan_copy_list(
+            tmp_path,
+            changes,
+            ["config.json", "logs/"],
+        ) == ["_internal/manifest.json", "app.exe"]
+        assert _compute_mirror_chyan_delete_list(
+            changes,
+            ["config.json", "logs/"],
+        ) == ["old.dll", "old_dir"]
+
     def test_incremental_package_requires_matching_installed_version(
         self, tmp_path: Path
     ) -> None:
         from src.endfield_essence_recognizer.updater.installer import (
+            _compute_manifest_sha256,
             _validate_incremental_package,
         )
 
         installed_manifest_path = tmp_path / MANIFEST_RELATIVE_PATH
         installed_manifest_path.parent.mkdir()
+        installed_manifest = {"version": "1.0.0", "files": []}
         installed_manifest_path.write_text(
-            json.dumps({"version": "1.0.0", "files": []}), encoding="utf-8"
+            json.dumps(installed_manifest), encoding="utf-8"
         )
+        target_manifest = {"version": "1.1.0"}
+        metadata = {
+            "from_version": "1.0.0",
+            "to_version": "1.1.0",
+            "base_manifest_sha256": _compute_manifest_sha256(installed_manifest),
+            "target_manifest_sha256": _compute_manifest_sha256(target_manifest),
+        }
 
-        assert _validate_incremental_package(
+        assert _validate_incremental_package(tmp_path, target_manifest, metadata)
+        assert not _validate_incremental_package(
             tmp_path,
-            {"version": "1.1.0"},
-            {"from_version": "1.0.0", "to_version": "1.1.0"},
+            target_manifest,
+            {**metadata, "from_version": "0.9.0"},
         )
         assert not _validate_incremental_package(
             tmp_path,
-            {"version": "1.1.0"},
-            {"from_version": "0.9.0", "to_version": "1.1.0"},
+            target_manifest,
+            {**metadata, "base_manifest_sha256": "0" * 64},
         )
+
+
+class TestIncrementalPackageSelection:
+    """增量包选择测试。"""
+
+    def test_incremental_package_requires_explicit_target_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.endfield_essence_recognizer.updater import checker
+
+        monkeypatch.setattr(checker, "__version__", "1.0.0")
+        data = {
+            "incrementalPackages": [
+                {
+                    "fromVersion": "1.0.0",
+                    "downloadUrl": "https://example.invalid/missing-target.zip",
+                },
+                {
+                    "fromVersion": "1.0.0",
+                    "toVersion": "1.1.0",
+                    "downloadUrl": "https://example.invalid/target.zip",
+                },
+            ]
+        }
+
+        package = checker._find_incremental_package(data, "1.1.0")
+
+        assert package is not None
+        assert package["downloadUrl"].endswith("target.zip")
 
 
 class TestProtectedBackupList:

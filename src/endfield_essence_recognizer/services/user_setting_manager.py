@@ -28,7 +28,14 @@ def _load_user_setting_from_file(
         obj = json.loads(path.read_text(encoding="utf-8"))
         if "version" in obj:
             if obj["version"] == model_cls._VERSION:
-                return model_cls.model_validate(obj), False
+                model = model_cls.model_validate(obj)
+                normalized = (
+                    obj.get("update_mirror") == "cn"
+                    or obj.get("update_flow") == "cn"
+                    or "update_flow" not in obj
+                    or "update_github_mirror" not in obj
+                )
+                return model, normalized
             else:
                 # 尝试从旧版本迁移
                 try:
