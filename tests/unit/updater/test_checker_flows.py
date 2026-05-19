@@ -44,7 +44,7 @@ class FakeAsyncClient:
 
     async def __aexit__(self, *args) -> None:
         """模拟异步上下文管理器退出。"""
-        return None
+        return
 
     async def get(self, url: str, **kwargs) -> FakeResponse:
         """记录请求并返回预设响应；未预设的 URL 视为测试失败。"""
