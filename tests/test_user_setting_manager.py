@@ -187,7 +187,9 @@ def test_config_migration_from_v3_to_current():
     assert migrated.update_proxy == ""
     assert migrated.treasure_essence_match_mode == "all"
     assert migrated.high_level_treasure_match_mode == "any"
-    assert migrated.high_level_treasure_stats == []
+    assert migrated.high_level_treasure_only_check_attribute is True
+    assert migrated.high_level_treasure_only_check_secondary is True
+    assert migrated.high_level_treasure_only_check_skill is True
     assert migrated.same_type_treasure_limit_enabled is False
     assert migrated.same_type_treasure_limit == 1
     # 验证版本更新
@@ -254,7 +256,9 @@ def test_user_setting_schema_stability():
         "high_level_treasure_secondary_threshold",
         "high_level_treasure_skill_threshold",
         "high_level_treasure_match_mode",
-        "high_level_treasure_stats",
+        "high_level_treasure_only_check_attribute",
+        "high_level_treasure_only_check_secondary",
+        "high_level_treasure_only_check_skill",
         "same_type_treasure_limit_enabled",
         "same_type_treasure_limit",
         "auto_page_flip",
@@ -305,7 +309,9 @@ def test_config_migration_chain_v2_to_current():
     # v4→v5 补充的字段
     assert migrated.treasure_essence_match_mode == "all"
     assert migrated.high_level_treasure_match_mode == "any"
-    assert migrated.high_level_treasure_stats == []
+    assert migrated.high_level_treasure_only_check_attribute is True
+    assert migrated.high_level_treasure_only_check_secondary is True
+    assert migrated.high_level_treasure_only_check_skill is True
     assert migrated.same_type_treasure_limit_enabled is False
     assert migrated.same_type_treasure_limit == 1
 

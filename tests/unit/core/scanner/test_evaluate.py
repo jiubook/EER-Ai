@@ -14,7 +14,6 @@ from endfield_essence_recognizer.core.scanner.models import (
 )
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
-    HighLevelTreasureStats,
     NonFiveStarBehavior,
     TreasureMatchMode,
     UserSetting,
@@ -248,45 +247,65 @@ def test_evaluate_high_level(
     assert "AttrA+11" in result.log_message
 
 
-def test_evaluate_high_level_limited_to_configured_stat(
+def test_evaluate_high_level_only_mode_with_category_toggles(
     mock_static_game_data, default_settings, default_essence_data
 ):
-    """设置指定高等级属性后，只有指定属性达到阈值才视为宝藏。"""
+    """仅模式下，只有勾选的类别会被检查。"""
     default_settings.high_level_treasure_enabled = True
-    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ANY
-    default_settings.high_level_treasure_stats = [
-        HighLevelTreasureStats(
-            attribute="X",
-            attribute_threshold=3,
-            secondary=None,
-            skill=None,
-        )
-    ]
-    default_essence_data.levels = [6, 0, 0]
+    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ONLY
+    default_settings.high_level_treasure_attribute_threshold = 3
+    default_settings.high_level_treasure_secondary_threshold = 3
+    default_settings.high_level_treasure_skill_threshold = 3
+    # Only check attribute
+    default_settings.high_level_treasure_only_check_attribute = True
+    default_settings.high_level_treasure_only_check_secondary = False
+    default_settings.high_level_treasure_only_check_skill = False
+    # Attribute level meets threshold, others don't
+    default_essence_data.levels = [3, 0, 0]
 
     result = evaluate_essence(
         default_essence_data, default_settings, mock_static_game_data
     )
+    assert result.quality == EssenceQuality.TREASURE
+    assert result.is_high_level is True
 
-    assert result.quality == EssenceQuality.TRASH
-    assert result.is_high_level is False
 
-
-def test_evaluate_high_level_configured_stat_match(
+def test_evaluate_high_level_only_mode_unchecked_category_ignored(
     mock_static_game_data, default_settings, default_essence_data
 ):
-    """指定高等级属性和等级达到阈值时视为宝藏。"""
+    """仅模式下，未勾选的类别即使不达标也不影响判定。"""
     default_settings.high_level_treasure_enabled = True
-    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ANY
-    default_settings.high_level_treasure_stats = [
-        HighLevelTreasureStats(
-            attribute="A",
-            attribute_threshold=3,
-            secondary=None,
-            skill=None,
-        )
-    ]
-    default_essence_data.levels = [3, 0, 0]
+    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ONLY
+    default_settings.high_level_treasure_attribute_threshold = 3
+    default_settings.high_level_treasure_secondary_threshold = 5
+    default_settings.high_level_treasure_skill_threshold = 3
+    # Check attribute and skill, skip secondary
+    default_settings.high_level_treasure_only_check_attribute = True
+    default_settings.high_level_treasure_only_check_secondary = False
+    default_settings.high_level_treasure_only_check_skill = True
+    # Attribute=3 (meets), Secondary=0 (doesn't meet but unchecked), Skill=2 (doesn't meet)
+    default_essence_data.levels = [3, 0, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+    # Skill doesn't meet threshold so should be TRASH
+    assert result.quality == EssenceQuality.TRASH
+
+
+def test_evaluate_high_level_only_mode_all_categories_match(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """仅模式下，所有勾选类别都达标时视为宝藏。"""
+    default_settings.high_level_treasure_enabled = True
+    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ONLY
+    default_settings.high_level_treasure_attribute_threshold = 3
+    default_settings.high_level_treasure_secondary_threshold = 3
+    default_settings.high_level_treasure_skill_threshold = 2
+    default_settings.high_level_treasure_only_check_attribute = True
+    default_settings.high_level_treasure_only_check_secondary = True
+    default_settings.high_level_treasure_only_check_skill = True
+    default_essence_data.levels = [3, 3, 2]
 
     stat = MagicMock()
     stat.name = "AttrA"
@@ -295,39 +314,20 @@ def test_evaluate_high_level_configured_stat_match(
     result = evaluate_essence(
         default_essence_data, default_settings, mock_static_game_data
     )
-
     assert result.quality == EssenceQuality.TREASURE
     assert result.is_high_level is True
-    assert "AttrA+3" in result.log_message
 
 
-def test_evaluate_high_level_only_mode_ignores_unconfigured_slots(
+def test_evaluate_high_level_all_mode_requires_all_slots(
     mock_static_game_data, default_settings, default_essence_data
 ):
-    """高等级仅模式只检查用户设置的属性槽位。"""
-    default_settings.high_level_treasure_enabled = True
-    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ONLY
-    default_settings.high_level_treasure_stats = [
-        HighLevelTreasureStats(attribute="A", attribute_threshold=3)
-    ]
-    default_essence_data.levels = [3, 0, 0]
-
-    result = evaluate_essence(
-        default_essence_data, default_settings, mock_static_game_data
-    )
-
-    assert result.quality == EssenceQuality.TREASURE
-
-
-def test_evaluate_high_level_all_mode_requires_three_slots(
-    mock_static_game_data, default_settings, default_essence_data
-):
-    """高等级和模式要求 1、2、3 三个槽位都设置且满足。"""
+    """高等级和模式要求 1、2、3 三个槽位都满足阈值。"""
     default_settings.high_level_treasure_enabled = True
     default_settings.high_level_treasure_match_mode = TreasureMatchMode.ALL
-    default_settings.high_level_treasure_stats = [
-        HighLevelTreasureStats(attribute="A", attribute_threshold=3)
-    ]
+    default_settings.high_level_treasure_attribute_threshold = 3
+    default_settings.high_level_treasure_secondary_threshold = 3
+    default_settings.high_level_treasure_skill_threshold = 3
+    # Only attribute meets threshold
     default_essence_data.levels = [3, 0, 0]
 
     result = evaluate_essence(

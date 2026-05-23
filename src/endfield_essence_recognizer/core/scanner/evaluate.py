@@ -15,7 +15,9 @@ from endfield_essence_recognizer.schemas.user_setting import (
 STAT_SLOTS = ("attribute", "secondary", "skill")
 
 
-def _matches_by_mode(matches: list[bool], configured_count: int, mode: TreasureMatchMode) -> bool:
+def _matches_by_mode(
+    matches: list[bool], configured_count: int, mode: TreasureMatchMode
+) -> bool:
     if configured_count == 0:
         return False
     if mode == TreasureMatchMode.ANY:
@@ -76,55 +78,41 @@ def _evaluate_high_level_treasure(
     levels = data.levels
     mode = setting.high_level_treasure_match_mode
 
-    if setting.high_level_treasure_stats:
-        for treasure_stat in setting.high_level_treasure_stats:
-            configured_values = [
-                treasure_stat.attribute,
-                treasure_stat.secondary,
-                treasure_stat.skill,
-            ]
-            thresholds = [
-                treasure_stat.attribute_threshold,
-                treasure_stat.secondary_threshold,
-                treasure_stat.skill_threshold,
-            ]
-            slot_matches: list[bool] = []
-            matched_indexes: list[int] = []
-            for index, (expected, actual, level, threshold) in enumerate(
-                zip(configured_values, stats, levels, thresholds, strict=True)
-            ):
-                if expected is None:
-                    continue
-                is_match = expected == actual and level is not None and level >= threshold
-                slot_matches.append(is_match)
-                if is_match:
-                    matched_indexes.append(index)
-
-            if _matches_by_mode(slot_matches, len(slot_matches), mode):
-                return True, _format_high_level_info(
-                    static_game_data, stats, levels, matched_indexes
-                )
-        return False, ""
-
     thresholds = [
         setting.high_level_treasure_attribute_threshold,
         setting.high_level_treasure_secondary_threshold,
         setting.high_level_treasure_skill_threshold,
     ]
-    slot_matches = [
+    original_slot_matches = [
         stat_id is not None and level is not None and level >= threshold
         for stat_id, level, threshold in zip(stats, levels, thresholds, strict=True)
     ]
 
-    if mode == TreasureMatchMode.ANY:
-        matched_indexes = [index for index, is_match in enumerate(slot_matches) if is_match]
+    if mode == TreasureMatchMode.ONLY:
+        only_flags = [
+            setting.high_level_treasure_only_check_attribute,
+            setting.high_level_treasure_only_check_secondary,
+            setting.high_level_treasure_only_check_skill,
+        ]
+        eval_matches = [
+            m for m, f in zip(original_slot_matches, only_flags, strict=True) if f
+        ]
     else:
-        matched_indexes = list(range(len(STAT_SLOTS))) if all(slot_matches) else []
+        eval_matches = original_slot_matches
 
-    if not _matches_by_mode(slot_matches, len(slot_matches), mode):
+    if mode == TreasureMatchMode.ANY:
+        matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
+    else:
+        matched_indexes = (
+            list(range(len(STAT_SLOTS))) if all(original_slot_matches) else []
+        )
+
+    if not _matches_by_mode(eval_matches, len(eval_matches), mode):
         return False, ""
 
-    return True, _format_high_level_info(static_game_data, stats, levels, matched_indexes)
+    return True, _format_high_level_info(
+        static_game_data, stats, levels, matched_indexes
+    )
 
 
 def _apply_same_type_treasure_limit(
