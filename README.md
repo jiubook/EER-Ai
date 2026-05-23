@@ -61,9 +61,10 @@
 
 选择“常青引导程序”或者“常青独立安装程序”均可。如果遇到网络问题无法下载，可以加群，在群文件里获取安装包。
 
-**方法二：** 请参考 [https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851](https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851)
+**方法二：** 请保持工具打开状态，用浏览器访问 [http://127.0.0.1:325/](http://127.0.0.1:325/)
+  > 如果浏览器中也白屏，则可能是您在手动更新的时候未完全删除`_internal`文件夹，请删除旧的`_internal`文件夹后重新复制
 
-**方法三：** 请保持工具打开状态，用浏览器访问 [http://127.0.0.1:325/](http://127.0.0.1:325/)
+**方法三：** 请参考 [https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851](https://github.com/Logical-Byte/endfield-essence-recognizer/issues/24#issuecomment-3830421851)
 
 **方法四：** 如果以上方法仍然解决不了，那就先凑合用。界面看不见没关系的，只要终末地在前台，按 `]` 键是可以正常使用的。
 

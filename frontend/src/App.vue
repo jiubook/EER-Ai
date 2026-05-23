@@ -23,6 +23,7 @@
       <v-app-bar-nav-icon @click="drawer = !drawer" />
       <v-app-bar-title>{{ route.meta?.title || '终末地基质妙妙小工具' }}</v-app-bar-title>
       <template #append>
+        <profile-selector />
         <v-btn icon="mdi-update" @click="checkForUpdates(true)" />
         <v-btn icon="mdi-theme-light-dark" @click="theme.toggle()" />
       </template>
@@ -42,6 +43,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTheme } from 'vuetify'
 import Logo from '@/components/icons/logo.vue'
+import ProfileSelector from '@/components/ProfileSelector.vue'
 import UpdateDialogs from '@/components/UpdateDialogs.vue'
 import { useLogs } from '@/composables/useLogs'
 import { useUpdateChecker } from '@/composables/useUpdateChecker'
@@ -61,11 +63,32 @@ const { checkForUpdates } = useUpdateChecker()
 
 const { fetchStaticData } = useStaticData()
 
+function scheduleStartupUpdateCheck() {
+  const runCheck = () => {
+    void checkForUpdates(false, { silent: true, timeoutMs: 2500 })
+  }
+
+  // 等首屏渲染和必要数据请求先开始，避免启动时更新检查抢占交互体验。
+  window.requestAnimationFrame(() => {
+    const requestIdleCallback = (
+      window as Window & {
+        requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number
+      }
+    ).requestIdleCallback
+
+    if (requestIdleCallback) {
+      requestIdleCallback(runCheck, { timeout: 3000 })
+    } else {
+      window.setTimeout(runCheck, 1500)
+    }
+  })
+}
+
 onMounted(() => {
   // 初始化游戏数据
-  fetchStaticData()
-  // 初始检查更新
-  checkForUpdates(false)
+  void fetchStaticData()
+  // 初始检查更新放到后台空闲时执行，手动点击更新按钮仍然会立即检查。
+  scheduleStartupUpdateCheck()
 })
 </script>
 

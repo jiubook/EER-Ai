@@ -1,6 +1,8 @@
 import itertools
 import threading
 
+import numpy as np
+
 from endfield_essence_recognizer.core.interfaces import ImageSource, WindowActions
 from endfield_essence_recognizer.core.layout.base import (
     Point,
@@ -245,9 +247,12 @@ class ScannerEngine:
         self._user_setting_manager: UserSettingManager = user_setting_manager
         self._profile: ResolutionProfile = profile
 
-        # 以下两个字段是 ScannerEngine 维护的运行时状态
+        # 以下字段是 ScannerEngine 维护的运行时状态
         self._weapon_essence_counts: dict[WeaponId, int] = {}
+        self._weapon_essence_levels: dict[WeaponId, tuple[int, int, int]] = {}
         self._total_essence_count: int = 0
+        # 跟踪每个属性组合已跳过的同等级基质次数
+        self._skip_exact_level_counts: dict[tuple, int] = {}
 
         from endfield_essence_recognizer.utils.log import str_properties_and_attrs
 
@@ -272,6 +277,186 @@ class ScannerEngine:
             A dictionary mapping weapon IDs to essence counts.
         """
         return self._weapon_essence_counts.copy()
+
+    def get_weapon_essence_data(self):
+        """
+        获取完整的武器基质数据（包括等级）。
+
+        Returns:
+            WeaponEssenceData 对象，包含计数和等级信息。
+        """
+        from endfield_essence_recognizer.schemas.scanner import WeaponEssenceData
+
+        return WeaponEssenceData(
+            counts=self._weapon_essence_counts.copy(),
+            levels=self._weapon_essence_levels.copy(),
+        )
+
+    def _sort_weapons_by_priority(self, weapon_ids: set[str]) -> list[str]:
+        """按优先级排序武器ID（高优先级在前）。
+
+        排序规则：
+        1. 用户设置的 priority（正数）优先于默认值
+        2. 默认值按稀有度降序排列
+        """
+        priority_map: dict[str, int] = {}
+        try:
+            from endfield_essence_recognizer.api.routes.profiles import (
+                get_profile_manager,
+            )
+
+            profile_manager = get_profile_manager()
+            profile = profile_manager.get_active_profile()
+            for weapon_id, priority in profile.weapon_priorities.items():
+                if weapon_id in weapon_ids:
+                    priority_map[weapon_id] = priority or 0
+            for entry in profile.treasure_matrix:
+                if entry.weapon_id in weapon_ids:
+                    priority_map.setdefault(entry.weapon_id, entry.priority or 0)
+        except Exception as exc:
+            logger.debug("未能加载武器优先级配置，使用默认排序: {}", exc)
+
+        def get_priority(weapon_id: str) -> int:
+            user_priority = priority_map.get(weapon_id, 0)
+            if user_priority > 0:
+                return user_priority
+            weapon = self.ctx.static_game_data.get_weapon(weapon_id)
+            return weapon.rarity if weapon else 0
+
+        return sorted(weapon_ids, key=lambda wid: -get_priority(wid))
+
+    def _init_weapon_levels_from_profile(self) -> None:
+        """从 profile 的宝藏基质配置中初始化已有武器等级。"""
+        try:
+            from endfield_essence_recognizer.api.routes.profiles import (
+                get_profile_manager,
+            )
+
+            profile = get_profile_manager().get_active_profile()
+            for entry in profile.treasure_matrix:
+                self._weapon_essence_levels[entry.weapon_id] = (
+                    entry.affix1_level,
+                    entry.affix2_level,
+                    entry.affix3_level,
+                )
+        except Exception as exc:
+            logger.debug("未能从账号配置初始化武器等级: {}", exc)
+
+    def _get_stat_tuple(self, weapon_ids: set[str]) -> tuple:
+        """获取一组武器的属性组合作为 hashable key。"""
+        for wid in weapon_ids:
+            weapon = self.ctx.static_game_data.get_weapon(wid)
+            if weapon:
+                return (
+                    weapon.stat1_id,
+                    weapon.stat2_id,
+                    weapon.stat3_id,
+                )
+        return ()
+
+    def _assign_essence_to_weapon(
+        self,
+        matched_weapon_ids: set[str],
+        levels: list[int | None],
+    ) -> None:
+        """将一个基质按优先级分配给单把武器。
+
+        规则：
+        1. 只分配给一把武器（优先级最高的可接受武器）
+        2. 非降级原则：基质各维度等级必须 >= 武器当前等级才可更新
+        3. 同属性组中已有 N 把武器的当前等级与基质等级完全相同时，
+           前 N 次跳过（归属不确定），后续可分配给下一把武器
+        """
+        if not matched_weapon_ids:
+            return
+
+        sorted_weapons = self._sort_weapons_by_priority(matched_weapon_ids)
+
+        current_levels = (
+            levels[0] or 1,
+            levels[1] or 1,
+            levels[2] or 1,
+        )
+
+        # 统计组内已有多少把武器的等级与当前基质完全相同
+        exact_match_count = sum(
+            1
+            for wid in sorted_weapons
+            if self._weapon_essence_levels.get(wid) == current_levels
+        )
+
+        # 同等级跳过：已有 N 把武器拥有相同等级，前 N 次跳过
+        if exact_match_count > 0:
+            stat_key = self._get_stat_tuple(matched_weapon_ids)
+            skip_key = (stat_key, current_levels)
+            skip_count = self._skip_exact_level_counts.get(skip_key, 0)
+            if skip_count < exact_match_count:
+                self._skip_exact_level_counts[skip_key] = skip_count + 1
+                logger.debug(
+                    f"基质等级{current_levels}与{exact_match_count}把同属性武器相同，"
+                    f"已跳过{skip_count + 1}/{exact_match_count}次（归属不确定）"
+                )
+                return
+            # 已跳过足够次数，后续可分配
+
+        # 非降级原则检查：所有维度 >= 武器当前等级
+        def can_upgrade(weapon_id: str) -> bool:
+            existing = self._weapon_essence_levels.get(weapon_id)
+            if existing is None:
+                return True
+            return (
+                current_levels[0] >= existing[0]
+                and current_levels[1] >= existing[1]
+                and current_levels[2] >= existing[2]
+            )
+
+        # 找到第一个可接受该基质的高优先级武器
+        blocked_by_downgrade = False
+        for weapon_id in sorted_weapons:
+            existing_levels = self._weapon_essence_levels.get(weapon_id)
+
+            # 已拥有相同等级的武器跳过（已在上面的 exact_match_count 中处理）
+            if existing_levels == current_levels:
+                continue
+
+            # 非降级检查
+            if not can_upgrade(weapon_id):
+                blocked_by_downgrade = True
+                logger.debug(
+                    f"武器 {weapon_id} 当前等级 {existing_levels}，"
+                    f"基质等级 {current_levels}，不满足非降级原则，跳过"
+                )
+                continue
+
+            # 分配基质
+            self._weapon_essence_counts[weapon_id] = (
+                self._weapon_essence_counts.get(weapon_id, 0) + 1
+            )
+
+            # 更新等级
+            if existing_levels:
+                self._weapon_essence_levels[weapon_id] = (
+                    max(existing_levels[0], current_levels[0]),
+                    max(existing_levels[1], current_levels[1]),
+                    max(existing_levels[2], current_levels[2]),
+                )
+            else:
+                self._weapon_essence_levels[weapon_id] = current_levels
+
+            return  # 只分配给一把武器
+
+        if blocked_by_downgrade:
+            logger.debug(
+                f"基质等级 {current_levels} 对所有可选武器均不满足非降级原则，已忽略"
+            )
+            return
+
+        # 没有可分配的武器，分配给最高优先级的（仅计数）
+        if sorted_weapons:
+            weapon_id = sorted_weapons[0]
+            self._weapon_essence_counts[weapon_id] = (
+                self._weapon_essence_counts.get(weapon_id, 0) + 1
+            )
 
     def _execute_grid_scan(self, stop_event: threading.Event) -> None:
         """
@@ -302,7 +487,12 @@ class ScannerEngine:
 
         # 重置武器基质数量统计
         self._weapon_essence_counts = {}
+        self._weapon_essence_levels = {}
         self._total_essence_count = 0
+        self._skip_exact_level_counts = {}
+
+        # 从 profile 初始化已有武器等级，用于同等级跳过判断
+        self._init_weapon_levels_from_profile()
 
         icon_x_list = self._profile.essence_icon_x_list
         icon_y_list = self._profile.essence_icon_y_list
@@ -346,15 +536,12 @@ class ScannerEngine:
             if evaluation.quality != EssenceQuality.SKIP:
                 self._total_essence_count += 1
 
-            # 为匹配的非垃圾武器的基质数量自增
+            # 按优先级将基质分配给单把武器
             if (
                 evaluation.matched_weapons
                 and not evaluation.matched_weapons_all_blocked
             ):
-                for weapon_id in evaluation.matched_weapons:
-                    self._weapon_essence_counts[weapon_id] = (
-                        self._weapon_essence_counts.get(weapon_id, 0) + 1
-                    )
+                self._assign_essence_to_weapon(evaluation.matched_weapons, data.levels)
 
             # Log the result
             if (
@@ -465,7 +652,12 @@ class DraggableScannerEngine(ScannerEngine):
 
         # 重置武器基质数量统计
         self._weapon_essence_counts = {}
+        self._weapon_essence_levels = {}
         self._total_essence_count = 0
+        self._skip_exact_level_counts = {}
+
+        # 从 profile 初始化已有武器等级，用于同等级跳过判断
+        self._init_weapon_levels_from_profile()
 
         # 检查是否启用自动翻页
         auto_page_flip = user_setting.auto_page_flip
@@ -642,15 +834,14 @@ class DraggableScannerEngine(ScannerEngine):
                 if evaluation.quality != EssenceQuality.SKIP:
                     self._total_essence_count += 1
 
-                # 为匹配的非垃圾武器的基质数量自增
+                # 按优先级将基质分配给单把武器
                 if (
                     evaluation.matched_weapons
                     and not evaluation.matched_weapons_all_blocked
                 ):
-                    for weapon_id in evaluation.matched_weapons:
-                        self._weapon_essence_counts[weapon_id] = (
-                            self._weapon_essence_counts.get(weapon_id, 0) + 1
-                        )
+                    self._assign_essence_to_weapon(
+                        evaluation.matched_weapons, data.levels
+                    )
 
                 if (
                     evaluation.quality == EssenceQuality.TRASH
@@ -706,17 +897,11 @@ class DraggableScannerEngine(ScannerEngine):
             )
             screenshot = self._image_source.screenshot(roi)
 
-            # 在区域内查找是否有亮点（RGB 都高于 100）
-            height, width = screenshot.shape[:2]
-            for y in range(height):
-                for x in range(width):
-                    pixel = screenshot[y, x]
-                    b, g, r = int(pixel[0]), int(pixel[1]), int(pixel[2])
-                    if r > 100 and g > 100 and b > 100:
-                        logger.info(
-                            f"检测到滚动条亮点 at ({check_pos.x - radius + x}, {check_pos.y - radius + y}): RGB({r}, {g}, {b})"
-                        )
-                        return True
+            # 在区域内查找是否有亮点（BGR 三通道都高于 100）
+            has_bright = bool(np.any(np.all(screenshot[:, :, :3] > 100, axis=2)))
+            if has_bright:
+                logger.info(f"检测到滚动条亮点 at ({check_pos.x}, {check_pos.y})")
+                return True
 
             logger.debug(f"未检测到滚动条亮点 at ({check_pos.x}, {check_pos.y})")
             return False

@@ -236,31 +236,19 @@ class ScalingWindowActions(WindowActions):
         physical_step = round(step / self._scale_factor) if step > 0 else 1
         physical_max_drag = round(max_drag / self._scale_factor) if max_drag > 0 else 0
 
-        # Calculate logical drag distance for return value
-        logical_dx = end_x - start_x
-        logical_dy = end_y - start_y
-        logical_distance = int((logical_dx**2 + logical_dy**2) ** 0.5)
-
         # Delegate to underlying actions
-        if hasattr(self._actions, "progressive_drag"):
-            actual_distance, stopped_early = self._actions.progressive_drag(
-                physical_start_x,
-                physical_start_y,
-                physical_end_x,
-                physical_end_y,
-                physical_step,
-                physical_max_drag,
-                on_step,
-            )
-            # Convert physical distance back to logical distance
-            logical_actual = round(actual_distance * self._scale_factor)
-            return logical_actual, stopped_early
-        else:
-            # Fallback: just return the calculated distance
-            logger.warning(
-                "Underlying WindowActions does not implement progressive_drag method"
-            )
-            return logical_distance, False
+        actual_distance, stopped_early = self._actions.progressive_drag(
+            physical_start_x,
+            physical_start_y,
+            physical_end_x,
+            physical_end_y,
+            physical_step,
+            physical_max_drag,
+            on_step,
+        )
+        # Convert physical distance back to logical distance
+        logical_actual = round(actual_distance * self._scale_factor)
+        return logical_actual, stopped_early
 
 
 def create_scaling_wrappers(

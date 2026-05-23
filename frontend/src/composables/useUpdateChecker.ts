@@ -5,6 +5,13 @@ export interface UpdateInfo {
   downloadUrl: string
 }
 
+export interface CheckForUpdatesOptions {
+  /** 后台自动检查时不弹出失败提示，避免启动阶段打扰用户 */
+  silent?: boolean
+  /** 自动检查可设置超时，超时后直接放弃本次检查 */
+  timeoutMs?: number
+}
+
 const hasNewVersionDialog = ref<boolean>(false)
 const isLatestVersionDialog = ref<boolean>(false)
 const checkUpdateFailedDialog = ref<boolean>(false)
@@ -74,15 +81,27 @@ export function useUpdateChecker() {
    * 检查更新
    * @param showIfLatest 如果已是最新版本，是否显示提示
    */
-  async function checkForUpdates(showIfLatest: boolean = false) {
+  async function checkForUpdates(
+    showIfLatest: boolean = false,
+    options: CheckForUpdatesOptions = {},
+  ) {
+    const controller = options.timeoutMs ? new AbortController() : null
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), options.timeoutMs)
+      : null
+
     try {
       // 调用后端 API 检查更新
-      const response = await fetch('/api/update/check')
+      const response = await fetch('/api/update/check', { signal: controller?.signal })
       const result = await response.json()
 
       // 后端现在保证：有错误时 has_update=false 且 error=string
       // 没有错误时 has_update=false 且 error=null
       if (result.error) {
+        if (options.silent) {
+          console.warn('后台检查更新失败：', result.error)
+          return
+        }
         updateErrorMessage.value = result.error
         checkUpdateFailedDialog.value = true
         return
@@ -107,9 +126,14 @@ export function useUpdateChecker() {
       }
     } catch (error) {
       console.error('检查更新失败：', error)
+      if (options.silent) return
       updateErrorMessage.value =
         error instanceof Error ? error.message : '网络请求失败，请检查网络连接'
       checkUpdateFailedDialog.value = true
+    } finally {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
     }
   }
 
