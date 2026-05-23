@@ -52,15 +52,6 @@ class EssenceStats(BaseModel):
     skill: str | None
 
 
-class HighLevelTreasureStats(BaseModel):
-    attribute: str | None = None
-    secondary: str | None = None
-    skill: str | None = None
-    attribute_threshold: int = Field(default=3, ge=1, le=6)
-    secondary_threshold: int = Field(default=3, ge=1, le=6)
-    skill_threshold: int = Field(default=3, ge=1, le=3)
-
-
 class UserSetting(BaseModel):
     _VERSION: ClassVar[int] = 5
     _same_type_treasure_counts: dict[tuple[str | None, ...], int] = PrivateAttr(
@@ -89,8 +80,12 @@ class UserSetting(BaseModel):
     """高等级技能属性词条的等级阈值（+1~+3）"""
     high_level_treasure_match_mode: TreasureMatchMode = TreasureMatchMode.ANY
     """高等级属性词条的匹配方式：仅/和/或。"""
-    high_level_treasure_stats: list[HighLevelTreasureStats] = []
-    """仅指定属性词条达到等级阈值时，才视为高等级宝藏；为空则沿用全属性阈值。"""
+    high_level_treasure_only_check_attribute: bool = True
+    """仅模式下是否检查基础属性槽位"""
+    high_level_treasure_only_check_secondary: bool = True
+    """仅模式下是否检查附加属性槽位"""
+    high_level_treasure_only_check_skill: bool = True
+    """仅模式下是否检查技能属性槽位"""
 
     same_type_treasure_limit_enabled: bool = False
     """是否启用同类型宝藏基质数量上限。"""
@@ -119,10 +114,13 @@ class UserSetting(BaseModel):
 
     @staticmethod
     def _migrate_v4_to_v5(data: dict) -> None:
-        """v4 → v5: 添加宝藏匹配方式、限定高等级属性和同类型数量上限。"""
+        """v4 → v5: 添加宝藏匹配方式、仅模式分类开关和同类型数量上限。"""
         data.setdefault("treasure_essence_match_mode", "all")
         data.setdefault("high_level_treasure_match_mode", "any")
-        data.setdefault("high_level_treasure_stats", [])
+        data.pop("high_level_treasure_stats", None)
+        data.setdefault("high_level_treasure_only_check_attribute", True)
+        data.setdefault("high_level_treasure_only_check_secondary", True)
+        data.setdefault("high_level_treasure_only_check_skill", True)
         data.setdefault("same_type_treasure_limit_enabled", False)
         data.setdefault("same_type_treasure_limit", 1)
 
