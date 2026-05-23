@@ -49,7 +49,12 @@ def test_load_user_setting_valid_file(manager, settings_file):
         "version": UserSetting._VERSION,
         "trash_weapon_ids": ["weapon_1"],
         "treasure_essence_stats": [
-            {"attribute": "atk", "secondary": "crit", "skill": None}
+            {
+                "name": "自定义基质",
+                "attribute": "atk",
+                "secondary": "crit",
+                "skill": None,
+            }
         ],
     }
     settings_file.write_text(json.dumps(data), encoding="utf-8")
@@ -59,6 +64,7 @@ def test_load_user_setting_valid_file(manager, settings_file):
     assert setting.trash_weapon_ids == ["weapon_1"]
     assert len(setting.treasure_essence_stats) == 1
     assert setting.treasure_essence_stats[0].attribute == "atk"
+    assert setting.treasure_essence_stats[0].name == "自定义基质"
 
 
 def test_load_user_setting_invalid_version_backups_file(manager, settings_file):
@@ -165,7 +171,9 @@ def test_config_migration_from_v3_to_current():
     old_config = {
         "version": 3,
         "trash_weapon_ids": ["weapon_1"],
-        "treasure_essence_stats": [],
+        "treasure_essence_stats": [
+            {"attribute": "atk", "secondary": "crit", "skill": None}
+        ],
         "treasure_action": "lock",
         "trash_action": "unlock",
         "non_five_star_behavior": "process",
@@ -192,6 +200,10 @@ def test_config_migration_from_v3_to_current():
     assert migrated.high_level_treasure_only_check_skill is True
     assert migrated.same_type_treasure_limit_enabled is False
     assert migrated.same_type_treasure_limit == 1
+    # 验证自定义宝藏基质条目添加了 name 字段
+    assert len(migrated.treasure_essence_stats) == 1
+    assert migrated.treasure_essence_stats[0].name == ""
+    assert migrated.treasure_essence_stats[0].attribute == "atk"
     # 验证版本更新
     assert migrated.version == UserSetting._VERSION
 
@@ -286,7 +298,9 @@ def test_config_migration_chain_v2_to_current():
     early_v2_config = {
         "version": 2,
         "trash_weapon_ids": ["weapon_v2"],
-        "treasure_essence_stats": [],
+        "treasure_essence_stats": [
+            {"attribute": "atk", "secondary": None, "skill": "fire"}
+        ],
         "treasure_action": "lock",
         "trash_action": "unlock",
         "high_level_treasure_enabled": False,
@@ -314,6 +328,10 @@ def test_config_migration_chain_v2_to_current():
     assert migrated.high_level_treasure_only_check_skill is True
     assert migrated.same_type_treasure_limit_enabled is False
     assert migrated.same_type_treasure_limit == 1
+    # 验证自定义宝藏基质条目迁移后包含 name 字段
+    assert len(migrated.treasure_essence_stats) == 1
+    assert migrated.treasure_essence_stats[0].name == ""
+    assert migrated.treasure_essence_stats[0].attribute == "atk"
 
 
 def test_migrations_completeness():

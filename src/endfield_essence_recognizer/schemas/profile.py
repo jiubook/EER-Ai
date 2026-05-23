@@ -55,6 +55,7 @@ class ProfileData(BaseModel):
             "4star": True,
             "5star": True,
             "6star": True,
+            "custom": True,
         }
     )
     """武器总览的星级过滤器配置。"""

@@ -326,6 +326,34 @@ export function useMatrixPlanner() {
     })
   }
 
+  /** 从自定义基质预设添加/移除需求词条 */
+  function addStatFromCustomPreset(
+    syntheticId: string,
+    attribute: string,
+    secondary: string,
+    skill: string,
+  ) {
+    lastSelectedWeaponId.value = syntheticId
+
+    // 检查是否已添加 — 切换关闭
+    const existing = requiredEssenceStats.value.findIndex(
+      (s) => !s.isCustom && s.weaponId === syntheticId,
+    )
+    if (existing !== -1) {
+      requiredEssenceStats.value.splice(existing, 1)
+      return
+    }
+
+    requiredEssenceStats.value.push({
+      id: _nextId++,
+      isCustom: false,
+      weaponId: syntheticId,
+      attribute,
+      secondary,
+      skill,
+    })
+  }
+
   function addCustomStat() {
     requiredEssenceStats.value.push({
       id: _nextId++,
@@ -486,6 +514,7 @@ export function useMatrixPlanner() {
     allSkillStats,
     energyAlluviums,
     addStatFromWeapon,
+    addStatFromCustomPreset,
     addCustomStat,
     removeStat,
     moveStatUp,

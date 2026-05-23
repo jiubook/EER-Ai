@@ -397,6 +397,15 @@
                   >
                     6★
                   </v-chip>
+                  <v-chip
+                    color="primary"
+                    filter
+                    size="small"
+                    value="custom"
+                    variant="outlined"
+                  >
+                    自定义
+                  </v-chip>
                 </v-chip-group>
               </div>
 
@@ -409,6 +418,46 @@
                 prepend-inner-icon="mdi-magnify"
                 variant="outlined"
               />
+              <!-- 自定义基质区段（仅预刻券模式显示） -->
+              <template v-if="!noPrecraftMode && selectedRarities.includes('custom') && customMatrixEntries.length > 0">
+                <div class="d-flex align-center mb-2 mt-4">
+                  <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+                  <h4>自定义基质</h4>
+                </div>
+                <div class="weapon-grid">
+                  <div
+                    v-for="entry in customMatrixEntries"
+                    :key="entry.syntheticId"
+                    class="weapon-item"
+                    :class="{
+                      'weapon-selected': isWeaponSelected(entry.syntheticId),
+                      'weapon-obtained': isWeaponObtained(entry.syntheticId),
+                      'weapon-matched': isWeaponMatchedInPlans(entry.syntheticId),
+                    }"
+                    @click="handleCustomStatClick(entry)"
+                  >
+                    <div class="custom-entry-icon">
+                      <v-icon color="#ff5a36" size="28">mdi-diamond-stone</v-icon>
+                    </div>
+                    <div class="text-caption text-center mt-1">{{ entry.displayName }}</div>
+                    <div
+                      v-if="isWeaponSelected(entry.syntheticId)"
+                      class="weapon-selected-overlay"
+                    >
+                      <v-icon color="white" size="small">mdi-check-circle</v-icon>
+                    </div>
+                    <v-chip
+                      v-if="isWeaponObtained(entry.syntheticId)"
+                      class="obtained-badge"
+                      color="success"
+                      size="x-small"
+                      variant="flat"
+                    >
+                      已获得
+                    </v-chip>
+                  </div>
+                </div>
+              </template>
               <template v-for="wType in weaponTypes" :key="wType.id">
                 <div class="d-flex align-center mb-2 mt-4">
                   <img
@@ -478,6 +527,7 @@ const {
   allSkillStats,
   energyAlluviums,
   addStatFromWeapon,
+  addStatFromCustomPreset,
   addCustomStat,
   removeStat,
   moveStatUp,
@@ -487,6 +537,46 @@ const {
   bestChoices,
   clearAllStats,
 } = useMatrixPlanner()
+
+// --- 自定义基质相关 ---
+
+/** 自定义宝藏基质属性配置列表 */
+const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null }>>([])
+
+/** 从后端获取配置中的自定义宝藏基质属性列表 */
+async function fetchCustomStats() {
+  try {
+    const res = await fetch('/api/config')
+    const config = await res.json()
+    customStats.value = config.treasure_essence_stats || []
+  } catch (error) {
+    console.error('获取自定义宝藏基质配置失败:', error)
+  }
+}
+
+/** 自定义基质条目列表，用于从武器预设添加展示 */
+const customMatrixEntries = computed(() => {
+  return customStats.value.map((stat, index) => ({
+    syntheticId: `custom_stat_${index}`,
+    displayName: stat.name || `自定义基质 ${index + 1}`,
+    index,
+  }))
+})
+
+/** 处理自定义基质条目点击，添加/移除需求词条 */
+function handleCustomStatClick(entry: { syntheticId: string; index: number }) {
+  const stat = customStats.value[entry.index]
+  if (!stat) return
+  const attribute = getStatDisplayName(stat.attribute)
+  const secondary = getStatDisplayName(stat.secondary)
+  const skill = getStatDisplayName(stat.skill)
+  if (!attribute || !secondary || !skill) return
+  addStatFromCustomPreset(entry.syntheticId, attribute, secondary, skill)
+}
+
+onMounted(() => {
+  fetchCustomStats()
+})
 
 /** 不使用预刻券模式：显示所有刷取地点 */
 const noPrecraftMode = ref(false)
@@ -836,6 +926,22 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   display: grid;
   grid-template-columns: repeat(auto-fit, $weapon-icon-size);
   gap: calc($weapon-icon-size / 10);
+}
+
+/* 自定义基质条目图标样式 */
+.custom-entry-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 90, 54, 0.08),
+    rgba(255, 90, 54, 0.02)
+  );
+  border: 1px solid rgba(255, 90, 54, 0.25);
 }
 
 .weapon-item {

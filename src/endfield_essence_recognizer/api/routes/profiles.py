@@ -287,7 +287,7 @@ async def get_batch_farming_recommendations(
 # --- 武器总览过滤器 ---
 
 
-VALID_RARITY_FILTERS = ("3star", "4star", "5star", "6star")
+VALID_RARITY_FILTERS = ("3star", "4star", "5star", "6star", "custom")
 
 
 class UpdateWeaponOverviewFiltersRequest(BaseModel):

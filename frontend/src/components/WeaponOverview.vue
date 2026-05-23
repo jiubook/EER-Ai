@@ -52,8 +52,52 @@
           >
             6★
           </v-chip>
+          <v-chip
+            color="primary"
+            filter
+            size="small"
+            value="custom"
+            variant="outlined"
+          >
+            自定义
+          </v-chip>
         </v-chip-group>
       </div>
+
+      <!-- 自定义基质区段 -->
+      <template v-if="showCustomSection && customMatrixEntries.length > 0">
+        <div class="d-flex align-center mb-1 mt-3">
+          <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+          <h4>自定义基质</h4>
+        </div>
+        <div class="weapon-overview-grid">
+          <div
+            v-for="entry in customMatrixEntries"
+            :key="entry.syntheticId"
+            class="weapon-overview-item"
+            @click="showWeaponDetail(entry.syntheticId)"
+            @contextmenu.prevent="toggleWeaponOwnership(entry.syntheticId)"
+          >
+            <div
+              class="weapon-icon-wrapper"
+              :class="{
+                'weapon-not-owned': !isWeaponOwned(entry.syntheticId),
+                'weapon-maxed': isWeaponMaxed(entry.syntheticId),
+              }"
+            >
+              <div class="custom-matrix-icon">
+                <v-icon color="#ff5a36" size="28">mdi-diamond-stone</v-icon>
+              </div>
+              <div class="item-name-container">
+                <span class="item-name">{{ entry.displayName }}</span>
+              </div>
+
+              <!-- 满级的彩虹边框 -->
+              <div v-if="isWeaponMaxed(entry.syntheticId)" class="rainbow-border" />
+            </div>
+          </div>
+        </div>
+      </template>
 
       <template v-for="wType in filteredWeaponTypes" :key="wType.id">
         <div class="d-flex align-center mb-1 mt-3">
@@ -107,9 +151,26 @@
     <v-card v-if="detailWeaponId">
       <v-card-item>
         <template #prepend>
-          <item-icon class="weapon-icon-detail" :item-id="detailWeaponId" />
+          <div v-if="isCustomEntry(detailWeaponId)" class="custom-dialog-icon">
+            <v-icon color="#ff5a36" size="36">mdi-diamond-stone</v-icon>
+          </div>
+          <item-icon v-else class="weapon-icon-detail" :item-id="detailWeaponId" />
         </template>
-        <v-card-title>{{ weaponsMap.get(detailWeaponId)?.name || detailWeaponId }}</v-card-title>
+        <v-card-title>
+          <v-text-field
+            v-if="isCustomEntry(detailWeaponId)"
+            v-model="customEntryName"
+            density="compact"
+            hide-details
+            placeholder="自定义基质名称"
+            variant="underlined"
+            @blur="saveCustomEntryName"
+            @keydown.enter="saveCustomEntryName"
+          />
+          <template v-else>
+            {{ weaponsMap.get(detailWeaponId)?.name || detailWeaponId }}
+          </template>
+        </v-card-title>
         <v-card-subtitle>{{ getWeaponStatsText(detailWeaponId) }}</v-card-subtitle>
         <template #append>
           <v-btn icon="mdi-close" variant="text" @click="detailDialog = false" />
@@ -157,8 +218,8 @@
           </div>
         </div>
 
-        <!-- 同类武器 -->
-        <div v-if="getSameStatWeapons(detailWeaponId).length > 0">
+        <!-- 同类武器（自定义条目不显示） -->
+        <div v-if="!isCustomEntry(detailWeaponId) && getSameStatWeapons(detailWeaponId).length > 0">
           <div class="text-subtitle-2 mb-2">同类属性武器</div>
           <div class="d-flex flex-column ga-2">
             <v-card
@@ -192,7 +253,7 @@
             </v-card>
           </div>
         </div>
-        <div v-else class="text-medium-emphasis text-caption">
+        <div v-else-if="!isCustomEntry(detailWeaponId)" class="text-medium-emphasis text-caption">
           没有其他武器与此武器共享相同属性组合。
         </div>
       </v-card-text>
@@ -201,7 +262,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
@@ -222,6 +283,87 @@ const { selectedRarities } = useRarityFilters()
 // 武器详情弹窗
 const detailDialog = ref(false)
 const detailWeaponId = ref<string | null>(null)
+
+// --- 自定义基质相关 ---
+
+/** 自定义宝藏基质属性配置列表 */
+const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null }>>([])
+
+/** 从后端获取配置中的自定义宝藏基质属性列表 */
+async function fetchCustomStats() {
+  try {
+    const res = await fetch('/api/config')
+    const config = await res.json()
+    customStats.value = config.treasure_essence_stats || []
+  } catch (error) {
+    console.error('获取自定义宝藏基质配置失败:', error)
+  }
+}
+
+/** 判断是否为自定义基质条目（weapon_id 以 custom_stat_ 开头） */
+function isCustomEntry(weaponId: string | null): boolean {
+  return weaponId?.startsWith('custom_stat_') ?? false
+}
+
+/** 自定义基质条目列表，用于武器总览展示 */
+const customMatrixEntries = computed(() => {
+  return customStats.value
+    .map((stat, index) => ({
+      syntheticId: `custom_stat_${index}`,
+      displayName: stat.name || `自定义基质 ${index + 1}`,
+      index,
+    }))
+})
+
+/** 是否显示自定义基质区段（当 6★ 筛选激活时显示） */
+const showCustomSection = computed(() => selectedRarities.value.includes('custom'))
+
+/** 自定义条目编辑中的名称 */
+const customEntryName = ref('')
+
+// 弹窗打开时，如果是自定义条目，加载其名称
+watch([detailDialog, detailWeaponId], () => {
+  if (detailDialog.value && isCustomEntry(detailWeaponId.value)) {
+    const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
+    customEntryName.value = customStats.value[index]?.name || ''
+  }
+})
+
+/** 保存自定义条目名称到配置和 profile */
+async function saveCustomEntryName() {
+  if (!isCustomEntry(detailWeaponId.value)) return
+  const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
+  if (customStats.value[index]) {
+    customStats.value[index].name = customEntryName.value
+    await postCustomStatsUpdate()
+    // 同步更新 profile 中的 weapon_name
+    const entry = matrixEntryByWeaponId.value.get(detailWeaponId.value!)
+    if (entry) {
+      entry.weapon_name = customEntryName.value
+      await updateTreasureMatrix([...treasureMatrix.value])
+    }
+  }
+}
+
+/** 将自定义宝藏基质配置保存到后端 */
+async function postCustomStatsUpdate() {
+  try {
+    const res = await fetch('/api/config')
+    const currentConfig = await res.json()
+    currentConfig.treasure_essence_stats = customStats.value
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentConfig),
+    })
+  } catch (error) {
+    console.error('保存自定义宝藏基质配置失败:', error)
+  }
+}
+
+onMounted(() => {
+  fetchCustomStats()
+})
 
 const matrixEntryByWeaponId = computed(
   () => new Map(treasureMatrix.value.map((entry) => [entry.weapon_id, entry])),
@@ -276,10 +418,18 @@ async function toggleWeaponOwnership(weaponId: string) {
   if (isWeaponOwned(weaponId)) {
     await removeTreasureMatrixEntry(weaponId)
   } else {
-    const weapon = weaponsMap.value.get(weaponId)
+    // 自定义条目使用配置中的名称，普通武器使用 weaponsMap 中的名称
+    let weaponName: string
+    if (isCustomEntry(weaponId)) {
+      const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+      weaponName = customStats.value[index]?.name || `自定义基质 ${index + 1}`
+    } else {
+      const weapon = weaponsMap.value.get(weaponId)
+      weaponName = weapon?.name || weaponId
+    }
     await addTreasureMatrixEntry({
       weapon_id: weaponId,
-      weapon_name: weapon?.name || weaponId,
+      weapon_name: weaponName,
       affix1_level: 1,
       affix2_level: 1,
       affix3_level: 1,
@@ -298,8 +448,21 @@ function showWeaponDetail(weaponId: string) {
 
 /**
  * 获取武器属性文本
+ * 自定义条目从 customStats 配置中读取属性名
  */
 function getWeaponStatsText(weaponId: string): string {
+  // 自定义条目：从配置中读取属性
+  if (isCustomEntry(weaponId)) {
+    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+    const stat = customStats.value[index]
+    if (!stat) return '自定义基质'
+    const parts: string[] = []
+    if (stat.attribute) parts.push(getGemTagName(stat.attribute))
+    if (stat.secondary) parts.push(getGemTagName(stat.secondary))
+    if (stat.skill) parts.push(getGemTagName(stat.skill))
+    return parts.join('、') || '自定义基质'
+  }
+
   const weapon = weaponsMap.value.get(weaponId)
   if (!weapon) return '未知武器'
 
@@ -319,8 +482,10 @@ function getWeaponStatsText(weaponId: string): string {
 
 /**
  * 获取同类武器（相同属性组合）
+ * 自定义条目没有真实武器数据，返回空数组
  */
 function getSameStatWeapons(weaponId: string): string[] {
+  if (isCustomEntry(weaponId)) return []
   const weapon = weaponsMap.value.get(weaponId)
   if (!weapon) return []
   const sameWeapons: string[] = []
@@ -383,10 +548,13 @@ function getUserPriority(weaponId: string): number {
 
 /**
  * 获取武器的有效优先级（未设置时使用稀有度）
+ * 自定义条目默认优先级为 6（等同于 6★）
  */
 function getWeaponPriority(weaponId: string): number {
   const userP = getUserPriority(weaponId)
   if (userP > 0) return userP
+  // 自定义条目默认优先级为 6
+  if (isCustomEntry(weaponId)) return 6
   const weapon = weaponsMap.value.get(weaponId)
   return weapon ? weapon.rarity : 0
 }
@@ -544,6 +712,57 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   width: 2rem !important;
   height: 2rem !important;
   flex-shrink: 0;
+}
+
+/* 自定义基质图标样式 */
+.custom-matrix-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 90, 54, 0.08),
+    rgba(255, 90, 54, 0.02)
+  );
+  border: 1px solid rgba(255, 90, 54, 0.25);
+}
+
+/* 自定义基质名称容器（复用 ItemIcon 的布局模式） */
+.item-name-container {
+  position: absolute;
+  bottom: 4%;
+  width: 100%;
+  pointer-events: none;
+  text-align: center;
+  line-height: 1;
+}
+
+.item-name {
+  display: inline-block;
+  font-weight: 500;
+  font-size: 0.6rem;
+  text-shadow: 0 0 4px rgb(var(--v-theme-surface));
+  -webkit-text-stroke: 1px rgb(var(--v-theme-surface));
+  paint-order: stroke fill;
+}
+
+/* 自定义基质弹窗图标样式 */
+.custom-dialog-icon {
+  width: 3rem;
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 90, 54, 0.08),
+    rgba(255, 90, 54, 0.02)
+  );
+  border: 1px solid rgba(255, 90, 54, 0.25);
 }
 
 .rainbow-border {

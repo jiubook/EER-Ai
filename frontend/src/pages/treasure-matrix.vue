@@ -58,6 +58,15 @@
               >
                 6★
               </v-chip>
+              <v-chip
+                color="primary"
+                filter
+                size="small"
+                value="custom"
+                variant="outlined"
+              >
+                自定义
+              </v-chip>
             </v-chip-group>
           </div>
 
@@ -86,7 +95,10 @@
               <div class="matrix-card-body">
                 <section class="weapon-identity">
                   <div class="weapon-icon-wrap" :class="getWeaponTierClass(entry.weapon_id)">
-                    <item-icon class="weapon-icon-small" :item-id="entry.weapon_id" />
+                    <div v-if="isCustomEntry(entry.weapon_id)" class="custom-entry-icon">
+                      <v-icon color="#ff5a36" size="28">mdi-diamond-stone</v-icon>
+                    </div>
+                    <item-icon v-else class="weapon-icon-small" :item-id="entry.weapon_id" />
                     <span class="weapon-tier">{{ getWeaponRarityText(entry.weapon_id) }}</span>
                   </div>
                   <div class="weapon-info">
@@ -533,6 +545,26 @@
             prepend-inner-icon="mdi-magnify"
             variant="outlined"
           />
+          <!-- 自定义基质区段 -->
+          <template v-if="customMatrixEntries.length > 0">
+            <h4 class="mt-4 mb-2 d-flex align-center">
+              <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+              自定义基质
+            </h4>
+            <div class="weapon-grid">
+              <div
+                v-for="entry in customMatrixEntries"
+                :key="entry.syntheticId"
+                class="weapon-item"
+                @click="onAddCustomStat(entry.index)"
+              >
+                <div class="custom-entry-icon">
+                  <v-icon color="#ff5a36" size="28">mdi-diamond-stone</v-icon>
+                </div>
+                <div class="text-caption text-center mt-1">{{ entry.displayName }}</div>
+              </div>
+            </div>
+          </template>
           <template v-for="wType in weaponTypes" :key="wType.id">
             <h4 class="mt-4 mb-2 d-flex align-center">
               <img
@@ -596,6 +628,52 @@ const { weaponsMap, weaponTypes } = useStaticData()
 const showAddWeaponDialog = ref(false)
 const weaponSearch = ref('')
 const computing = ref(false)
+
+// --- 自定义基质相关 ---
+
+/** 判断是否为自定义基质条目（weapon_id 以 custom_stat_ 开头） */
+function isCustomEntry(weaponId: string): boolean {
+  return weaponId.startsWith('custom_stat_')
+}
+
+/** 自定义宝藏基质属性配置列表，用于读取自定义条目的属性名 */
+const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null }>>([])
+
+/** 从后端获取配置中的自定义宝藏基质属性列表 */
+async function fetchCustomStats() {
+  try {
+    const res = await fetch('/api/config')
+    const config = await res.json()
+    customStats.value = config.treasure_essence_stats || []
+  } catch (error) {
+    console.error('获取自定义宝藏基质配置失败:', error)
+  }
+}
+
+/** 自定义基质条目列表，用于添加武器对话框展示 */
+const customMatrixEntries = computed(() => {
+  return customStats.value.map((stat, index) => ({
+    syntheticId: `custom_stat_${index}`,
+    displayName: stat.name || `自定义基质 ${index + 1}`,
+    index,
+  }))
+})
+
+/** 添加自定义基质条目到宝藏基质配置 */
+async function onAddCustomStat(index: number) {
+  const syntheticId = `custom_stat_${index}`
+  // 检查是否已添加
+  if (matrixEntries.value.some((e) => e.weapon_id === syntheticId)) return
+  const stat = customStats.value[index]
+  await addTreasureMatrixEntry({
+    weapon_id: syntheticId,
+    weapon_name: stat?.name || `自定义基质 ${index + 1}`,
+    affix1_level: 1,
+    affix2_level: 1,
+    affix3_level: 1,
+  })
+  showAddWeaponDialog.value = false
+}
 
 const targetAffix1 = ref(6)
 const targetAffix2 = ref(6)
@@ -752,8 +830,11 @@ const matrixEntries = computed({
 const filteredMatrixEntries = computed(() => {
   let entries = matrixEntries.value
 
-  // 过滤稀有度
+  // 过滤稀有度（自定义条目按 6★ 处理）
   entries = entries.filter((entry) => {
+    if (isCustomEntry(entry.weapon_id)) {
+      return selectedRarities.value.includes('6')
+    }
     const weapon = weaponsMap.value.get(entry.weapon_id)
     if (!weapon) return false
     return selectedRarities.value.includes(String(weapon.rarity))
@@ -769,6 +850,11 @@ const filteredMatrixEntries = computed(() => {
 
   // 按优先级降序排序，优先级相同时按稀有度降序排序（6★ -> 3★）
   return entries.toSorted((a, b) => {
+    // 自定义条目始终排在最前面
+    const aCustom = isCustomEntry(a.weapon_id) ? 1 : 0
+    const bCustom = isCustomEntry(b.weapon_id) ? 1 : 0
+    if (aCustom !== bCustom) return bCustom - aCustom
+
     const pa = a.priority || 0
     const pb = b.priority || 0
     if (pa !== pb) return pb - pa
@@ -779,7 +865,23 @@ const filteredMatrixEntries = computed(() => {
   })
 })
 
+/**
+ * 获取武器的属性名称列表
+ * 自定义条目从 customStats 配置中读取
+ */
 function getWeaponTraitNames(weaponId: string): string[] {
+  // 自定义条目：从配置中读取属性
+  if (isCustomEntry(weaponId)) {
+    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+    const stat = customStats.value[index]
+    if (!stat) return ['自定义基质']
+    const parts: string[] = []
+    if (stat.attribute) parts.push(getGemTagName(stat.attribute))
+    if (stat.secondary) parts.push(getGemTagName(stat.secondary))
+    if (stat.skill) parts.push(getGemTagName(stat.skill))
+    return parts.length > 0 ? parts : ['自定义基质']
+  }
+
   const stats = getStatsForWeapon(weaponId)
   const parts: string[] = []
   if (stats.attribute) parts.push(getGemTagName(stats.attribute))
@@ -788,7 +890,12 @@ function getWeaponTraitNames(weaponId: string): string[] {
   return parts.length > 0 ? parts : ['无属性']
 }
 
+/**
+ * 获取武器稀有度
+ * 自定义条目默认为 6★
+ */
 function getWeaponRarity(weaponId: string): number | null {
+  if (isCustomEntry(weaponId)) return 6
   return weaponsMap.value.get(weaponId)?.rarity ?? null
 }
 
@@ -1022,6 +1129,7 @@ function navigateToPlanner() {
 
 onMounted(() => {
   fetchProfiles()
+  fetchCustomStats()
 })
 </script>
 
@@ -1108,6 +1216,21 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
       width: 100% !important;
       height: 100% !important;
       border-radius: 8px;
+    }
+
+    /* 自定义基质条目图标样式 */
+    .custom-entry-icon {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background: linear-gradient(
+        135deg,
+        rgba(255, 90, 54, 0.08),
+        rgba(255, 90, 54, 0.02)
+      );
     }
 
     .weapon-icon-wrap.tier-6 {

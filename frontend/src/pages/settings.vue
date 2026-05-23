@@ -200,6 +200,17 @@
             align="center"
           >
             <v-col cols="12" md="3" sm="6">
+              <v-text-field
+                v-model="essenceStat.name"
+                density="comfortable"
+                hide-details
+                label="自定义名称"
+                placeholder="可选，用于武器总览显示"
+                prepend-inner-icon="mdi-diamond-stone"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col cols="12" md="3" sm="6">
               <v-select
                 v-model="essenceStat.attribute"
                 clearable
@@ -247,47 +258,50 @@
                 variant="outlined"
               />
             </v-col>
-            <v-col cols="12" md="3" sm="6">
-              <v-btn
-                color="primary"
-                icon="mdi-plus"
-                variant="text"
-                @click="
-                  treasureEssenceStats.splice(index, 0, {
-                    attribute: null,
-                    secondary: null,
-                    skill: null,
-                  })
-                "
-              />
-              <v-btn
-                color="error"
-                icon="mdi-delete"
-                variant="text"
-                @click="treasureEssenceStats.splice(index, 1)"
-              />
-              <v-btn
-                :disabled="index === 0"
-                icon="mdi-chevron-up"
-                variant="text"
-                @click="
-                  () => {
-                    const stat = treasureEssenceStats.splice(index, 1)[0]!
-                    treasureEssenceStats.splice(index - 1, 0, stat)
-                  }
-                "
-              />
-              <v-btn
-                :disabled="index === treasureEssenceStats.length - 1"
-                icon="mdi-chevron-down"
-                variant="text"
-                @click="
-                  () => {
-                    const stat = treasureEssenceStats.splice(index, 1)[0]!
-                    treasureEssenceStats.splice(index + 1, 0, stat)
-                  }
-                "
-              />
+            <v-col cols="12">
+              <div class="d-flex ga-1">
+                <v-btn
+                  color="primary"
+                  icon="mdi-plus"
+                  variant="text"
+                  @click="
+                    treasureEssenceStats.splice(index, 0, {
+                      name: '',
+                      attribute: null,
+                      secondary: null,
+                      skill: null,
+                    })
+                  "
+                />
+                <v-btn
+                  color="error"
+                  icon="mdi-delete"
+                  variant="text"
+                  @click="treasureEssenceStats.splice(index, 1)"
+                />
+                <v-btn
+                  :disabled="index === 0"
+                  icon="mdi-chevron-up"
+                  variant="text"
+                  @click="
+                    () => {
+                      const stat = treasureEssenceStats.splice(index, 1)[0]!
+                      treasureEssenceStats.splice(index - 1, 0, stat)
+                    }
+                  "
+                />
+                <v-btn
+                  :disabled="index === treasureEssenceStats.length - 1"
+                  icon="mdi-chevron-down"
+                  variant="text"
+                  @click="
+                    () => {
+                      const stat = treasureEssenceStats.splice(index, 1)[0]!
+                      treasureEssenceStats.splice(index + 1, 0, stat)
+                    }
+                  "
+                />
+              </div>
             </v-col>
           </v-row>
           <v-row v-if="treasureEssenceStats.length === 0" class="my-4">
@@ -296,7 +310,7 @@
                 color="primary"
                 prepend-icon="mdi-plus"
                 @click="
-                  treasureEssenceStats.push({ attribute: null, secondary: null, skill: null })
+                  treasureEssenceStats.push({ name: '', attribute: null, secondary: null, skill: null })
                 "
               >
                 添加自定义宝藏基质
@@ -311,7 +325,7 @@
                 icon="mdi-plus"
                 variant="text"
                 @click="
-                  treasureEssenceStats.push({ attribute: null, secondary: null, skill: null })
+                  treasureEssenceStats.push({ name: '', attribute: null, secondary: null, skill: null })
                 "
               />
             </v-col>
@@ -534,6 +548,8 @@ const allSkillStats = computed(() =>
 )
 
 interface EssenceStat {
+  /** 自定义显示名称，用于武器总览页面展示 */
+  name?: string
   attribute: string | null
   secondary: string | null
   skill: string | null

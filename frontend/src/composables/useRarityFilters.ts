@@ -22,6 +22,7 @@ export function useRarityFilters() {
         if (filters['4star']) newRarities.push('4')
         if (filters['5star']) newRarities.push('5')
         if (filters['6star']) newRarities.push('6')
+        if (filters['custom']) newRarities.push('custom')
 
         // 只有在实际不同时才更新，避免循环
         const current = selectedRarities.value.toSorted().join(',')
@@ -52,6 +53,7 @@ export function useRarityFilters() {
           '4star': newValue.includes('4'),
           '5star': newValue.includes('5'),
           '6star': newValue.includes('6'),
+          'custom': newValue.includes('custom'),
         })
       } catch {
         // 错误已由 useProfiles 的 lastError 处理

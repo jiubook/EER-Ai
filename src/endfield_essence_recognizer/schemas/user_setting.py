@@ -47,9 +47,16 @@ class TreasureMatchMode(StrEnum):
 
 
 class EssenceStats(BaseModel):
-    attribute: str | None
-    secondary: str | None
-    skill: str | None
+    """自定义宝藏基质属性组合，支持可选的显示名称。"""
+
+    name: str = ""
+    """自定义显示名称，用于武器总览页面展示。"""
+    attribute: str | None = None
+    """基础属性 ID，None 表示不限制。"""
+    secondary: str | None = None
+    """附加属性 ID，None 表示不限制。"""
+    skill: str | None = None
+    """技能属性 ID，None 表示不限制。"""
 
 
 class UserSetting(BaseModel):
@@ -114,7 +121,7 @@ class UserSetting(BaseModel):
 
     @staticmethod
     def _migrate_v4_to_v5(data: dict) -> None:
-        """v4 → v5: 添加宝藏匹配方式、仅模式分类开关和同类型数量上限。"""
+        """v4 → v5: 添加宝藏匹配方式、仅模式分类开关、同类型数量上限和自定义名称。"""
         data.setdefault("treasure_essence_match_mode", "all")
         data.setdefault("high_level_treasure_match_mode", "any")
         data.pop("high_level_treasure_stats", None)
@@ -123,6 +130,9 @@ class UserSetting(BaseModel):
         data.setdefault("high_level_treasure_only_check_skill", True)
         data.setdefault("same_type_treasure_limit_enabled", False)
         data.setdefault("same_type_treasure_limit", 1)
+        # 为每个自定义宝藏基质条目添加 name 字段
+        for entry in data.get("treasure_essence_stats", []):
+            entry.setdefault("name", "")
 
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）
