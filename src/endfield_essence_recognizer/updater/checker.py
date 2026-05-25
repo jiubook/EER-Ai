@@ -334,7 +334,12 @@ def _version_tokens(value: str) -> tuple[str, ...]:
     """生成版本号的常见写法，用于匹配 GitHub 增量包文件名。"""
     raw = _normalize_version(value)
     with_v = f"v{raw}"
-    return (raw, with_v, raw.replace(".", "-"), with_v.replace(".", "-"))
+    return (
+        raw,
+        with_v,
+        raw.replace(".", "-"),
+        with_v.replace(".", "-"),
+    )
 
 
 def _asset_url(asset: dict[str, Any]) -> str | None:
@@ -437,6 +442,7 @@ async def _check_github_updates(
                     "sha256": _sha256_from_asset(incremental_asset),
                     "package_type": "incremental",
                     "from_version": __version__,
+                    "to_version": latest_version,
                     "size": incremental_asset.get("size"),
                 }
             )
