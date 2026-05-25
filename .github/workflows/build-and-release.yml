@@ -150,12 +150,17 @@ jobs:
         if: steps.previous_release.outputs.has_previous == 'true'
         shell: pwsh
         run: |
-          $incrementalZip = "dist/endfield-essence-recognizer-${{ steps.previous_release.outputs.previous_tag }}-to-${{ steps.previous_release.outputs.current_tag }}-incremental-${{ matrix.os }}.zip"
+          # Read actual version from old manifest (tag version may differ)
+          $oldManifestPath = "${{ steps.extract_previous.outputs.old_dist_dir }}/_internal/manifest.json"
+          $oldManifest = Get-Content $oldManifestPath | ConvertFrom-Json
+          $fromVersion = $oldManifest.version
+          Write-Host "Old manifest version: $fromVersion"
+          $incrementalZip = "dist/endfield-essence-recognizer-v$fromVersion-to-${{ steps.previous_release.outputs.current_tag }}-incremental-${{ matrix.os }}.zip"
           uv run python scripts/generate_incremental_package.py `
             --old-dist-dir "${{ steps.extract_previous.outputs.old_dist_dir }}" `
             --new-dist-dir "dist/endfield-essence-recognizer" `
             --output $incrementalZip `
-            --from-version "${{ steps.previous_release.outputs.previous_version }}" `
+            --from-version "$fromVersion" `
             --to-version "${{ steps.previous_release.outputs.current_version }}"
           "incremental_zip=$incrementalZip" >> $env:GITHUB_OUTPUT
 
