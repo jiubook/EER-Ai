@@ -28,7 +28,7 @@ MIRROR_CHYAN_LATEST_URL = "https://mirrorchyan.com/api/resources/{res_id}/latest
 MIRROR_CHYAN_DEFAULT_USER_AGENT = "EER_APP"
 
 # GitHub Releases 检查 API。
-GITHUB_REPO = "Logical-Byte/endfield-essence-recognizer"
+GITHUB_REPO = "jiubook/EER-Ai"
 GITHUB_LATEST_RELEASE_URL = (
     f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 )

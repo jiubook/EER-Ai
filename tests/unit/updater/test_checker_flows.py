@@ -66,6 +66,7 @@ def fake_httpx(monkeypatch):
     monkeypatch.setattr(checker, "__version__", "1.0.0")
 
 
+@pytest.mark.skip(reason="一图流流程已禁用")
 @pytest.mark.asyncio
 async def test_yituliu_flow_only_requests_yituliu():
     """一图流流程只应请求一图流版本源。"""
@@ -89,6 +90,7 @@ async def test_yituliu_flow_only_requests_yituliu():
     assert FakeAsyncClient.calls == [checker.UPDATE_CHECK_URL]
 
 
+@pytest.mark.skip(reason="Mirror 酱流程已禁用")
 @pytest.mark.asyncio
 async def test_mirror_chyan_flow_only_requests_mirror_chyan():
     """Mirror 酱流程只应请求 Mirror 酱接口。"""
@@ -127,8 +129,8 @@ async def test_github_flow_only_requests_github():
                     {
                         "name": "endfield-essence-recognizer-v1.1.0-windows.zip",
                         "browser_download_url": (
-                            "https://github.com/Logical-Byte/"
-                            "endfield-essence-recognizer/releases/download/"
+                            "https://github.com/jiubook/"
+                            "EER-Ai/releases/download/"
                             "v1.1.0/endfield-essence-recognizer-v1.1.0-windows.zip"
                         ),
                         "digest": "sha256:" + "a" * 64,
@@ -146,10 +148,9 @@ async def test_github_flow_only_requests_github():
 
 
 @pytest.mark.asyncio
-async def test_failed_checks_fallback_in_enabled_order_to_github():
-    """检查失败时应按启用顺序回退到后续流程。"""
+async def test_disabled_flow_falls_back_to_github():
+    """禁用的首选流程应自动回退到 GitHub。"""
     FakeAsyncClient.routes = {
-        checker.UPDATE_CHECK_URL: RuntimeError("一图流不可用"),
         checker.GITHUB_LATEST_RELEASE_URL: FakeResponse(
             {
                 "tag_name": "v1.1.0",
@@ -157,8 +158,8 @@ async def test_failed_checks_fallback_in_enabled_order_to_github():
                     {
                         "name": "endfield-essence-recognizer-v1.1.0-windows.zip",
                         "browser_download_url": (
-                            "https://github.com/Logical-Byte/"
-                            "endfield-essence-recognizer/releases/download/"
+                            "https://github.com/jiubook/"
+                            "EER-Ai/releases/download/"
                             "v1.1.0/endfield-essence-recognizer-v1.1.0-windows.zip"
                         ),
                     }
@@ -172,6 +173,5 @@ async def test_failed_checks_fallback_in_enabled_order_to_github():
     assert isinstance(result, dict)
     assert result["source"] == GITHUB_FLOW
     assert FakeAsyncClient.calls == [
-        checker.UPDATE_CHECK_URL,
         checker.GITHUB_LATEST_RELEASE_URL,
     ]

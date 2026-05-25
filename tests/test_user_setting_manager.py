@@ -184,7 +184,7 @@ def test_config_migration_from_v3_to_v4():
     assert migrated.auto_page_flip is True
     # 验证新字段有默认值
     assert migrated.update_mirror == "github"
-    assert migrated.update_flow == "cn_yituliu"
+    assert migrated.update_flow == "github"
     assert migrated.update_github_mirror == "github"
     assert migrated.update_proxy == ""
     # 验证版本更新
@@ -301,7 +301,7 @@ def test_config_migration_chain_v2_to_v4():
     assert migrated.auto_page_flip is True
     # v3→v4 补充的字段
     assert migrated.update_mirror == "github"
-    assert migrated.update_flow == "cn_yituliu"
+    assert migrated.update_flow == "github"
     assert migrated.update_github_mirror == "github"
     assert migrated.update_proxy == ""
     assert migrated.update_mirrorchyan_res_id == ""
