@@ -123,6 +123,7 @@ jobs:
             --dir "previous-release"
 
       - name: Extract previous full package
+        id: extract_previous
         if: steps.previous_release.outputs.has_previous == 'true'
         shell: pwsh
         run: |
@@ -137,6 +138,12 @@ jobs:
             -Path $zipFile.FullName `
             -DestinationPath "previous-dist" `
             -Force
+          # Detect dist directory structure
+          if (Test-Path "previous-dist/endfield-essence-recognizer") {
+            "old_dist_dir=previous-dist/endfield-essence-recognizer" >> $env:GITHUB_OUTPUT
+          } else {
+            "old_dist_dir=previous-dist" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Generate incremental package
         id: generate_incremental
@@ -145,7 +152,7 @@ jobs:
         run: |
           $incrementalZip = "dist/endfield-essence-recognizer-${{ steps.previous_release.outputs.previous_tag }}-to-${{ steps.previous_release.outputs.current_tag }}-incremental-${{ matrix.os }}.zip"
           uv run python scripts/generate_incremental_package.py `
-            --old-dist-dir "previous-dist/endfield-essence-recognizer" `
+            --old-dist-dir "${{ steps.extract_previous.outputs.old_dist_dir }}" `
             --new-dist-dir "dist/endfield-essence-recognizer" `
             --output $incrementalZip `
             --from-version "${{ steps.previous_release.outputs.previous_version }}" `
