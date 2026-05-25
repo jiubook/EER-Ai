@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 import zipfile
 from pathlib import Path
 
@@ -185,6 +186,7 @@ def generate_incremental_package(
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="生成文件级增量更新包")
     parser.add_argument("--old-dist-dir", type=Path, required=True)
     parser.add_argument("--new-dist-dir", type=Path, required=True)
@@ -210,9 +212,9 @@ def main() -> None:
     )
 
     print(
-        "增量包已生成: "
-        f"{args.output} ({len(metadata['files'])} 个文件, "
-        f"{len(metadata['remove'])} 个删除项)"
+        f"Incremental package generated: "
+        f"{args.output} ({len(metadata['files'])} files, "
+        f"{len(metadata['remove'])} removed)"
     )
 
 
