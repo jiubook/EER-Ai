@@ -149,6 +149,8 @@ jobs:
         id: generate_incremental
         if: steps.previous_release.outputs.has_previous == 'true'
         shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           # Read actual version from old manifest (tag version may differ)
           $oldManifestPath = "${{ steps.extract_previous.outputs.old_dist_dir }}/_internal/manifest.json"
