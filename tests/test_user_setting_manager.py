@@ -184,9 +184,14 @@ def test_config_migration_from_v3_to_v4():
     assert migrated.auto_page_flip is True
     # 验证新字段有默认值
     assert migrated.update_mirror == "github"
+    assert migrated.update_flow == "cn_yituliu"
+    assert migrated.update_github_mirror == "github"
     assert migrated.update_proxy == ""
     # 验证版本更新
-    assert migrated.version == 4
+    assert migrated.version == UserSetting._VERSION
+    assert migrated.update_mirrorchyan_res_id == ""
+    assert migrated.update_mirrorchyan_cdk == ""
+    assert migrated.update_mirrorchyan_user_agent == "EER_APP"
 
 
 def test_config_migration_invalid_version():
@@ -249,7 +254,12 @@ def test_user_setting_schema_stability():
         "high_level_treasure_skill_threshold",
         "auto_page_flip",
         "update_mirror",
+        "update_flow",
+        "update_github_mirror",
         "update_proxy",
+        "update_mirrorchyan_res_id",
+        "update_mirrorchyan_cdk",
+        "update_mirrorchyan_user_agent",
     }
 
     actual_fields = set(UserSetting.model_fields.keys())
@@ -284,14 +294,19 @@ def test_config_migration_chain_v2_to_v4():
 
     migrated = UserSetting.migrate_from_old_version(early_v2_config)
 
-    assert migrated.version == 4
+    assert migrated.version == UserSetting._VERSION
     assert migrated.trash_weapon_ids == ["weapon_v2"]
     # v2→v3 补充的字段
     assert migrated.non_five_star_behavior == "process"
     assert migrated.auto_page_flip is True
     # v3→v4 补充的字段
     assert migrated.update_mirror == "github"
+    assert migrated.update_flow == "cn_yituliu"
+    assert migrated.update_github_mirror == "github"
     assert migrated.update_proxy == ""
+    assert migrated.update_mirrorchyan_res_id == ""
+    assert migrated.update_mirrorchyan_cdk == ""
+    assert migrated.update_mirrorchyan_user_agent == "EER_APP"
 
 
 def test_migrations_completeness():
@@ -305,6 +320,19 @@ def test_migrations_completeness():
             f"缺少迁移函数：v{v} → v{v + 1}\n"
             f"请在 UserSetting 中添加 _migrate_v{v}_to_v{v + 1} 方法"
         )
+
+
+def test_legacy_cn_update_mirror_normalizes_to_yituliu_flow():
+    setting = UserSetting.model_validate(
+        {
+            "version": UserSetting._VERSION,
+            "update_mirror": "cn",
+        }
+    )
+
+    assert setting.update_flow == "cn_yituliu"
+    assert setting.update_mirror == "github"
+    assert setting.update_github_mirror == "github"
 
 
 def test_frontend_config_version_matches_backend():

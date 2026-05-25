@@ -358,11 +358,30 @@
           <v-row class="my-4">
             <v-col cols="12" md="6">
               <v-select
-                v-model="updateMirror"
+                v-model="updateFlow"
+                density="comfortable"
+                hide-details
+                :items="flowOptions"
+                label="更新流程"
+                variant="outlined"
+              >
+                <template #append-inner>
+                  <v-tooltip location="top">
+                    <template #activator="{ props }">
+                      <v-icon v-bind="props" size="small">mdi-information-outline</v-icon>
+                    </template>
+                    <span>{{ selectedFlowName }}</span>
+                  </v-tooltip>
+                </template>
+              </v-select>
+            </v-col>
+            <v-col v-if="updateFlow === 'github'" cols="12" md="6">
+              <v-select
+                v-model="updateGithubMirror"
                 density="comfortable"
                 hide-details
                 :items="mirrorOptions"
-                label="下载镜像源"
+                label="GitHub 下载镜像"
                 variant="outlined"
               >
                 <template #append-inner>
@@ -398,6 +417,37 @@
                 />
               </div>
             </v-col>
+            <v-col v-if="updateFlow === 'cn_mirrorchyan'" cols="12" md="4">
+              <v-text-field
+                v-model="updateMirrorChyanResId"
+                density="comfortable"
+                hide-details
+                label="Mirror 酱资源 ID"
+                placeholder="联系 Mirror 酱获取"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col v-if="updateFlow === 'cn_mirrorchyan'" cols="12" md="4">
+              <v-text-field
+                v-model="updateMirrorChyanCdk"
+                density="comfortable"
+                hide-details
+                label="Mirror 酱 CDK"
+                placeholder="不填写则仅检查版本"
+                type="password"
+                variant="outlined"
+              />
+            </v-col>
+            <v-col v-if="updateFlow === 'cn_mirrorchyan'" cols="12" md="4">
+              <v-text-field
+                v-model="updateMirrorChyanUserAgent"
+                density="comfortable"
+                hide-details
+                label="Mirror 酱来源标识"
+                placeholder="EER_APP"
+                variant="outlined"
+              />
+            </v-col>
           </v-row>
         </v-expansion-panel-text>
       </v-expansion-panel>
@@ -422,7 +472,7 @@ import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
 const theme = useTheme()
 const { weaponTypes, weaponsMap, rarityColors, essencesMap } = useStaticData()
 const { isScanning, pollingEnabled } = useScanningStatus()
-const { mirrorOptions } = useUpdateMirrors()
+const { mirrorOptions, flowOptions } = useUpdateMirrors()
 const statusPollingEnabled = ref(pollingEnabled)
 const configVersion = ref(0)
 
@@ -458,9 +508,13 @@ const highLevelTreasureEnabled = ref(false)
 const highLevelTreasureAttributeThreshold = ref(3)
 const highLevelTreasureSecondaryThreshold = ref(3)
 const highLevelTreasureSkillThreshold = ref(3)
-const updateMirror = ref('github')
+const updateFlow = ref('cn_yituliu')
+const updateGithubMirror = ref('github')
 const updateProxyEnabled = ref(false)
 const updateProxyPort = ref('7890')
+const updateMirrorChyanResId = ref('')
+const updateMirrorChyanCdk = ref('')
+const updateMirrorChyanUserAgent = ref('EER_APP')
 const weaponEssenceCounts = ref<Record<string, number>>({})
 
 const notSelectedWeaponIds = computed(() => {
@@ -470,8 +524,13 @@ const notSelectedWeaponIds = computed(() => {
 })
 
 const selectedMirrorName = computed(() => {
-  const mirror = mirrorOptions.value.find((m) => m.value === updateMirror.value)
+  const mirror = mirrorOptions.value.find((m) => m.value === updateGithubMirror.value)
   return mirror ? mirror.title : 'GitHub 官方'
+})
+
+const selectedFlowName = computed(() => {
+  const flow = flowOptions.value.find((m) => m.value === updateFlow.value)
+  return flow ? flow.title : '一图流 API (CN 镜像)'
 })
 
 function getWeaponStatsDescription(weaponId: string): string {
@@ -548,7 +607,7 @@ function isTypePartiallySelected(groupId: string): boolean {
 const config = computed(() => {
   const proxyUrl = updateProxyEnabled.value ? `http://127.0.0.1:${updateProxyPort.value}` : ''
   return {
-    version: 4,
+    version: 5,
     trash_weapon_ids: notSelectedWeaponIds.value,
     treasure_essence_stats: treasureEssenceStats.value,
     treasure_action: treasureAction.value,
@@ -559,8 +618,13 @@ const config = computed(() => {
     high_level_treasure_attribute_threshold: highLevelTreasureAttributeThreshold.value,
     high_level_treasure_secondary_threshold: highLevelTreasureSecondaryThreshold.value,
     high_level_treasure_skill_threshold: highLevelTreasureSkillThreshold.value,
-    update_mirror: updateMirror.value,
+    update_mirror: updateGithubMirror.value,
+    update_flow: updateFlow.value,
+    update_github_mirror: updateGithubMirror.value,
     update_proxy: proxyUrl,
+    update_mirrorchyan_res_id: updateMirrorChyanResId.value,
+    update_mirrorchyan_cdk: updateMirrorChyanCdk.value,
+    update_mirrorchyan_user_agent: updateMirrorChyanUserAgent.value || 'EER_APP',
   }
 })
 
@@ -579,8 +643,13 @@ async function getConfig() {
     high_level_treasure_attribute_threshold,
     high_level_treasure_secondary_threshold,
     high_level_treasure_skill_threshold,
+    update_flow,
+    update_github_mirror,
     update_mirror,
     update_proxy,
+    update_mirrorchyan_res_id,
+    update_mirrorchyan_cdk,
+    update_mirrorchyan_user_agent,
   } = result
   configVersion.value = version
   treasureEssenceStats.value = treasure_essence_stats
@@ -592,7 +661,11 @@ async function getConfig() {
   highLevelTreasureAttributeThreshold.value = high_level_treasure_attribute_threshold
   highLevelTreasureSecondaryThreshold.value = high_level_treasure_secondary_threshold
   highLevelTreasureSkillThreshold.value = high_level_treasure_skill_threshold
-  updateMirror.value = update_mirror || 'github'
+  updateFlow.value = normalizeUpdateFlow(update_flow, update_mirror)
+  updateGithubMirror.value = update_github_mirror || getLegacyGithubMirror(update_mirror)
+  updateMirrorChyanResId.value = update_mirrorchyan_res_id || ''
+  updateMirrorChyanCdk.value = update_mirrorchyan_cdk || ''
+  updateMirrorChyanUserAgent.value = update_mirrorchyan_user_agent || 'EER_APP'
 
   // 解析代理配置
   if (update_proxy) {
@@ -607,6 +680,20 @@ async function getConfig() {
   selectedWeaponIds.value = Array.from(weaponsMap.value.keys()).filter(
     (weaponId) => !trash_weapon_ids.includes(weaponId),
   )
+}
+
+/** 从旧 update_mirror 字段中提取 GitHub 下载镜像。 */
+function getLegacyGithubMirror(value: string | undefined): string {
+  if (!value || value === 'cn' || value === 'cn_yituliu' || value === 'mirrorchyan') return 'github'
+  return value
+}
+
+/** 将旧配置字段转换为新的更新流程字段。 */
+function normalizeUpdateFlow(value: string | undefined, legacyMirror: string | undefined): string {
+  if (value === 'cn') return 'cn_yituliu'
+  if (value === 'cn_yituliu' || value === 'cn_mirrorchyan' || value === 'github') return value
+  if (legacyMirror === 'cn') return 'cn_yituliu'
+  return 'cn_yituliu'
 }
 
 async function postConfig() {

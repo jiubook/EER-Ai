@@ -18,7 +18,15 @@ from endfield_essence_recognizer.updater.checker import (
     NoUpdateAvailable,
 )
 from endfield_essence_recognizer.updater.manager import UpdateManager
-from endfield_essence_recognizer.updater.mirrors import MIRROR_NAMES
+from endfield_essence_recognizer.updater.mirrors import (
+    GITHUB_MIRROR_NAMES,
+    get_mirror_url,
+)
+from endfield_essence_recognizer.updater.sources import (
+    GITHUB_FLOW,
+    UPDATE_FLOW_NAMES,
+    get_enabled_update_flows,
+)
 from endfield_essence_recognizer.utils.log import logger
 
 router = APIRouter(prefix="/update", tags=["update"])
@@ -28,9 +36,22 @@ update_manager = UpdateManager()
 
 @router.get("/mirrors")
 async def get_mirrors():
-    """获取可用的镜像源列表"""
+    """获取可用的 GitHub 下载镜像列表。"""
     return {
-        "mirrors": [{"title": name, "value": key} for key, name in MIRROR_NAMES.items()]
+        "mirrors": [
+            {"title": name, "value": key} for key, name in GITHUB_MIRROR_NAMES.items()
+        ]
+    }
+
+
+@router.get("/flows")
+async def get_update_flows():
+    """获取后端启用的更新流程列表。"""
+    return {
+        "flows": [
+            {"title": UPDATE_FLOW_NAMES[flow], "value": flow}
+            for flow in get_enabled_update_flows()
+        ]
     }
 
 
@@ -49,7 +70,17 @@ async def check_update(
         settings = setting_manager.get_user_setting()
         proxy = settings.update_proxy if settings.update_proxy else None
 
-        result = await update_manager.check_and_prompt(proxy=proxy)
+        result = await update_manager.check_and_prompt(
+            proxy=proxy,
+            update_flow=getattr(settings, "update_flow", None),
+            mirror_chyan_res_id=getattr(settings, "update_mirrorchyan_res_id", ""),
+            mirror_chyan_cdk=getattr(settings, "update_mirrorchyan_cdk", ""),
+            mirror_chyan_user_agent=getattr(
+                settings,
+                "update_mirrorchyan_user_agent",
+                "",
+            ),
+        )
 
         if isinstance(result, dict):
             return {"has_update": True, "update_info": result}
@@ -81,35 +112,27 @@ async def install_update_route(
 
         settings = setting_manager.get_user_setting()
         proxy = settings.update_proxy if settings.update_proxy else None
-        mirror = settings.update_mirror
+        github_mirror = getattr(settings, "update_github_mirror", "github")
 
-        # 转换下载 URL
+        # 仅 GitHub 流程允许在 GitHub 官方与代理镜像之间切换；其他流程不跨源改写 URL。
         download_url = None
-        if mirror and mirror != "github" and update_manager.update_info:
-            mirrors = update_manager.update_info.get("mirrors", {})
-            # 优先使用一图流 API 返回的镜像
-            if mirror in mirrors and "downloadUrl" in mirrors[mirror]:
-                download_url = mirrors[mirror]["downloadUrl"]
-                logger.info(f"使用 API 镜像源: {mirror}")
-            elif "cn" in mirrors and "downloadUrl" in mirrors["cn"]:
-                # 国内用户默认走 CN 镜像
-                download_url = mirrors["cn"]["downloadUrl"]
-                logger.info("使用 CN 镜像源")
-            else:
-                # 回退到 mirrors.py 中的模板镜像
-                from endfield_essence_recognizer.updater.mirrors import get_mirror_url
-
-                original_url = update_manager.update_info["download_url"]
-                match = re.match(
-                    r"https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/(.+)",
-                    original_url,
+        if (
+            github_mirror
+            and github_mirror != "github"
+            and update_manager.update_info
+            and update_manager.update_info.get("source") == GITHUB_FLOW
+        ):
+            original_url = update_manager.update_info["download_url"]
+            match = re.match(
+                r"https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/(.+)",
+                original_url,
+            )
+            if match:
+                owner, repo, tag, filename = match.groups()
+                download_url = get_mirror_url(
+                    github_mirror, f"{owner}/{repo}", tag, filename
                 )
-                if match:
-                    owner, repo, tag, filename = match.groups()
-                    download_url = get_mirror_url(
-                        mirror, f"{owner}/{repo}", tag, filename
-                    )
-                    logger.info(f"使用模板镜像源: {mirror}")
+                logger.info(f"使用 GitHub 镜像源: {github_mirror}")
 
         # 重置进度状态，避免上一轮残留值
         reset_progress()

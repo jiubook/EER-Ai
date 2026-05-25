@@ -11,6 +11,8 @@ target/
 
 # Virtual environments
 .venv
+.tmp/
+.uv-cache/
 
 # logs
 logs/

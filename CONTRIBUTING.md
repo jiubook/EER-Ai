@@ -42,7 +42,27 @@
 * **模式一致性**：新开发的组件或状态管理应参考项目现有的设计模式，确保风格统一。
 * **变量命名**：同样需遵守语义化命名的原则，避免混淆。
 
-### 4. 修改配置 Schema
+### 4. Rust 更新器规范 (`updater/`)
+
+`_internal/eer_updater.exe` 是应用内热更新的最后执行者，修改时请优先保证安全边界和可回滚性：
+
+* **协议保持稳定**：Python 侧生成的 `_plan.json` 与 updater 命令行参数是内部协议。新增能力应优先添加可选字段，避免破坏 installer 与 updater 的调用关系。
+* **路径必须收敛在根目录内**：所有来自 manifest 或 plan 的路径都必须拒绝绝对路径、盘符路径、`..`、根路径和空路径。
+* **拒绝链接绕路**：更新执行路径不得穿过符号链接或 Windows 重解析点；目录清理也不能递归进入链接目标。
+* **失败优先保旧版本可用**：覆盖前必须先把新文件写入同目录临时文件，再备份旧文件并 rename 替换；复制失败、缺少源文件或路径非法时，应写入失败状态并尽量回滚。
+* **更新器位置固定**：`eer_updater.exe` 必须放在 `_internal/` 下，并参与 manifest 复制；不要把 `_internal/eer_updater.exe` 加入 manifest protected 列表。
+* **protected 必须白名单化**：运行时只信任 installer 内硬编码的用户数据白名单，不能直接信任 manifest 中新增的 protected 程序路径。
+* **测试要求**：涉及路径解析、复制、删除、回滚、protected 规则、临时目录或 plan schema 的变更，必须补充 Rust 单元测试或 Python 侧计划生成测试。
+
+常用检查命令：
+
+```bash
+cargo fmt --manifest-path updater/Cargo.toml --check
+cargo clippy --manifest-path updater/Cargo.toml -- -D warnings
+cargo test --manifest-path updater/Cargo.toml
+```
+
+### 5. 修改配置 Schema
 
 如果需要修改 `UserSetting` 配置结构（位于 `src/endfield_essence_recognizer/schemas/user_setting.py`），**必须**遵循以下步骤：
 
@@ -81,7 +101,7 @@ _MIGRATIONS: ClassVar[dict[int, Any]] = {
 - 自动化测试会在你忘记更新时提醒你
 - 避免用户手动重新配置
 
-### 5. 注释与可读性
+### 6. 注释与可读性
 
 * **逻辑清晰**：复杂逻辑块必须配有必要的行内注释，解释其目的和实现思路。
 * **可读性优先**：我们推崇编写自解释的代码。在代码简洁性与可读性发生冲突时，请优先选择可读性。
@@ -124,6 +144,17 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 #### 2. 安装 Node.js
 
 前端开发需要 [Node.js](https://nodejs.org/) 环境（推荐 LTS 版本）。
+
+#### 2.5 安装 Rust 工具链（可选，仅打包时需要）
+
+更新器 `_internal/eer_updater.exe` 使用 Rust 编写。如果需要本地构建完整包，需安装 [Rust 工具链](https://rustup.rs/)：
+
+```bash
+# 安装 rustup（Windows）
+winget install Rustlang.Rustup
+```
+
+仅开发后端/前端功能可跳过此步骤。
 
 #### 3. 准备游戏数据
 
@@ -176,11 +207,16 @@ uv run eer
 
 3. **代码检查**
 
-项目使用 Ruff 进行代码检查和格式化：
+Python 代码使用 Ruff 进行检查和格式化，Rust 更新器代码使用 clippy 和 rustfmt：
 
 ```bash
-# 运行 pre-commit 检查
+# Python: 运行 pre-commit 检查
 uv run pre-commit run --all-files
+
+# Rust: 检查更新器代码（需要 Rust 工具链）
+cargo fmt --manifest-path updater/Cargo.toml --check
+cargo clippy --manifest-path updater/Cargo.toml -- -D warnings
+cargo test --manifest-path updater/Cargo.toml
 ```
 
 4. **运行测试**
@@ -265,22 +301,36 @@ npm run lint:fix
 
 ### 打包发布
 
-使用 PyInstaller 打包成可执行文件：
+使用 PyInstaller 打包成可执行文件，需要以下步骤：
+
+#### 前置条件
+
+- Python 3.12+（通过 uv 管理）
+- Node.js LTS（前端构建）
+- Rust 工具链（更新器构建，安装：https://rustup.rs/）
+
+#### 构建步骤
 
 ```bash
-# 安装构建依赖
+# 1. 安装构建依赖
 uv sync --group build --no-dev
 
-# 构建前端（必需）
+# 2. 构建前端
 cd frontend
 npm run build
 cd ..
 
-# 打包
+# 3. 构建更新器 (eer_updater.exe)
+cargo build --release --manifest-path updater/Cargo.toml
+
+# 4. PyInstaller 打包（main.spec 会自动复制 release updater）
 uv run pyinstaller main.spec -y
 
-# 打包完成后，手动执行 manifest 生成
+# 5. 生成更新清单（manifest.json）
 uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-recognizer
 ```
 
 打包产物位于 `dist/endfield-essence-recognizer` 目录。
+
+> **注意**：第 3 步需要 Rust 工具链。如果不需要本地构建更新器，可以跳过第 3 步，
+> 但打包产物中将不包含 `_internal/eer_updater.exe`，应用内更新功能将无法使用。
