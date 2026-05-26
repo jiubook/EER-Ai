@@ -48,6 +48,7 @@
 
 - `scripts/generate_manifest.py`：扫描 PyInstaller 产物并生成 `_internal/manifest.json`。
 - `scripts/generate_incremental_package.py`：对比旧/新 PyInstaller 产物并生成文件级增量 zip。
+- `scripts/generate_yituliu_json.py`：从最新 GitHub Release 自动生成一图流 `version.json`（含全量包和增量包信息、SHA-256）。
 - `main.spec`：PyInstaller 打包脚本，会在本地存在 release updater 时复制 `_internal/eer_updater.exe` 到 dist 的 `_internal` 目录。
 
 ## Manifest 与 Plan
@@ -240,6 +241,16 @@ protected 来源优先级：
 
 获取后端已启用的更新流程列表。该列表由 `UPDATE_FLOW_ENABLED` 控制，前端只能展示并保存启用的流程。
 
+```json
+{
+  "flows": [
+    { "title": "一图流 API (CN 镜像)", "value": "cn_yituliu" },
+    { "title": "Mirror 酱", "value": "cn_mirrorchyan" },
+    { "title": "GitHub Release", "value": "github" }
+  ]
+}
+```
+
 ### `GET /api/update/mirrors`
 
 获取 GitHub 流程可用的下载镜像列表。该列表只在本次检查成功的流程为 `github` 时用于下载 URL 改写；一图流和 Mirror 酱流程不会使用这些镜像。
@@ -291,13 +302,25 @@ DEFAULT_UPDATE_FLOW = "cn_yituliu"
 {
   "update_flow": "cn_yituliu",
   "update_github_mirror": "github",
-  "update_mirror": "github"
+  "update_mirror": "github",
+  "update_mirrorchyan_res_id": "",
+  "update_mirrorchyan_cdk": "",
+  "update_mirrorchyan_user_agent": "EER_APP"
 }
 ```
 
 - `update_flow`：用户选择的更新流程，支持 `cn_yituliu`、`cn_mirrorchyan`、`github`。
 - `update_github_mirror`：GitHub 流程使用的下载镜像，支持 `github`、`ghproxy`、`ghfast` 等。
 - `update_mirror`：兼容旧字段，当前仍写入 GitHub 下载镜像；旧值 `cn` 会在 v5 内自动归一为 `update_flow = "cn_yituliu"`。
+- `update_mirrorchyan_res_id`：Mirror 酱分配的资源 ID，为空时该流程检查失败。
+- `update_mirrorchyan_cdk`：Mirror 酱 CDK；日志和前端提示不得输出明文。
+- `update_mirrorchyan_user_agent`：Mirror 酱来源统计标识，默认 `EER_APP`。
+
+配置版本从 v4 升级到 v5 时，前端会自动迁移：
+
+- 旧字段 `update_mirror = "cn"` 归一为 `update_flow = "cn_yituliu"`、`update_github_mirror = "github"`。
+- 其他 `update_mirror` 值（如 `ghproxy`）同时写入 `update_flow`（默认 `cn_yituliu`）和 `update_github_mirror`（保留原值）。
+- `update_mirrorchyan_*` 字段不存在时回退为空字符串或 `EER_APP`。
 
 ## 一图流版本源 JSON
 
@@ -418,20 +441,41 @@ Mirror 酱 API 当前没有 sha256 字段，因此无法复用本项目原有“
 
 ## 本地开发与验证
 
+`pre-commit` 已包含 Rust 更新器的 `fmt`、`clippy` 和 `test` 钩子，触发条件为 `updater/` 目录下文件变更。执行全量检查：
+
 ```bash
-# Python 侧 manifest / installer 测试
+# 一键检查 Python + 前端 + Rust（推荐）
+uv run pre-commit run --all-files
+
+# 仅 Python 侧 manifest / installer 测试
 uv run pytest tests/unit/updater/test_manifest.py
 
-# Python 侧 lint
+# 仅 Python 侧 lint
 uv run ruff check scripts/generate_manifest.py scripts/generate_incremental_package.py src/endfield_essence_recognizer/updater/installer.py tests/unit/updater/test_manifest.py
 
-# Rust updater
+# 仅 Rust updater（需要 Rust 工具链）
 cargo fmt --manifest-path updater/Cargo.toml --check
 cargo clippy --manifest-path updater/Cargo.toml -- -D warnings
 cargo test --manifest-path updater/Cargo.toml
 ```
 
 ## 发布新版本
+
+### CI 自动化（推荐）
+
+推送以 `v` 开头的 tag 后，`build-and-release.yml` 会自动完成以下步骤：
+
+1. 构建 Rust updater（`cargo build --release`）。
+2. PyInstaller 打包并复制 updater 到 `_internal/`。
+3. 生成 `_internal/manifest.json`。
+4. 打包全量 zip。
+5. 下载上一个稳定 Release 的全量 zip，与当前 dist 对比，自动生成增量包。
+6. 增量包命名规则：`incremental-v{旧版本}-to-{新tag}-{os}.zip`（例如 `incremental-v0.9.2-to-v0.9.3-windows.zip`），其中旧版本从上一个 Release 包内的 `_internal/manifest.json` 中读取，而非 tag。
+7. 全量包和增量包一并上传到 GitHub Release。
+
+手动触发增量包前，需确保上一个 Release 的全量 zip 已存在，否则 CI 会跳过增量包步骤。
+
+### 本地手动发布
 
 1. 更新 `pyproject.toml` 中的版本号。
 2. 构建前端产物。
@@ -442,6 +486,7 @@ cargo test --manifest-path updater/Cargo.toml
 7. 如需增量包，保留上一版本解压后的 dist 目录，并执行 `scripts/generate_incremental_package.py` 生成增量 zip。
 8. 在版本源 JSON 中增加 `incrementalPackages`，用户端检查到匹配当前版本的增量包后会优先下载；不匹配则仍走全量包。
 9. 如需发布到 Mirror 酱，优先上传本项目脚本生成的增量包；如果只能使用 Mirror 酱自动生成的 `changes.json` 增量包，也应确保包内包含新版本 `_internal/manifest.json`，并避免把用户数据文件加入 `added` / `modified` / `deleted`。
+10. 执行 `scripts/generate_yituliu_json.py` 自动生成一图流 `version.json`（含全量包和增量包 URL、SHA-256、size），并上传到一图流 CDN。
 
 本地生成 manifest：
 
@@ -458,6 +503,19 @@ uv run python scripts/generate_incremental_package.py \
   --from-version 0.8.0 \
   --to-version 0.9.2 \
   --output dist/endfield-essence-recognizer-0.8.0-to-0.9.2-windows-delta.zip
+```
+
+本地生成一图流 `version.json`：
+
+```bash
+# 从 GitHub Release 自动获取信息并计算 SHA-256（需下载文件）
+uv run python scripts/generate_yituliu_json.py --output version.json
+
+# 跳过 SHA-256 计算（快速生成，不含 sha256 字段）
+uv run python scripts/generate_yituliu_json.py --output version.json --skip-sha256
+
+# 直接从 GitHub API 的 asset digest 字段读取 SHA-256（不下载文件，需 asset 有 digest）
+uv run python scripts/generate_yituliu_json.py --output version.json --use-api
 ```
 
 ## 常见问题

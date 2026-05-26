@@ -210,10 +210,16 @@ uv run eer
 Python 代码使用 Ruff 进行检查和格式化，Rust 更新器代码使用 clippy 和 rustfmt：
 
 ```bash
-# Python: 运行 pre-commit 检查
+# 一键检查 Python + 前端 + Rust（推荐，pre-commit 已包含全部钩子）
 uv run pre-commit run --all-files
 
-# Rust: 检查更新器代码（需要 Rust 工具链）
+# 仅 Python 侧 manifest / installer 测试
+uv run pytest tests/unit/updater/test_manifest.py
+
+# 仅 Python 侧 lint
+uv run ruff check scripts/generate_manifest.py scripts/generate_incremental_package.py src/endfield_essence_recognizer/updater/installer.py tests/unit/updater/test_manifest.py
+
+# 仅 Rust: 检查更新器代码（需要 Rust 工具链，pre-commit 会自动触发）
 cargo fmt --manifest-path updater/Cargo.toml --check
 cargo clippy --manifest-path updater/Cargo.toml -- -D warnings
 cargo test --manifest-path updater/Cargo.toml
