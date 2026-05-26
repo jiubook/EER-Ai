@@ -119,7 +119,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force "previous-release" | Out-Null
           gh release download "${{ steps.previous_release.outputs.previous_tag }}" `
-            --pattern "endfield-essence-recognizer-*.zip" `
+            --pattern "endfield-essence-recognizer-${{ steps.previous_release.outputs.previous_tag }}-${{ matrix.os }}.zip" `
             --dir "previous-release"
 
       - name: Extract previous full package
@@ -128,7 +128,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force "previous-dist" | Out-Null
-          $zipFile = Get-ChildItem -Path "previous-release" -Filter "endfield-essence-recognizer-*.zip" | Select-Object -First 1
+          $zipFile = Get-ChildItem -Path "previous-release" -Filter "endfield-essence-recognizer-${{ steps.previous_release.outputs.previous_tag }}-${{ matrix.os }}.zip" | Select-Object -First 1
           if (-not $zipFile) {
             Write-Error "No matching zip found in previous-release/"
             exit 1

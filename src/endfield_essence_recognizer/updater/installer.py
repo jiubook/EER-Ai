@@ -592,6 +592,37 @@ def _compute_mirror_chyan_delete_list(changes: dict, protected: list[str]) -> li
     )
 
 
+def _files_under_dirs(temp_dir: Path, dirs: list[str]) -> set[str]:
+    """展开 Mirror 酱 added_dir 中声明的目录，收集其中的文件。"""
+    temp_dir = temp_dir.resolve()
+    files: set[str] = set()
+    for raw_dir in dirs:
+        if not isinstance(raw_dir, str):
+            continue
+        normalized = raw_dir.replace("\\", "/").strip("/")
+        if not normalized:
+            continue
+
+        base = temp_dir / normalized
+        try:
+            base.resolve().relative_to(temp_dir)
+        except ValueError:
+            logger.warning(f"跳过越界 added_dir: {raw_dir}")
+            continue
+
+        if not base.is_dir():
+            continue
+
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                files.add(str(path.relative_to(temp_dir).as_posix()))
+            except ValueError:
+                logger.warning(f"跳过越界文件: {path}")
+    return files
+
+
 def _compute_mirror_chyan_copy_list(
     temp_dir: Path,
     changes: dict,
@@ -605,6 +636,7 @@ def _compute_mirror_chyan_copy_list(
         for file_path in changes.get(key, [])
         if isinstance(file_path, str)
     }
+    changed_files.update(_files_under_dirs(temp_dir, changes.get("added_dir", [])))
     if not changed_files:
         changed_files = {
             str(path.relative_to(temp_dir).as_posix())

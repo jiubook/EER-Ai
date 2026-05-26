@@ -167,6 +167,8 @@ async def _fetch_mirror_chyan_latest(
 def _find_incremental_package(data: dict, latest_version: str) -> dict | None:
     """从版本源中查找可从当前版本升级到最新版本的增量包。"""
     packages: object | None = None
+    current_version = _normalize_version(__version__)
+    target_version = _normalize_version(latest_version)
     for key in _INCREMENTAL_PACKAGE_KEYS:
         packages = data.get(key)
         if packages:
@@ -179,12 +181,12 @@ def _find_incremental_package(data: dict, latest_version: str) -> dict | None:
             continue
         from_version = _get_first(package, "fromVersion", "from_version", "from")
         to_version = _get_first(package, "toVersion", "to_version", "to")
-        if from_version != __version__:
+        if _normalize_version(from_version) != current_version:
             continue
         if to_version is None:
             logger.warning("跳过缺少明确 to_version 的增量包")
             continue
-        if to_version != latest_version:
+        if _normalize_version(to_version) != target_version:
             continue
         download_url = _get_first(package, "downloadUrl", "download_url", "url")
         if not isinstance(download_url, str) or not download_url:

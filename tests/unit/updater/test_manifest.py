@@ -456,6 +456,38 @@ class TestIncrementalPackage:
             ["config.json", "logs/"],
         ) == ["old.dll", "old_dir"]
 
+    def test_mirror_chyan_added_dir_is_expanded(self, tmp_path: Path) -> None:
+        from src.endfield_essence_recognizer.updater.installer import (
+            _compute_mirror_chyan_copy_list,
+        )
+
+        (tmp_path / "assets").mkdir()
+        (tmp_path / "assets" / "root.txt").write_text("root", encoding="utf-8")
+        (tmp_path / "assets" / "nested").mkdir()
+        (tmp_path / "assets" / "nested" / "child.txt").write_text(
+            "child",
+            encoding="utf-8",
+        )
+
+        changes = {
+            "added": [],
+            "modified": [],
+            "deleted": [],
+            "added_dir": ["assets/"],
+            "deleted_dir": [],
+        }
+
+        copy_list = _compute_mirror_chyan_copy_list(
+            tmp_path,
+            changes,
+            ["config.json", "logs/"],
+        )
+
+        assert copy_list == [
+            "assets/nested/child.txt",
+            "assets/root.txt",
+        ]
+
     def test_incremental_package_requires_matching_installed_version(
         self, tmp_path: Path
     ) -> None:
@@ -509,6 +541,27 @@ class TestIncrementalPackageSelection:
                 {
                     "fromVersion": "1.0.0",
                     "toVersion": "1.1.0",
+                    "downloadUrl": "https://example.invalid/target.zip",
+                },
+            ]
+        }
+
+        package = checker._find_incremental_package(data, "1.1.0")
+
+        assert package is not None
+        assert package["downloadUrl"].endswith("target.zip")
+
+    def test_incremental_package_accepts_v_prefix(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.endfield_essence_recognizer.updater import checker
+
+        monkeypatch.setattr(checker, "__version__", "1.0.0")
+        data = {
+            "incrementalPackages": [
+                {
+                    "fromVersion": "v1.0.0",
+                    "toVersion": "v1.1.0",
                     "downloadUrl": "https://example.invalid/target.zip",
                 },
             ]
