@@ -161,7 +161,7 @@ jobs:
           $oldManifest = Get-Content $oldManifestPath | ConvertFrom-Json
           $fromVersion = $oldManifest.version
           Write-Host "Old manifest version: $fromVersion"
-          $incrementalZip = "dist/endfield-essence-recognizer-v$fromVersion-to-${{ steps.previous_release.outputs.current_tag }}-incremental-${{ matrix.os }}.zip"
+          $incrementalZip = "dist/incremental-v$fromVersion-to-${{ steps.previous_release.outputs.current_tag }}-${{ matrix.os }}.zip"
           uv run python scripts/generate_incremental_package.py `
             --old-dist-dir "${{ steps.extract_previous.outputs.old_dist_dir }}" `
             --new-dist-dir "dist/endfield-essence-recognizer" `
@@ -175,5 +175,5 @@ jobs:
         with:
           files: |
             dist/endfield-essence-recognizer-${{ steps.release_tag.outputs.normalized }}-${{ matrix.os }}.zip
-            dist/endfield-essence-recognizer-*-to-*-incremental-${{ matrix.os }}.zip
+            dist/incremental-*-to-*-${{ matrix.os }}.zip
           generate_release_notes: true
