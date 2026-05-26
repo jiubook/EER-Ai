@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -86,10 +87,11 @@ class TestGenerateManifest:
     """生成 manifest 的测试。"""
 
     def test_manifest_structure(self, fake_dist_dir: Path) -> None:
-        """manifest 应包含 version、files、protected 三个字段。"""
+        """manifest 应包含版本、文件、文件哈希和保护字段。"""
         manifest = generate_manifest(fake_dist_dir, "1.0.0")
         assert "version" in manifest
         assert "files" in manifest
+        assert "file_hashes" in manifest
         assert "protected" in manifest
 
     def test_manifest_version(self, fake_dist_dir: Path) -> None:
@@ -112,6 +114,15 @@ class TestGenerateManifest:
         """dist 中的 _internal/eer_updater.exe 应进入 files 列表。"""
         manifest = generate_manifest(fake_dist_dir, "1.0.0")
         assert "_internal/eer_updater.exe" in manifest["files"]
+
+    def test_manifest_includes_file_hashes(self, fake_dist_dir: Path) -> None:
+        """manifest 应记录实际文件的 SHA-256，manifest 自身除外。"""
+        manifest = generate_manifest(fake_dist_dir, "1.0.0")
+        expected = hashlib.sha256(b"exe").hexdigest()
+
+        assert manifest["file_hashes"]["endfield-essence-recognizer.exe"] == expected
+        assert len(manifest["file_hashes"]["_internal/python3.dll"]) == 64
+        assert MANIFEST_RELATIVE_PATH not in manifest["file_hashes"]
 
     def test_manifest_protected_defaults(self, fake_dist_dir: Path) -> None:
         """默认应使用 PROTECTED_PATHS 作为保护列表。"""
@@ -729,12 +740,39 @@ class TestUpdateTempDir:
             ["old.dll"],
             ["new.dll"],
             ["config.json"],
+            {"new.dll": "a" * 64},
         )
 
         assert plan_path == tmp_path / "_plan.json"
         data = json.loads(plan_path.read_text(encoding="utf-8"))
         assert data["remove_list"] == ["old.dll"]
+        assert data["copy_hashes"] == {"new.dll": "a" * 64}
         assert not list(tmp_path.glob("._plan.*.tmp"))
+
+    def test_copy_hashes_fallback_to_extracted_files(self, tmp_path: Path) -> None:
+        """旧包缺少 manifest 哈希时，应使用解压目录中的实际文件哈希。"""
+        from src.endfield_essence_recognizer.updater.installer import (
+            _compute_copy_hashes,
+        )
+
+        (tmp_path / "new.dll").write_text("new", encoding="utf-8")
+
+        assert _compute_copy_hashes(tmp_path, ["new.dll"]) == {
+            "new.dll": hashlib.sha256(b"new").hexdigest()
+        }
+
+    def test_copy_hashes_prefer_manifest_hashes(self, tmp_path: Path) -> None:
+        """新版 manifest 自带哈希时，应优先使用 manifest 声明值。"""
+        from src.endfield_essence_recognizer.updater.installer import (
+            _compute_copy_hashes,
+        )
+
+        (tmp_path / "new.dll").write_text("new", encoding="utf-8")
+        manifest = {"file_hashes": {"new.dll": "b" * 64}}
+
+        assert _compute_copy_hashes(tmp_path, ["new.dll"], manifest) == {
+            "new.dll": "b" * 64
+        }
 
     def test_legacy_install_temp_dir_is_cleaned(self, tmp_path: Path) -> None:
         from src.endfield_essence_recognizer.updater.installer import (

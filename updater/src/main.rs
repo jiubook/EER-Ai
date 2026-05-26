@@ -10,10 +10,11 @@
 //! - 主程序退出后才开始替换文件，避免 Windows 文件锁导致更新失败。
 
 use serde::Deserialize;
-use std::collections::HashSet;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
@@ -22,7 +23,9 @@ use std::os::windows::fs::MetadataExt;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+#[cfg(windows)]
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+#[cfg(windows)]
 use windows_sys::Win32::System::Threading::{
     OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
 };
@@ -32,6 +35,7 @@ use windows_sys::Win32::System::Threading::{
 // ---------------------------------------------------------------------------
 
 const MAX_LOG_SIZE: u64 = 4 * 1024 * 1024; // 4MB
+#[cfg(windows)]
 const PARENT_WAIT_TIMEOUT_MS: u32 = 100;
 const BACKUP_DIR_PREFIX: &str = "_update_backup_";
 #[cfg(windows)]
@@ -54,6 +58,9 @@ struct UpdatePlan {
     /// 更新包中必须复制到安装目录的文件。
     #[serde(default)]
     copy_list: Vec<String>,
+    /// 复制文件的 SHA-256 映射；旧 plan 可缺省，保持兼容。
+    #[serde(default)]
+    copy_hashes: HashMap<String, String>,
     /// 需要保留的用户数据路径；目录条目以 `/` 或 `\` 结尾。
     #[serde(default)]
     protected_list: Vec<String>,
@@ -246,6 +253,7 @@ fn has_link_like_component(root: &Path, relative: &Path) -> bool {
 // ---------------------------------------------------------------------------
 
 /// 等待主程序进程退出，避免 Windows 文件锁阻止覆盖。
+#[cfg(windows)]
 fn wait_for_parent_process(parent_pid: u32) {
     unsafe {
         let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, parent_pid);
@@ -268,6 +276,10 @@ fn wait_for_parent_process(parent_pid: u32) {
         CloseHandle(handle);
     }
 }
+
+/// 非 Windows 平台没有 Windows 文件锁等待需求。
+#[cfg(not(windows))]
+fn wait_for_parent_process(_parent_pid: u32) {}
 
 // ---------------------------------------------------------------------------
 // 文件操作
@@ -632,6 +644,31 @@ fn copy_file_to_unique_temp(source: &Path, target: &Path) -> io::Result<PathBuf>
     Err(io::Error::new(io::ErrorKind::AlreadyExists, reason))
 }
 
+fn compute_sha256_hex(path: &Path) -> io::Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn expected_copy_hash<'a>(copy_hashes: &'a HashMap<String, String>, rel: &str) -> Option<&'a str> {
+    copy_hashes
+        .get(rel)
+        .or_else(|| copy_hashes.get(&rel.replace('\\', "/")))
+        .map(String::as_str)
+}
+
+fn sha256_matches(actual: &str, expected: &str) -> bool {
+    actual.eq_ignore_ascii_case(expected.trim())
+}
+
 // ---------------------------------------------------------------------------
 // 主逻辑
 // ---------------------------------------------------------------------------
@@ -713,12 +750,16 @@ fn run_with_args(args: Vec<String>) -> i32 {
         }
     };
     logger.log(&format!(
-        "plan 加载完成: package_type={}, remove={}, copy={}, protected={}",
+        "plan 加载完成: package_type={}, remove={}, copy={}, copy_hashes={}, protected={}",
         plan.package_type,
         plan.remove_list.len(),
         plan.copy_list.len(),
+        plan.copy_hashes.len(),
         plan.protected_list.len()
     ));
+    if plan.copy_hashes.is_empty() {
+        logger.log("plan 未提供 copy_hashes，将按旧版兼容模式跳过复制前 SHA-256 校验");
+    }
 
     // 阶段 4：执行更新
     cleanup_stale_backup_dirs(&root_dir, &mut logger);
@@ -828,6 +869,33 @@ fn run_with_args(args: Vec<String>) -> i32 {
                 failure_reason = format!("update package is missing file: {rel_normalized}");
             }
             continue;
+        }
+        if let Some(expected_hash) = expected_copy_hash(&plan.copy_hashes, rel) {
+            match compute_sha256_hex(&source) {
+                Ok(actual_hash) if sha256_matches(&actual_hash, expected_hash) => {}
+                Ok(actual_hash) => {
+                    logger.log(&format!(
+                        "  SHA-256 校验失败: {rel_normalized} (expected={expected_hash}, actual={actual_hash})"
+                    ));
+                    success = false;
+                    if failure_reason.is_empty() {
+                        failure_reason = format!("SHA-256 校验失败: {rel_normalized}");
+                    }
+                    continue;
+                }
+                Err(e) => {
+                    logger.log(&format!("  SHA-256 计算失败: {rel_normalized} ({e})"));
+                    success = false;
+                    if failure_reason.is_empty() {
+                        failure_reason = format!("SHA-256 计算失败: {rel_normalized} ({e})");
+                    }
+                    continue;
+                }
+            }
+        } else if !plan.copy_hashes.is_empty() {
+            logger.log(&format!(
+                "  未找到 SHA-256，按兼容模式跳过校验: {rel_normalized}"
+            ));
         }
         // 确保目标父目录存在
         if let Some(parent) = target.parent() {
@@ -1121,6 +1189,66 @@ mod tests {
 
         assert_eq!(code, 2);
         assert_eq!(fs::read_to_string(root.join("app.dll")).unwrap(), "old");
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    /// copy_hashes 不匹配时，应拒绝复制并保留旧文件。
+    fn copy_hash_mismatch_fails_before_replacing_target() {
+        let base = test_dir("hash-mismatch");
+        let root = base.join("root");
+        let extract = base.join("extract");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&extract).unwrap();
+        fs::write(root.join("app.dll"), "old").unwrap();
+        fs::write(extract.join("app.dll"), "new").unwrap();
+
+        let plan = r#"{
+  "package_type": "manifest",
+  "remove_list": [],
+  "copy_list": ["app.dll"],
+  "copy_hashes": {"app.dll": "0000000000000000000000000000000000000000000000000000000000000000"},
+  "protected_list": []
+}"#;
+        let plan_path = extract.join("_plan.json");
+        fs::write(&plan_path, plan).unwrap();
+        let success_file = root.join("_update_success.txt");
+        let failure_file = root.join("_update_failure.txt");
+
+        let code = run_with_args(vec![
+            "eer_updater.exe".to_string(),
+            "0".to_string(),
+            root.to_string_lossy().into_owned(),
+            extract.to_string_lossy().into_owned(),
+            root.join("_updates")
+                .join("package.zip")
+                .to_string_lossy()
+                .into_owned(),
+            success_file.to_string_lossy().into_owned(),
+            failure_file.to_string_lossy().into_owned(),
+            root.join("missing-main.exe").to_string_lossy().into_owned(),
+            plan_path.to_string_lossy().into_owned(),
+        ]);
+
+        assert_eq!(code, 2);
+        assert_eq!(fs::read_to_string(root.join("app.dll")).unwrap(), "old");
+        assert!(failure_file.exists());
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    /// SHA-256 helper 应返回标准小写十六进制摘要。
+    fn computes_sha256_hex() {
+        let base = test_dir("sha256");
+        let file = base.join("payload.bin");
+        fs::write(&file, "abc").unwrap();
+
+        assert_eq!(
+            compute_sha256_hex(&file).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
 
         let _ = fs::remove_dir_all(base);
     }

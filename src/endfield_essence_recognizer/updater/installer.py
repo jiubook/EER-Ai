@@ -65,6 +65,55 @@ def _compute_manifest_sha256(manifest: dict) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _compute_file_sha256(file_path: Path) -> str:
+    """计算文件 SHA-256，供 plan 绑定解压后的待复制文件。"""
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def _is_sha256_hex(value: object) -> bool:
+    """校验字符串是否是标准 64 位十六进制 SHA-256。"""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(ch in "0123456789abcdefABCDEF" for ch in value)
+    )
+
+
+def _compute_copy_hashes(
+    temp_dir: Path,
+    copy_list: list[str],
+    manifest: dict | None = None,
+) -> dict[str, str]:
+    """为 plan 中的复制清单生成兼容式 SHA-256 映射。
+
+    优先使用新版 manifest 的 file_hashes；旧包或 Mirror 酱包缺少该字段时，
+    回退为当前解压目录中的实际文件哈希，以防 plan 生成后本地临时文件被改写。
+    """
+    manifest_hashes = (
+        manifest.get("file_hashes", {}) if isinstance(manifest, dict) else {}
+    )
+    if not isinstance(manifest_hashes, dict):
+        manifest_hashes = {}
+
+    copy_hashes: dict[str, str] = {}
+    for raw_path in copy_list:
+        normalized = raw_path.replace("\\", "/")
+        expected_hash = manifest_hashes.get(normalized)
+        if _is_sha256_hex(expected_hash):
+            copy_hashes[normalized] = str(expected_hash).lower()
+            continue
+
+        source_path = temp_dir / normalized
+        if source_path.is_file():
+            copy_hashes[normalized] = _compute_file_sha256(source_path)
+
+    return copy_hashes
+
+
 def _is_path_traversal(temp_dir: Path, member: str) -> bool:
     """检查 zip 条目是否存在路径穿越风险。
 
@@ -743,6 +792,7 @@ def _generate_plan_json(
     remove_list: list[str],
     copy_list: list[str],
     protected_list: list[str],
+    copy_hashes: dict[str, str] | None = None,
 ) -> Path:
     """生成更新计划 JSON 文件。
 
@@ -752,6 +802,7 @@ def _generate_plan_json(
         remove_list: 需要删除的文件列表。
         copy_list: 需要复制的文件列表。
         protected_list: 受保护的文件列表。
+        copy_hashes: 复制文件的 SHA-256 映射，旧包兼容时可为空。
 
     Returns:
         plan JSON 文件路径。
@@ -760,6 +811,7 @@ def _generate_plan_json(
         "package_type": package_type,
         "remove_list": remove_list,
         "copy_list": copy_list,
+        "copy_hashes": copy_hashes or {},
         "protected_list": protected_list,
     }
     plan_path = temp_dir / "_plan.json"
@@ -883,8 +935,14 @@ def install_update(zip_path: Path) -> bool:
             new_version = _safe_status_version(
                 manifest.get("version") if manifest is not None else "unknown"
             )
+            copy_hashes = _compute_copy_hashes(temp_dir, copy_list, manifest)
             plan_path = _generate_plan_json(
-                temp_dir, package_type, remove_list, copy_list, protected_list
+                temp_dir,
+                package_type,
+                remove_list,
+                copy_list,
+                protected_list,
+                copy_hashes,
             )
         elif manifest is not None:
             incremental_metadata = _load_incremental_metadata(temp_dir)
@@ -931,8 +989,14 @@ def install_update(zip_path: Path) -> bool:
                 package_type = "manifest"
 
             new_version = _safe_status_version(manifest.get("version"))
+            copy_hashes = _compute_copy_hashes(temp_dir, copy_list, manifest)
             plan_path = _generate_plan_json(
-                temp_dir, package_type, remove_list, copy_list, protected_list
+                temp_dir,
+                package_type,
+                remove_list,
+                copy_list,
+                protected_list,
+                copy_hashes,
             )
         else:
             # 回退模式：兼容无 manifest 的旧版更新包
@@ -946,8 +1010,14 @@ def install_update(zip_path: Path) -> bool:
             ]
             protected_list = ["config.json", ".env"]
             new_version = "unknown"
+            copy_hashes = _compute_copy_hashes(temp_dir, copy_list)
             plan_path = _generate_plan_json(
-                temp_dir, "fallback", remove_list, copy_list, protected_list
+                temp_dir,
+                "fallback",
+                remove_list,
+                copy_list,
+                protected_list,
+                copy_hashes,
             )
 
         # 独立更新器固定放在 _internal，避免用户在安装根目录误启动。

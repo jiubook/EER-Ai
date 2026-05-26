@@ -67,6 +67,10 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
     "_internal/manifest.json",
     "README.md"
   ],
+  "file_hashes": {
+    "endfield-essence-recognizer.exe": "0123...64位sha256",
+    "_internal/eer_updater.exe": "abcd...64位sha256"
+  },
   "protected": [
     "config.json",
     "profiles.json",
@@ -78,6 +82,7 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
 ```
 
 `_internal/eer_updater.exe` 必须在 `files` 中，但不能在 `protected` 中，否则后续无法替换更新器。
+`file_hashes` 记录发布包内文件的 SHA-256；`_internal/manifest.json` 自身不记录哈希，避免清单内容自引用。
 
 ### 临时解压目录中的 `_plan.json`
 
@@ -88,11 +93,15 @@ manifest 是发布包的目标状态声明，由 CI 或本地发布流程生成�
   "package_type": "manifest",
   "remove_list": ["_internal/old.dll"],
   "copy_list": ["endfield-essence-recognizer.exe", "_internal/eer_updater.exe"],
+  "copy_hashes": {
+    "endfield-essence-recognizer.exe": "0123...64位sha256",
+    "_internal/eer_updater.exe": "abcd...64位sha256"
+  },
   "protected_list": ["config.json", "profiles.json", "logs/", "screenshots/", ".env"]
 }
 ```
 
-协议要求：`_plan.json` 是 Python installer 与 Rust updater 之间的协议。新增字段应优先保持可选，避免破坏双方调用关系。
+协议要求：`_plan.json` 是 Python installer 与 Rust updater 之间的协议。新增字段应优先保持可选，避免破坏双方调用关系。`copy_hashes` 是可选字段；新版 Rust updater 在字段存在时会在复制前校验 SHA-256，旧包缺少 manifest 哈希时 Python 会回退为解压目录实际文件哈希。
 
 ### `_internal/incremental_update.json`
 

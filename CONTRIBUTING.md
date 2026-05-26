@@ -50,6 +50,7 @@
 * **路径必须收敛在根目录内**：所有来自 manifest 或 plan 的路径都必须拒绝绝对路径、盘符路径、`..`、根路径和空路径。
 * **拒绝链接绕路**：更新执行路径不得穿过符号链接或 Windows 重解析点；目录清理也不能递归进入链接目标。
 * **失败优先保旧版本可用**：覆盖前必须先把新文件写入同目录临时文件，再备份旧文件并 rename 替换；复制失败、缺少源文件或路径非法时，应写入失败状态并尽量回滚。
+* **复制前校验完整性**：新版 `_plan.json` 会携带 `copy_hashes`，Rust updater 在复制前校验 SHA-256；修改 manifest 或增量包生成逻辑时必须保持该字段向后兼容。
 * **更新器位置固定**：`eer_updater.exe` 必须放在 `_internal/` 下，并参与 manifest 复制；不要把 `_internal/eer_updater.exe` 加入 manifest protected 列表。
 * **protected 必须白名单化**：运行时只信任 installer 内硬编码的用户数据白名单，不能直接信任 manifest 中新增的 protected 程序路径。
 * **测试要求**：涉及路径解析、复制、删除、回滚、protected 规则、临时目录或 plan schema 的变更，必须补充 Rust 单元测试或 Python 侧计划生成测试。
