@@ -45,7 +45,7 @@ def _digest_from_asset(asset: dict) -> str | None:
     """从 GitHub asset 的 digest 字段提取 sha256，不存在则返回 None。"""
     digest = asset.get("digest", "")
     if isinstance(digest, str) and digest.startswith("sha256:"):
-        return digest[len("sha256:"):]
+        return digest[len("sha256:") :]
     return None
 
 
@@ -162,7 +162,9 @@ def generate_yituliu_json(
         if use_api:
             full_sha256 = _digest_from_asset(full_info["_raw"])
             if not full_sha256:
-                print(f"警告: 全量包 {full_info['name']} 无 digest 字段", file=sys.stderr)
+                print(
+                    f"警告: 全量包 {full_info['name']} 无 digest 字段", file=sys.stderr
+                )
         else:
             print(f"计算全量包 SHA-256: {full_info['name']} ...", file=sys.stderr)
             full_sha256 = _compute_sha256(full_info["url"])
