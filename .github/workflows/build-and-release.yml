@@ -71,14 +71,21 @@ jobs:
         run: |
           uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-recognizer
 
-      - name: Zip the built files
+      - name: Resolve release tag
+        id: release_tag
         shell: pwsh
         run: |
-          cd dist
           $releaseTag = "${{ github.ref_name }}"
           if (-not $releaseTag.StartsWith("v")) {
             $releaseTag = "v$releaseTag"
           }
+          "normalized=$releaseTag" >> $env:GITHUB_OUTPUT
+
+      - name: Zip the built files
+        shell: pwsh
+        run: |
+          cd dist
+          $releaseTag = "${{ steps.release_tag.outputs.normalized }}"
           Compress-Archive -Path "endfield-essence-recognizer/*" -DestinationPath "endfield-essence-recognizer-$releaseTag-${{ matrix.os }}.zip"
 
       - name: Resolve previous release
@@ -87,10 +94,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $currentTag = "${{ github.ref_name }}"
-          if (-not $currentTag.StartsWith("v")) {
-            $currentTag = "v$currentTag"
-          }
+          $currentTag = "${{ steps.release_tag.outputs.normalized }}"
           $currentVersion = $currentTag.TrimStart("v")
 
           $releases = gh release list --exclude-drafts --exclude-pre-releases --limit 50 --json tagName
@@ -170,6 +174,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/endfield-essence-recognizer-${{ github.ref_name }}-${{ matrix.os }}.zip
+            dist/endfield-essence-recognizer-${{ steps.release_tag.outputs.normalized }}-${{ matrix.os }}.zip
             dist/endfield-essence-recognizer-*-to-*-incremental-${{ matrix.os }}.zip
           generate_release_notes: true
