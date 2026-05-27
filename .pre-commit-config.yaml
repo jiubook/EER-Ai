@@ -43,3 +43,21 @@ repos:
       entry: npm run --prefix frontend type-check
       files: ^frontend/
       pass_filenames: false
+    - id: rust-fmt
+      name: Rust fmt
+      language: system
+      entry: cargo fmt --manifest-path updater/Cargo.toml --check
+      files: ^updater/
+      pass_filenames: false
+    - id: rust-clippy
+      name: Rust clippy
+      language: system
+      entry: cargo clippy --manifest-path updater/Cargo.toml -- -D warnings
+      files: ^updater/
+      pass_filenames: false
+    - id: rust-test
+      name: Rust tests
+      language: system
+      entry: cargo test --manifest-path updater/Cargo.toml
+      files: ^updater/
+      pass_filenames: false

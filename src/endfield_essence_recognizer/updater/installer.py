@@ -12,15 +12,106 @@ manifest.json 存放在 ``_internal/manifest.json``，随更新包一起被复�
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import secrets
 import subprocess
 import sys
+import tempfile
+import threading
+import time
 from pathlib import Path
 
 from endfield_essence_recognizer.utils.log import logger
 
-# manifest 在安装目录中的相对路径（与 generate_manifest.py 保持一致）
+UPDATE_TEMP_PARENT_NAME = "endfield-essence-recognizer"
+UPDATE_TEMP_PREFIX = "update-"
+STALE_UPDATE_TEMP_SECONDS = 24 * 60 * 60
+
+# 清单文件在安装目录中的相对路径（与生成脚本保持一致）
 MANIFEST_RELATIVE_PATH = "_internal/manifest.json"
+
+# 增量包元数据只用于 Python 侧安装前校验，不会复制到安装目录。
+INCREMENTAL_METADATA_RELATIVE_PATH = "_internal/incremental_update.json"
+
+# Mirror 酱增量包使用的差异描述文件。
+MIRROR_CHYAN_CHANGES_RELATIVE_PATH = "changes.json"
+
+# 独立更新器可执行文件名
+UPDATER_EXE_NAME = "eer_updater.exe"
+UPDATER_RELATIVE_PATH = f"_internal/{UPDATER_EXE_NAME}"
+
+STATUS_DIR_NAME = "logs"
+
+# 运行时只信任这些用户数据路径，避免被篡改的 manifest 保护程序文件。
+ALLOWED_PROTECTED_PATHS = {
+    "config.json",
+    "profiles.json",
+    "logs/",
+    "screenshots/",
+    ".env",
+}
+
+
+def _compute_manifest_sha256(manifest: dict) -> str:
+    """计算清单的稳定内容哈希，用于绑定增量包。"""
+    canonical = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _compute_file_sha256(file_path: Path) -> str:
+    """计算文件 SHA-256，供 plan 绑定解压后的待复制文件。"""
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def _is_sha256_hex(value: object) -> bool:
+    """校验字符串是否是标准 64 位十六进制 SHA-256。"""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(ch in "0123456789abcdefABCDEF" for ch in value)
+    )
+
+
+def _compute_copy_hashes(
+    temp_dir: Path,
+    copy_list: list[str],
+    manifest: dict | None = None,
+) -> dict[str, str]:
+    """为 plan 中的复制清单生成兼容式 SHA-256 映射。
+
+    优先使用新版 manifest 的 file_hashes；旧包或 Mirror 酱包缺少该字段时，
+    回退为当前解压目录中的实际文件哈希，以防 plan 生成后本地临时文件被改写。
+    """
+    manifest_hashes = (
+        manifest.get("file_hashes", {}) if isinstance(manifest, dict) else {}
+    )
+    if not isinstance(manifest_hashes, dict):
+        manifest_hashes = {}
+
+    copy_hashes: dict[str, str] = {}
+    for raw_path in copy_list:
+        normalized = raw_path.replace("\\", "/")
+        expected_hash = manifest_hashes.get(normalized)
+        if _is_sha256_hex(expected_hash):
+            copy_hashes[normalized] = str(expected_hash).lower()
+            continue
+
+        source_path = temp_dir / normalized
+        if source_path.is_file():
+            copy_hashes[normalized] = _compute_file_sha256(source_path)
+
+    return copy_hashes
 
 
 def _is_path_traversal(temp_dir: Path, member: str) -> bool:
@@ -82,334 +173,295 @@ def _load_manifest(temp_dir: Path) -> dict | None:
         return None
 
 
+def _safe_status_version(value: object) -> str:
+    """将版本号转换为可安全用于状态文件名的片段。"""
+    text = str(value or "unknown").strip() or "unknown"
+    return "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in text)
+
+
+def _load_installed_manifest_version(current_dir: Path) -> str:
+    """从当前已安装的 manifest 中读取版本号。"""
+    for manifest_path in (
+        current_dir / MANIFEST_RELATIVE_PATH,
+        current_dir / "manifest.json",
+    ):
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return _safe_status_version(manifest.get("version"))
+        except (json.JSONDecodeError, OSError):
+            logger.warning(f"无法读取已安装版本: {manifest_path}")
+    return "unknown"
+
+
+def _load_installed_manifest(current_dir: Path) -> dict | None:
+    """读取当前已安装的 manifest，供增量包校验基线版本。"""
+    for manifest_path in (
+        current_dir / MANIFEST_RELATIVE_PATH,
+        current_dir / "manifest.json",
+    ):
+        if not manifest_path.is_file():
+            continue
+        try:
+            return json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning(f"无法读取已安装 manifest: {manifest_path} ({exc})")
+    return None
+
+
+def _load_incremental_metadata(temp_dir: Path) -> dict | None:
+    """如果当前 zip 是增量包，则加载增量包元数据。"""
+    metadata_path = temp_dir / INCREMENTAL_METADATA_RELATIVE_PATH
+    if not metadata_path.is_file():
+        return None
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("package_type") != "incremental":
+            logger.error("incremental_update.json 的 package_type 不是 incremental")
+            return None
+        if metadata.get("schema_version") != 2:
+            logger.error("incremental_update.json 的 schema_version 必须为 2")
+            return None
+        if "from_version" not in metadata or "to_version" not in metadata:
+            logger.error("incremental_update.json 缺少 from_version 或 to_version")
+            return None
+        if (
+            "base_manifest_sha256" not in metadata
+            or "target_manifest_sha256" not in metadata
+        ):
+            logger.error("incremental_update.json 缺少清单 sha256 绑定字段")
+            return None
+        if "files" not in metadata or "remove" not in metadata:
+            logger.error("incremental_update.json 缺少 files 或 remove")
+            return None
+        logger.info(
+            f"加载增量包元数据: {metadata['from_version']} -> {metadata['to_version']}, "
+            f"files={len(metadata['files'])}, remove={len(metadata['remove'])}"
+        )
+        return metadata
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.error(f"加载 incremental_update.json 失败: {exc}")
+        return None
+
+
+def _load_mirror_chyan_changes(temp_dir: Path) -> dict | None:
+    """读取 Mirror 酱增量包的 changes.json 差异描述。"""
+    changes_path = temp_dir / MIRROR_CHYAN_CHANGES_RELATIVE_PATH
+    if not changes_path.is_file():
+        return None
+    try:
+        changes = json.loads(changes_path.read_text(encoding="utf-8"))
+        if not isinstance(changes, dict):
+            logger.error("changes.json 必须是 JSON 对象")
+            return None
+        for key in ("added", "modified", "deleted", "added_dir", "deleted_dir"):
+            value = changes.get(key, [])
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) for item in value
+            ):
+                logger.error(f"changes.json 的 {key} 字段必须是字符串数组")
+                return None
+        logger.info(
+            "加载 Mirror 酱增量差异: "
+            f"added={len(changes.get('added', []))}, "
+            f"modified={len(changes.get('modified', []))}, "
+            f"deleted={len(changes.get('deleted', []))}"
+        )
+        return changes
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.error(f"加载 changes.json 失败: {exc}")
+        return None
+
+
+def _safe_rmtree(path: Path, allowed_parent: Path, label: str) -> bool:
+    """仅在目录仍位于预期父目录内时递归删除它。"""
+    import shutil
+
+    if not path.exists():
+        return True
+    try:
+        if path.is_symlink():
+            logger.warning(f"跳过符号链接目录清理: {path}")
+            return False
+        resolved_parent = allowed_parent.resolve()
+        resolved_path = path.resolve()
+        if resolved_path == resolved_parent or not resolved_path.is_relative_to(
+            resolved_parent
+        ):
+            logger.warning(f"跳过越界目录清理: {path} -> {resolved_path}")
+            return False
+        if not path.is_dir():
+            return True
+        # 删除前再次检查，降低检查后被替换成链接的竞态风险。
+        if path.is_symlink():
+            logger.warning(f"跳过符号链接目录清理: {path}")
+            return False
+        shutil.rmtree(path)
+        logger.info(f"已清理{label}: {path}")
+        return True
+    except OSError as exc:
+        logger.warning(f"清理{label}失败: {path} ({exc})")
+        return False
+
+
+def _safe_unlink(path: Path, label: str) -> bool:
+    """删除指定文件；清理失败时只记录日志，不中断主流程。"""
+    try:
+        if path.is_file():
+            path.unlink()
+            logger.info(f"已清理{label}: {path}")
+        return True
+    except OSError as exc:
+        logger.warning(f"清理{label}失败: {path} ({exc})")
+        return False
+
+
+def _schedule_remove_dir_after_exit(path: Path, label: str) -> None:
+    """在当前进程返回后，让 Windows 后台重试删除目录。"""
+    if os.name != "nt":
+        logger.warning(f"当前平台不支持延迟清理{label}: {path}")
+        return
+    script = (
+        f'for /l %i in (1,1,20) do (rmdir /s /q "{path}" 2>NUL '
+        "&& exit /b 0 & ping 127.0.0.1 -n 2 >NUL)"
+    )
+    try:
+        subprocess.Popen(
+            ["cmd", "/C", script],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info(f"已安排延迟清理{label}: {path}")
+    except OSError as exc:
+        logger.warning(f"安排延迟清理{label}失败: {path} ({exc})")
+
+
+def _schedule_remove_file_after_exit(path: Path, label: str) -> None:
+    """在当前进程返回后，让 Windows 后台重试删除文件。"""
+    if os.name != "nt":
+        logger.warning(f"当前平台不支持延迟清理{label}: {path}")
+        return
+    script = (
+        f'for /l %i in (1,1,20) do (del /f /q "{path}" 2>NUL '
+        "&& exit /b 0 & ping 127.0.0.1 -n 2 >NUL)"
+    )
+    try:
+        subprocess.Popen(
+            ["cmd", "/C", script],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info(f"已安排延迟清理{label}: {path}")
+    except OSError as exc:
+        logger.warning(f"安排延迟清理{label}失败: {path} ({exc})")
+
+
+def _cleanup_failed_install_artifacts(
+    *,
+    temp_dir: Path | None,
+    plan_path: Path | None,
+    package_path: Path,
+) -> None:
+    """清理 Rust 更新器接管前失败路径产生的本次更新临时文件。"""
+    if plan_path is not None and not _safe_unlink(plan_path, "本次计划文件"):
+        _schedule_remove_file_after_exit(plan_path, "本次计划文件")
+    if temp_dir is not None and temp_dir.exists():
+        if not _safe_rmtree(temp_dir, temp_dir.parent, "本次更新临时目录"):
+            _schedule_remove_dir_after_exit(temp_dir, "本次更新临时目录")
+    if package_path.exists() and not _safe_unlink(package_path, "更新包"):
+        _schedule_remove_file_after_exit(package_path, "更新包")
+    if package_path.parent.exists():
+        try:
+            package_path.parent.rmdir()
+        except OSError:
+            pass
+
+
+def _build_status_file_paths(
+    current_dir: Path,
+    old_version: str,
+    new_version: str,
+) -> tuple[Path, Path]:
+    """生成 logs/{旧版本}_{新版本}_updater_success|failure.txt 状态文件路径。"""
+    prefix = f"{_safe_status_version(old_version)}_{_safe_status_version(new_version)}"
+    logs_dir = current_dir / STATUS_DIR_NAME
+    return (
+        logs_dir / f"{prefix}_updater_success.txt",
+        logs_dir / f"{prefix}_updater_failure.txt",
+    )
+
+
+def _cleanup_legacy_install_temp_dir(current_dir: Path) -> None:
+    """清理旧方案遗留在安装根目录下的 _update_temp 目录。"""
+    legacy_temp_dir = current_dir / "_update_temp"
+    _safe_rmtree(legacy_temp_dir, current_dir, "旧临时目录")
+
+
+def _cleanup_stale_update_temp_dirs(
+    now: float | None = None,
+    stale_seconds: int = STALE_UPDATE_TEMP_SECONDS,
+) -> None:
+    """尽力清理系统临时目录中已过期的更新解压目录。"""
+    parent = Path(tempfile.gettempdir()) / UPDATE_TEMP_PARENT_NAME
+    if parent.is_symlink() or not parent.is_dir():
+        return
+
+    current_time = time.time() if now is None else now
+    for path in parent.iterdir():
+        if not path.name.startswith(UPDATE_TEMP_PREFIX):
+            continue
+        if path.is_symlink() or not path.is_dir():
+            continue
+        try:
+            age = current_time - path.stat().st_mtime
+        except OSError:
+            continue
+        if age < stale_seconds:
+            continue
+        _safe_rmtree(path, parent, "过期更新临时目录")
+
+
+def _build_update_temp_dir(current_dir: Path) -> Path:
+    """为本次安装生成唯一的外部更新解压目录。"""
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    random_suffix = secrets.token_hex(8)
+    return (
+        Path(tempfile.gettempdir())
+        / UPDATE_TEMP_PARENT_NAME
+        / f"{UPDATE_TEMP_PREFIX}{timestamp}-{subprocess.os.getpid()}-{random_suffix}"
+    )
+
+
+def _protect_installed_updater_when_package_lacks_it(
+    temp_dir: Path,
+    remove_list: list[str],
+    protected_list: list[str],
+) -> tuple[list[str], list[str]]:
+    """当更新包缺少 updater 时，保留安装目录中已有的 updater。"""
+    if (temp_dir / UPDATER_RELATIVE_PATH).is_file():
+        return remove_list, protected_list
+
+    remove_list = [path for path in remove_list if path != UPDATER_RELATIVE_PATH]
+    if UPDATER_RELATIVE_PATH not in protected_list:
+        protected_list = [*protected_list, UPDATER_RELATIVE_PATH]
+    return remove_list, sorted(protected_list)
+
+
 def _is_protected(file_path: str, protected: set[str]) -> bool:
     """判断文件是否被 protected 列表保护（精确匹配或前缀目录匹配）。"""
     if file_path in protected:
         return True
-    return any(file_path.startswith(p) for p in protected)
+    return any(p.endswith("/") and file_path.startswith(p) for p in protected)
 
 
-def _generate_update_script_manifest(
+def _compute_delete_list(
     current_dir: Path,
-    temp_dir: Path,
-    manifest: dict,
-) -> str:
-    """生成基于 manifest 的批处理更新脚本。
-
-    脚本流程：
-    1. 等待程序关闭
-    2. 备份 protected 文件（防止被覆盖）
-    3. 按删除清单删除旧文件
-    4. 按复制清单复制新文件（已排除 protected）
-    5. 恢复 protected 文件
-    6. 清理并启动新版本
-
-    Args:
-        current_dir: 当前程序所在目录。
-        temp_dir: 解压后的临时目录。
-        manifest: manifest 字典。
-
-    Returns:
-        批处理脚本内容。
-    """
-    # manifest 文件本身也需要在更新后保留
-    # （它已经在 manifest["files"] 中了，因为 generate_manifest 会把它加进去）
-
-    script = r"""@echo off
-setlocal EnableDelayedExpansion
-
-echo ========================================
-echo  EER Updater - Manifest-based Update
-echo ========================================
-
-REM Root directory detection (prevent installation to C:\ or D:\)
-set "check_dir=%~dp0"
-REM Remove drive letter and colon (e.g., "C:" -> "")
-set "check_dir=%check_dir:~2%"
-REM Remove trailing backslash
-if "%check_dir:~-1%"=="\\" set "check_dir=%check_dir:~0,-1%"
-REM If empty after removing drive and backslash, we're at root
-if "%check_dir%"=="" (
-    echo ERROR: Do not install to a root directory like C:\ or D:\
-    echo Please create a subfolder, e.g. D:\EER\
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
-)
-
-echo [1/6] Waiting for program to close...
-timeout /t 3 /nobreak >nul
-
-:wait_loop
-tasklist /FI "IMAGENAME eq endfield-essence-recognizer.exe" 2>NUL | find /I /N "endfield-essence-recognizer.exe">NUL
-if "%ERRORLEVEL%"=="0" (
-    echo   Program still running, waiting...
-    timeout /t 1 /nobreak >nul
-    goto wait_loop
-)
-
-echo [2/6] Waiting for file handles to release...
-timeout /t 2 /nobreak >nul
-
-REM Check write permission
-echo test >"%~dp0__write_test__.tmp" 2>nul
-if errorlevel 1 (
-    echo ERROR: No write permission! Please run as administrator.
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
-)
-del "%~dp0__write_test__.tmp" 2>nul
-
-echo [3/6] Backing up protected files...
-
-if not exist "%~dp0_update_temp\\__protected_files.txt" (
-    echo   No protected files to back up.
-    goto delete_old
-)
-
-set backup_count=0
-for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__protected_files.txt") do (
-    if exist "%~dp0%%F" (
-        REM Backup to _update_temp directory (will be restored after update)
-        for %%D in ("%~dp0_update_temp\\__backup\\%%F") do (
-            if not exist "%%~dpD" mkdir "%%~dpD" 2>nul
-        )
-        copy /Y "%~dp0%%F" "%~dp0_update_temp\\__backup\\%%F" >nul
-        if not errorlevel 1 (
-            echo   Backed up: %%F
-            set /a backup_count+=1
-        ) else (
-            echo   FAILED to back up: %%F
-        )
-    )
-)
-echo   Backed up !backup_count! protected files.
-
-:delete_old
-echo [4/6] Removing old version files...
-
-if not exist "%~dp0_update_temp\\__to_delete.txt" (
-    echo   No old files to delete ^(first install or no old manifest^).
-    goto copy_files
-)
-
-set delete_count=0
-for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__to_delete.txt") do (
-    if exist "%~dp0%%F" (
-        del /F /Q "%~dp0%%F" 2>nul
-        if not errorlevel 1 (
-            echo   Deleted: %%F
-            set /a delete_count+=1
-        ) else (
-            echo   FAILED to delete: %%F
-        )
-    )
-)
-
-echo   Deleted !delete_count! old files.
-
-REM Clean up empty directories left after file deletion
-echo [4.5/6] Removing empty directories...
-REM First pass: remove immediate parent directories of deleted files
-for /F "usebackq delims=" %%D in ("%~dp0_update_temp\\__to_delete.txt") do (
-    for %%P in ("%~dp0%%D") do (
-        if exist "%%~dpP" (
-            rmdir "%%~dpP" 2>nul
-        )
-    )
-)
-REM Second pass: recursively remove empty directories in _internal
-for /d %%D in ("%~dp0_internal\*") do (
-    rmdir "%%D" 2>nul
-    if exist "%%D" (
-        for /d %%S in ("%%D\*") do (
-            rmdir "%%S" 2>nul
-        )
-        rmdir "%%D" 2>nul
-    )
-)
-echo   Empty directories cleaned.
-
-:copy_files
-echo [5/7] Copying new / updated files from update package...
-
-REM Verify manifest file exists
-if not exist "%~dp0_update_temp\\__manifest_files.txt" (
-    echo ERROR: Manifest file missing! Update aborted.
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
-)
-
-set copy_failed=0
-set copy_count=0
-
-REM Copy all files listed in manifest (new + overwrite), protected files excluded
-for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__manifest_files.txt") do (
-    if exist "%~dp0_update_temp\\%%F" (
-        REM Ensure target directory exists
-        for %%D in ("%~dp0%%F") do (
-            if not exist "%%~dpD" mkdir "%%~dpD" 2>nul
-        )
-        copy /Y "%~dp0_update_temp\\%%F" "%~dp0%%F" >nul
-        if errorlevel 1 (
-            echo   FAILED: %%F
-            set copy_failed=1
-        ) else (
-            set /a copy_count+=1
-        )
-    )
-)
-
-if !copy_failed!==1 (
-    echo WARNING: Some files failed to copy.
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
-)
-
-echo   Copied !copy_count! files.
-
-REM Restore protected files (if backed up)
-if exist "%~dp0_update_temp\\__backup" (
-    echo [6/7] Restoring protected files...
-    for /F "usebackq delims=" %%F in ("%~dp0_update_temp\\__protected_files.txt") do (
-        if exist "%~dp0_update_temp\\__backup\\%%F" (
-            for %%D in ("%~dp0%%F") do (
-                if not exist "%%~dpD" mkdir "%%~dpD" 2>nul
-            )
-            copy /Y "%~dp0_update_temp\\__backup\\%%F" "%~dp0%%F" >nul
-            echo   Restored: %%F
-        )
-    )
-)
-
-:cleanup
-echo [7/7] Cleaning up update files...
-rmdir /S /Q "%~dp0_update_temp" 2>nul
-rmdir /S /Q "%~dp0_updates" 2>nul
-
-echo.
-echo ========================================
-echo  Update complete! Starting new version...
-echo ========================================
-start "" "%~dp0endfield-essence-recognizer.exe"
-
-timeout /t 1 /nobreak >nul
-del "%~f0"
-"""
-    return script
-
-
-def _generate_update_script_fallback(current_dir: Path, temp_dir: Path) -> str:
-    """生成回退方案的批处理更新脚本（无 manifest 时使用）。
-
-    保持与原始行为一致：硬编码删除列表 + xcopy 全量复制。
-
-    Args:
-        current_dir: 当前程序所在目录。
-        temp_dir: 解压后的临时目录。
-
-    Returns:
-        批处理脚本内容。
-    """
-    return r"""@echo off
-chcp 65001 >nul
-setlocal EnableDelayedExpansion
-
-echo ========================================
-echo  EER Updater - Fallback Mode
-echo ========================================
-
-REM Root directory detection (prevent installation to C:\ or D:\)
-set "check_dir=%~dp0"
-REM Remove drive letter and colon (e.g., "C:" -> "")
-set "check_dir=%check_dir:~2%"
-REM Remove trailing backslash
-if "%check_dir:~-1%"=="\\" set "check_dir=%check_dir:~0,-1%"
-REM If empty after removing drive and backslash, we're at root
-if "%check_dir%"=="" (
-    echo ERROR: Do not install to a root directory like C:\ or D:\
-    echo Please create a subfolder, e.g. D:\EER\
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
-)
-
-echo [1/5] Waiting for program to close...
-timeout /t 3 /nobreak >nul
-
-:wait_loop
-tasklist /FI "IMAGENAME eq endfield-essence-recognizer.exe" 2>NUL | find /I /N "endfield-essence-recognizer.exe">NUL
-if "%ERRORLEVEL%"=="0" (
-    echo   Program still running, waiting...
-    timeout /t 1 /nobreak >nul
-    goto wait_loop
-)
-
-echo [2/5] Waiting for file handles to release...
-timeout /t 2 /nobreak >nul
-
-echo [3/5] Protecting user configuration...
-if exist "%~dp0config.json" (
-    copy /Y "%~dp0config.json" "%~dp0config.json.protected" >nul
-    echo   Config file backed up
-)
-
-echo [4/5] Deleting old program files...
-if exist "%~dp0endfield-essence-recognizer.exe" del /F /Q "%~dp0endfield-essence-recognizer.exe" 2>nul
-if exist "%~dp0_internal" rmdir /S /Q "%~dp0_internal" 2>nul
-if exist "%~dp0logs" rmdir /S /Q "%~dp0logs" 2>nul
-if exist "%~dp0resources" rmdir /S /Q "%~dp0resources" 2>nul
-if exist "%~dp0README.md" del /F /Q "%~dp0README.md" 2>nul
-if exist "%~dp0界面白屏解决方法.md" del /F /Q "%~dp0界面白屏解决方法.md" 2>nul
-if exist "%~dp0遇到报错解决方法.webp" del /F /Q "%~dp0遇到报错解决方法.webp" 2>nul
-
-echo [5/5] Copying new files...
-set retry=0
-:copy_retry
-xcopy /E /Y /I "%~dp0_update_temp\\*" "%~dp0" 2>nul
-if errorlevel 1 (
-    set /a retry+=1
-    if !retry! lss 5 (
-        echo   Copy failed, retrying... ^(attempt !retry!/5^)
-        timeout /t 2 /nobreak >nul
-        goto copy_retry
-    )
-    echo ERROR: File copy failed after 5 attempts
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
-)
-
-echo Cleaning up...
-rmdir /S /Q "%~dp0_update_temp" 2>nul
-rmdir /S /Q "%~dp0_updates" 2>nul
-
-echo Restoring user configuration...
-if exist "%~dp0config.json.protected" (
-    move /Y "%~dp0config.json.protected" "%~dp0config.json" >nul
-    echo   Config file restored
-)
-
-echo.
-echo ========================================
-echo  Update complete! Starting new version...
-echo ========================================
-start "" "%~dp0endfield-essence-recognizer.exe"
-
-timeout /t 1 /nobreak >nul
-del "%~f0"
-"""
-
-
-def _prepare_delete_list(
-    current_dir: Path,
-    temp_dir: Path,
     new_manifest: dict,
-) -> None:
-    """基于旧 manifest 生成需要删除的文件列表。
+) -> list[str]:
+    """基于旧 manifest 计算需要删除的文件列表。
 
     删除旧 manifest 中的所有文件（排除 protected），
     确保所有程序文件都会被新版本替换。
@@ -420,8 +472,10 @@ def _prepare_delete_list(
 
     Args:
         current_dir: 当前程序所在目录。
-        temp_dir: 解压后的临时目录。
         new_manifest: 新版本的 manifest 字典。
+
+    Returns:
+        需要删除的文件相对路径列表（正斜杠格式）。
     """
     protected = set(new_manifest["protected"])
     new_files = set(new_manifest["files"])
@@ -485,31 +539,20 @@ def _prepare_delete_list(
             f"共 {len(to_delete)} 个"
         )
 
-    # 写入删除清单（转换为 Windows 路径格式）
-    delete_list_path = temp_dir / "__to_delete.txt"
-    delete_list_path.write_text(
-        "\n".join(f.replace("/", "\\") for f in sorted(to_delete)) + "\n"
-        if to_delete
-        else "",
-        encoding="utf-8",
-    )
-
     logger.info(f"生成删除清单: {len(to_delete)} 个文件")
+    return sorted(to_delete)
 
 
-def _prepare_manifest_files_list(temp_dir: Path, manifest: dict) -> None:
-    """生成 manifest 文件列表，供批处理脚本复制使用。
-
-    已排除 protected 文件，避免覆盖用户配置等敏感数据。
-    manifest.json 自身（``_internal/manifest.json``）必须在列表中，
-    确保更新后磁盘上保留"新 manifest"供下次更新使用。
+def _compute_copy_list(manifest: dict) -> list[str]:
+    """计算需要复制的文件列表（已排除 protected 和 .git 相关文件）。
 
     Args:
-        temp_dir: 解压后的临时目录。
         manifest: manifest 字典。
+
+    Returns:
+        需要复制的文件相对路径列表（正斜杠格式）。
     """
     protected = set(manifest["protected"])
-    # 过滤掉 protected 文件和 .git 相关文件
     copy_files = [
         f
         for f in manifest["files"]
@@ -519,36 +562,297 @@ def _prepare_manifest_files_list(temp_dir: Path, manifest: dict) -> None:
         and not f.startswith("resources/.git")
         and "/resources/.git" not in f
     ]
+    return sorted(copy_files)
 
-    files_path = temp_dir / "__manifest_files.txt"
-    # 转换为 Windows 路径格式
-    files_path.write_text(
-        "\n".join(f.replace("/", "\\") for f in sorted(copy_files)) + "\n",
-        encoding="utf-8",
+
+def _compute_incremental_delete_list(metadata: dict, manifest: dict) -> list[str]:
+    """返回增量包元数据中显式声明的删除清单。"""
+    protected = set(manifest["protected"])
+    return sorted(
+        {
+            file_path
+            for file_path in metadata.get("remove", [])
+            if isinstance(file_path, str) and not _is_protected(file_path, protected)
+        }
     )
 
 
-def _prepare_protected_files_list(temp_dir: Path, manifest: dict) -> None:
-    """生成 protected 文件列表，供批处理脚本备份/恢复使用。
+def _compute_incremental_copy_list(metadata: dict, manifest: dict) -> list[str] | None:
+    """根据增量包元数据生成复制清单。
 
-    仅列出在磁盘上实际存在的 protected 文件（非目录）。
+    增量包只携带元数据声明的文件；这些文件必须属于目标 manifest。
+    元数据文件本身仅用于安装前校验，不会复制到安装目录。
+    """
+    protected = set(manifest["protected"])
+    manifest_files = set(manifest["files"])
+    copy_files: set[str] = set()
+
+    for raw_file in metadata.get("files", []):
+        if not isinstance(raw_file, str):
+            logger.error("增量包 files 中存在非字符串条目")
+            return None
+        if raw_file == INCREMENTAL_METADATA_RELATIVE_PATH:
+            continue
+        if raw_file not in manifest_files:
+            logger.error(f"增量包声明了不在目标 manifest 中的文件: {raw_file}")
+            return None
+        if _is_protected(raw_file, protected):
+            continue
+        copy_files.add(raw_file)
+
+    copy_files.add(MANIFEST_RELATIVE_PATH)
+    return sorted(copy_files)
+
+
+def _build_mirror_chyan_protected_manifest(
+    current_dir: Path,
+    package_manifest: dict | None,
+) -> dict:
+    """为 Mirror 酱增量包选择 protected 来源，优先使用包内新清单。"""
+    if package_manifest is not None and isinstance(
+        package_manifest.get("protected"), list
+    ):
+        return package_manifest
+
+    installed_manifest = _load_installed_manifest(current_dir)
+    if installed_manifest is not None and isinstance(
+        installed_manifest.get("protected"),
+        list,
+    ):
+        return installed_manifest
+
+    return {"files": [], "protected": sorted(ALLOWED_PROTECTED_PATHS)}
+
+
+def _compute_mirror_chyan_delete_list(changes: dict, protected: list[str]) -> list[str]:
+    """根据 Mirror 酱 changes.json 生成删除清单。"""
+    protected_set = set(protected)
+    delete_candidates = [
+        *changes.get("deleted", []),
+        *changes.get("deleted_dir", []),
+    ]
+    return sorted(
+        {
+            file_path
+            for file_path in delete_candidates
+            if isinstance(file_path, str)
+            and not _is_protected(file_path, protected_set)
+        }
+    )
+
+
+def _files_under_dirs(temp_dir: Path, dirs: list[str]) -> set[str]:
+    """展开 Mirror 酱 added_dir 中声明的目录，收集其中的文件。"""
+    temp_dir = temp_dir.resolve()
+    files: set[str] = set()
+    for raw_dir in dirs:
+        if not isinstance(raw_dir, str):
+            continue
+        normalized = raw_dir.replace("\\", "/").strip("/")
+        if not normalized:
+            continue
+
+        base = temp_dir / normalized
+        try:
+            base.resolve().relative_to(temp_dir)
+        except ValueError:
+            logger.warning(f"跳过越界 added_dir: {raw_dir}")
+            continue
+
+        if not base.is_dir():
+            continue
+
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                files.add(str(path.relative_to(temp_dir).as_posix()))
+            except ValueError:
+                logger.warning(f"跳过越界文件: {path}")
+    return files
+
+
+def _compute_mirror_chyan_copy_list(
+    temp_dir: Path,
+    changes: dict,
+    protected: list[str],
+) -> list[str]:
+    """根据 Mirror 酱 changes.json 和解压内容生成复制清单。"""
+    protected_set = set(protected)
+    changed_files = {
+        file_path
+        for key in ("added", "modified")
+        for file_path in changes.get(key, [])
+        if isinstance(file_path, str)
+    }
+    changed_files.update(_files_under_dirs(temp_dir, changes.get("added_dir", [])))
+    if not changed_files:
+        changed_files = {
+            str(path.relative_to(temp_dir).as_posix())
+            for path in temp_dir.rglob("*")
+            if path.is_file()
+        }
+
+    ignored_files = {
+        MIRROR_CHYAN_CHANGES_RELATIVE_PATH,
+        INCREMENTAL_METADATA_RELATIVE_PATH,
+        "_plan.json",
+    }
+    return sorted(
+        {
+            file_path
+            for file_path in changed_files
+            if file_path not in ignored_files
+            and (temp_dir / file_path).is_file()
+            and not _is_protected(file_path, protected_set)
+        }
+    )
+
+
+def _validate_incremental_package(
+    current_dir: Path,
+    manifest: dict,
+    metadata: dict,
+) -> bool:
+    """校验增量包是否能应用到当前已安装版本。"""
+    installed_manifest = _load_installed_manifest(current_dir)
+    if installed_manifest is None:
+        logger.error("当前安装目录没有 manifest，不能应用增量包")
+        return False
+
+    installed_version = str(installed_manifest.get("version", ""))
+    expected_from = str(metadata.get("from_version", ""))
+    if installed_version != expected_from:
+        logger.error(
+            f"增量包基线版本不匹配: 当前 {installed_version}, 需要 {expected_from}"
+        )
+        return False
+
+    expected_base_sha256 = metadata.get("base_manifest_sha256")
+    actual_base_sha256 = _compute_manifest_sha256(installed_manifest)
+    if (
+        not isinstance(expected_base_sha256, str)
+        or actual_base_sha256 != expected_base_sha256
+    ):
+        logger.error(
+            f"增量包基线清单 sha256 不匹配: 当前={actual_base_sha256}, "
+            f"期望={expected_base_sha256}"
+        )
+        return False
+
+    to_version = str(metadata.get("to_version", ""))
+    manifest_version = str(manifest.get("version", ""))
+    if manifest_version != to_version:
+        logger.error(
+            f"增量包目标版本与 manifest 不一致: metadata={to_version}, "
+            f"manifest={manifest_version}"
+        )
+        return False
+
+    expected_target_sha256 = metadata.get("target_manifest_sha256")
+    actual_target_sha256 = _compute_manifest_sha256(manifest)
+    if (
+        not isinstance(expected_target_sha256, str)
+        or actual_target_sha256 != expected_target_sha256
+    ):
+        logger.error(
+            f"增量包目标清单 sha256 不匹配: 包内={actual_target_sha256}, "
+            f"期望={expected_target_sha256}"
+        )
+        return False
+
+    return True
+
+
+def _compute_protected_list(manifest: dict) -> list[str]:
+    """计算 updater 允许信任的 protected 路径列表。
 
     Args:
-        temp_dir: 解压后的临时目录。
         manifest: manifest 字典。
+
+    Returns:
+        protected 相对路径列表（正斜杠格式）。
     """
-    protected_path = temp_dir / "__protected_files.txt"
-    # batch 脚本会在安装目录检查文件是否存在
-    protected_entries = []
-    for p in manifest["protected"]:
-        # 目录条目（如 logs/）不需要备份，只备份具体文件
-        if not p.endswith("/"):
-            protected_entries.append(p)
-    # 转换为 Windows 路径格式
-    protected_path.write_text(
-        "\n".join(p.replace("/", "\\") for p in sorted(protected_entries)) + "\n",
+    protected: set[str] = set()
+    for raw_path in manifest["protected"]:
+        if not isinstance(raw_path, str):
+            logger.warning(f"忽略非字符串 protected 条目: {raw_path!r}")
+            continue
+        normalized = raw_path.replace("\\", "/")
+        if normalized in ALLOWED_PROTECTED_PATHS:
+            protected.add(normalized)
+        else:
+            logger.warning(f"忽略未在白名单内的 protected 条目: {normalized}")
+    return sorted(protected)
+
+
+def _generate_plan_json(
+    temp_dir: Path,
+    package_type: str,
+    remove_list: list[str],
+    copy_list: list[str],
+    protected_list: list[str],
+    copy_hashes: dict[str, str] | None = None,
+) -> Path:
+    """生成更新计划 JSON 文件。
+
+    Args:
+        temp_dir: 临时目录路径。
+        package_type: 包类型（"manifest" 或 "fallback"）。
+        remove_list: 需要删除的文件列表。
+        copy_list: 需要复制的文件列表。
+        protected_list: 受保护的文件列表。
+        copy_hashes: 复制文件的 SHA-256 映射，旧包兼容时可为空。
+
+    Returns:
+        plan JSON 文件路径。
+    """
+    plan = {
+        "package_type": package_type,
+        "remove_list": remove_list,
+        "copy_list": copy_list,
+        "copy_hashes": copy_hashes or {},
+        "protected_list": protected_list,
+    }
+    plan_path = temp_dir / "_plan.json"
+    tmp_path = temp_dir / f"._plan.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    tmp_path.write_text(
+        json.dumps(plan, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    os.replace(tmp_path, plan_path)
+    logger.info(
+        f"生成 plan JSON: remove={len(remove_list)}, "
+        f"copy={len(copy_list)}, protected={len(protected_list)}"
+    )
+    return plan_path
+
+
+def _compute_fallback_remove_list(current_dir: Path) -> list[str]:
+    """无 manifest 时的回退删除列表。
+
+    硬编码删除已知的程序目录和文件，与旧版 bat 脚本行为一致。
+
+    Args:
+        current_dir: 当前程序所在目录。
+
+    Returns:
+        需要删除的文件/目录相对路径列表。
+    """
+    to_delete = []
+    known_items = [
+        "endfield-essence-recognizer.exe",
+        "_internal/",
+        "resources/",
+        "README.md",
+        "界面白屏解决方法.md",
+        "遇到报错解决方法.webp",
+    ]
+    for item in known_items:
+        full_path = current_dir / item
+        if full_path.exists():
+            to_delete.append(item)
+    return to_delete
 
 
 def install_update(zip_path: Path) -> bool:
@@ -560,8 +864,8 @@ def install_update(zip_path: Path) -> bool:
     3. 生成删除清单（有旧 manifest 则精确删除，无则保守清理旧程序文件）
     4. 生成复制清单（已排除 protected）
     5. 生成 protected 备份清单
-    6. 生成批处理更新脚本（备份 → 删除 → 复制 → 恢复 → 清理）
-    7. 启动脚本并退出当前程序
+    6. 生成 plan JSON 文件
+    7. 启动 _internal/eer_updater.exe 并退出当前程序
 
     Args:
         zip_path: 更新包路径。
@@ -571,6 +875,10 @@ def install_update(zip_path: Path) -> bool:
     """
     import zipfile
 
+    zip_path = Path(zip_path)
+    temp_dir: Path | None = None
+    plan_path: Path | None = None
+    updater_started = False
     try:
         # 获取当前程序目录
         if getattr(sys, "frozen", False):
@@ -578,13 +886,13 @@ def install_update(zip_path: Path) -> bool:
         else:
             current_dir = Path.cwd()
 
-        # 创建临时解压目录
-        temp_dir = current_dir / "_update_temp"
+        # 创建临时解压目录。解压目录放在系统临时目录，避免安装目录残留 _update_temp。
+        _cleanup_legacy_install_temp_dir(current_dir)
+        _cleanup_stale_update_temp_dirs()
+        temp_dir = _build_update_temp_dir(current_dir)
         if temp_dir.exists():
-            import shutil
-
-            shutil.rmtree(temp_dir)
-        temp_dir.mkdir()
+            _safe_rmtree(temp_dir, temp_dir.parent, "本次更新临时目录")
+        temp_dir.mkdir(parents=True)
 
         # 解压更新包
         logger.info(f"解压更新包到: {temp_dir}")
@@ -596,39 +904,164 @@ def install_update(zip_path: Path) -> bool:
                     return False
             zip_ref.extractall(temp_dir)
 
+        old_version = _load_installed_manifest_version(current_dir)
+
         # 尝试加载 manifest
         manifest = _load_manifest(temp_dir)
+        mirror_chyan_changes = _load_mirror_chyan_changes(temp_dir)
+        if (
+            mirror_chyan_changes is None
+            and (temp_dir / MIRROR_CHYAN_CHANGES_RELATIVE_PATH).is_file()
+        ):
+            return False
 
-        if manifest is not None:
-            # Manifest 模式：精确删除 + 排除 protected 的复制
-            logger.info("使用 manifest 模式进行更新")
-            _prepare_delete_list(current_dir, temp_dir, manifest)
-            _prepare_manifest_files_list(temp_dir, manifest)
-            _prepare_protected_files_list(temp_dir, manifest)
-            script_content = _generate_update_script_manifest(
-                current_dir, temp_dir, manifest
+        if mirror_chyan_changes is not None:
+            logger.info("使用 Mirror 酱增量包模式进行更新")
+            protected_manifest = _build_mirror_chyan_protected_manifest(
+                current_dir,
+                manifest,
             )
-            encoding = "ansi"
+            protected_list = _compute_protected_list(protected_manifest)
+            remove_list = _compute_mirror_chyan_delete_list(
+                mirror_chyan_changes,
+                protected_list,
+            )
+            copy_list = _compute_mirror_chyan_copy_list(
+                temp_dir,
+                mirror_chyan_changes,
+                protected_list,
+            )
+            package_type = "mirror_chyan_incremental"
+            new_version = _safe_status_version(
+                manifest.get("version") if manifest is not None else "unknown"
+            )
+            copy_hashes = _compute_copy_hashes(temp_dir, copy_list, manifest)
+            plan_path = _generate_plan_json(
+                temp_dir,
+                package_type,
+                remove_list,
+                copy_list,
+                protected_list,
+                copy_hashes,
+            )
+        elif manifest is not None:
+            incremental_metadata = _load_incremental_metadata(temp_dir)
+            if (
+                incremental_metadata is None
+                and (temp_dir / INCREMENTAL_METADATA_RELATIVE_PATH).is_file()
+            ):
+                return False
+            protected_list = _compute_protected_list(manifest)
+
+            if incremental_metadata is not None:
+                if not _validate_incremental_package(
+                    current_dir,
+                    manifest,
+                    incremental_metadata,
+                ):
+                    return False
+
+                logger.info("使用增量包模式进行更新")
+                # 增量包不含未变化文件，只按 metadata 声明生成最小复制/删除清单。
+                remove_list = _compute_incremental_delete_list(
+                    incremental_metadata,
+                    manifest,
+                )
+                copy_list = _compute_incremental_copy_list(
+                    incremental_metadata,
+                    manifest,
+                )
+                if copy_list is None:
+                    return False
+                package_type = "incremental"
+            else:
+                # 清单模式：精确删除，并在复制时排除受保护路径
+                logger.info("使用 manifest 模式进行更新")
+                remove_list = _compute_delete_list(current_dir, manifest)
+                copy_list = _compute_copy_list(manifest)
+                remove_list, protected_list = (
+                    _protect_installed_updater_when_package_lacks_it(
+                        temp_dir,
+                        remove_list,
+                        protected_list,
+                    )
+                )
+                package_type = "manifest"
+
+            new_version = _safe_status_version(manifest.get("version"))
+            copy_hashes = _compute_copy_hashes(temp_dir, copy_list, manifest)
+            plan_path = _generate_plan_json(
+                temp_dir,
+                package_type,
+                remove_list,
+                copy_list,
+                protected_list,
+                copy_hashes,
+            )
         else:
             # 回退模式：兼容无 manifest 的旧版更新包
             logger.info("使用回退模式进行全量更新")
-            script_content = _generate_update_script_fallback(current_dir, temp_dir)
-            encoding = "utf-8-sig"  # 回退模式需要 UTF-8 以支持中文文件名
+            remove_list = _compute_fallback_remove_list(current_dir)
+            # 回退模式下，复制 temp_dir 中的所有文件
+            copy_list = [
+                str(p.relative_to(temp_dir).as_posix())
+                for p in temp_dir.rglob("*")
+                if p.is_file() and p.name != "_plan.json"
+            ]
+            protected_list = ["config.json", ".env"]
+            new_version = "unknown"
+            copy_hashes = _compute_copy_hashes(temp_dir, copy_list)
+            plan_path = _generate_plan_json(
+                temp_dir,
+                "fallback",
+                remove_list,
+                copy_list,
+                protected_list,
+                copy_hashes,
+            )
 
-        # 创建更新脚本
-        updater_script = current_dir / "_updater.bat"
-        updater_script.write_text(script_content, encoding=encoding, errors="replace")
+        # 独立更新器固定放在 _internal，避免用户在安装根目录误启动。
+        packaged_updater = temp_dir / UPDATER_RELATIVE_PATH
+        installed_updater = current_dir / UPDATER_RELATIVE_PATH
+        updater_exe = (
+            packaged_updater if packaged_updater.is_file() else installed_updater
+        )
+        if not updater_exe.is_file():
+            logger.error(f"未找到更新器: {updater_exe}")
+            return False
 
-        logger.info("启动更新脚本并退出程序")
-        subprocess.Popen(
-            ["cmd.exe", "/c", str(updater_script)],
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
+        # 构造命令行参数
+        main_exe = current_dir / "endfield-essence-recognizer.exe"
+        success_file, failure_file = _build_status_file_paths(
+            current_dir,
+            old_version,
+            new_version,
         )
 
-        # 延迟退出，确保响应返回给前端
-        import threading
+        args = [
+            str(updater_exe),
+            str(subprocess.os.getpid()),  # ParentPid
+            str(current_dir),  # RootDir
+            str(temp_dir),  # ExtractDir
+            str(zip_path),  # PackagePath
+            str(success_file),  # SuccessStatusFile
+            str(failure_file),  # FailureStatusFile
+            str(main_exe),  # RelaunchExecutable
+            str(plan_path),  # PlanFile
+        ]
 
+        logger.info(f"启动更新器: {updater_exe}")
+        logger.info(f"参数: RootDir={current_dir}, PlanFile={plan_path}")
+
+        subprocess.Popen(
+            args,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+        )
+        updater_started = True
+
+        # 延迟退出，确保响应返回给前端
         def delayed_exit() -> None:
+            """稍后强制退出当前进程，让独立 updater 接管文件替换。"""
             import os
             import time
 
@@ -642,3 +1075,10 @@ def install_update(zip_path: Path) -> bool:
     except Exception as exc:
         logger.error(f"安装更新失败: {exc}")
         return False
+    finally:
+        if not updater_started:
+            _cleanup_failed_install_artifacts(
+                temp_dir=temp_dir,
+                plan_path=plan_path,
+                package_path=zip_path,
+            )
