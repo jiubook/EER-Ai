@@ -1,4 +1,12 @@
-"""镜像源管理"""
+"""镜像源管理。"""
+
+from __future__ import annotations
+
+from endfield_essence_recognizer.updater.sources import (
+    GITHUB_FLOW,
+    MIRROR_CHYAN_FLOW,
+    YITULIU_FLOW,
+)
 
 MIRRORS = {
     "github": "https://github.com/{repo}/releases/download/{tag}/{file}",
@@ -17,9 +25,8 @@ MIRRORS = {
     "fastgit": "https://download.fastgit.org/{repo}/releases/download/{tag}/{file}",
 }
 
-MIRROR_NAMES = {
+GITHUB_MIRROR_NAMES = {
     "github": "GitHub 官方",
-    "cn": "一图流 API (CN 镜像)",
     "ghproxy": "GHProxy 官方镜像",
     "ghproxy_net": "GHProxy 镜像（net）",
     "ghproxy_homeboy": "GHProxy 镜像（homeboy）",
@@ -29,6 +36,13 @@ MIRROR_NAMES = {
     "ghfast": "ghfast.top 镜像",
     "gh_api": "Cloudflare Worker 镜像",
     "fastgit": "FastGit 镜像（部分可用）",
+}
+
+MIRROR_NAMES = {
+    YITULIU_FLOW: "一图流 API (CN 镜像)",
+    MIRROR_CHYAN_FLOW: "Mirror 酱",
+    GITHUB_FLOW: "GitHub Release",
+    **GITHUB_MIRROR_NAMES,
 }
 
 
