@@ -647,7 +647,7 @@ fn copy_file_to_unique_temp(source: &Path, target: &Path) -> io::Result<PathBuf>
 fn compute_sha256_hex(path: &Path) -> io::Result<String> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
+    let mut buffer = vec![0u8; 8192];
     loop {
         let read = file.read(&mut buffer)?;
         if read == 0 {
