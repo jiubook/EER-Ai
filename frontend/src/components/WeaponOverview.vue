@@ -712,16 +712,7 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   position: absolute;
   inset: -3px;
   border-radius: 8px;
-  background: linear-gradient(
-    45deg,
-    #ff0000,
-    #ff7f00,
-    #ffff00,
-    #00ff00,
-    #0000ff,
-    #4b0082,
-    #9400d3
-  );
+  background: linear-gradient(45deg, #FFF, #ff4ada, #ff4e4e, #ff9832, #ff0, #0f0, #00ffff, #79a0fd, #d46eff, #ff8df0, #FFF);
   background-size: 400% 400%;
   animation: rainbow-rotate 3s linear infinite;
   z-index: -1;

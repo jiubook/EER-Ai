@@ -251,7 +251,11 @@ async def get_batch_farming_recommendations(
     results: list[BatchFarmingItemResult] = []
     for item in request.items:
         weapon = static_data.get_weapon(item.weapon_id)
-        if not weapon:
+        if weapon:
+            weapon_name = weapon.name
+        elif item.weapon_id.startswith("custom_stat_"):
+            weapon_name = item.weapon_id
+        else:
             results.append(
                 BatchFarmingItemResult(
                     weapon_id=item.weapon_id,
@@ -263,7 +267,7 @@ async def get_batch_farming_recommendations(
         try:
             recommendation = compute_farming_recommendation(
                 weapon_id=item.weapon_id,
-                weapon_name=weapon.name,
+                weapon_name=weapon_name,
                 current_levels=item.current_levels,
                 target_levels=item.target_levels,
             )

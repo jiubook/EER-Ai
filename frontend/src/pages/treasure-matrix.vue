@@ -357,9 +357,10 @@
           >
             <v-card-item>
               <template #prepend>
-                <item-icon class="weapon-icon-small" :item-id="rec.weapon_id" />
+                <custom-stat-icon v-if="isCustomEntry(rec.weapon_id)" hide-name :name="getCustomStatName(rec.weapon_id)" small />
+                <item-icon v-else class="weapon-icon-small" :item-id="rec.weapon_id" />
               </template>
-              <v-card-title>{{ rec.weapon_name }}</v-card-title>
+              <v-card-title>{{ isCustomEntry(rec.weapon_id) ? getCustomStatName(rec.weapon_id) : rec.weapon_name }}</v-card-title>
               <v-card-subtitle>
                 当前: +{{ rec.current_levels[0] }} / +{{ rec.current_levels[1] }} / +{{ rec.current_levels[2] }}
                 → 目标: +{{ rec.target_levels[0] }} / +{{ rec.target_levels[1] }} / +{{ rec.target_levels[2] }}
@@ -630,6 +631,12 @@ const computing = ref(false)
 /** 判断是否为自定义基质条目（weapon_id 以 custom_stat_ 开头） */
 function isCustomEntry(weaponId: string): boolean {
   return weaponId.startsWith('custom_stat_')
+}
+
+/** 获取自定义基质的显示名称 */
+function getCustomStatName(weaponId: string): string {
+  const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+  return customStats.value[index]?.name || `自定义基质 ${index + 1}`
 }
 
 /** 自定义宝藏基质属性配置列表，用于读取自定义条目的属性名 */
@@ -1075,6 +1082,9 @@ async function computeAll() {
       .filter((entry) => {
         // 必须勾选了"参与计算"
         if (entry.include_in_calculation === false) return false
+
+        // 自定义基质始终参与计算
+        if (isCustomEntry(entry.weapon_id)) return true
 
         // 必须在选中的稀有度范围内
         const weapon = weaponsMap.value.get(entry.weapon_id)

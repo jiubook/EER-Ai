@@ -66,21 +66,19 @@
                                 'weapon-matched': selectedWeaponForLocation === weaponId
                               }"
                             >
-                              <template v-if="isCustomStatId(weaponId)">
-                                <custom-stat-icon :name="getCustomStatDisplayName(weaponId)" small />
-                              </template>
+                              <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
                               <template v-else>
                                 <item-icon :item-id="weaponId" show-item-name />
-                                <v-chip
-                                  v-if="isWeaponObtained(weaponId)"
-                                  class="obtained-badge"
-                                  color="success"
-                                  size="x-small"
-                                  variant="flat"
-                                >
-                                  已获得
-                                </v-chip>
                               </template>
+                              <v-chip
+                                v-if="isWeaponObtained(weaponId)"
+                                class="obtained-badge"
+                                color="success"
+                                size="x-small"
+                                variant="flat"
+                              >
+                                已获得
+                              </v-chip>
                             </div>
                           </div>
                         </div>
@@ -189,18 +187,16 @@
                                   }"
                                 >
                                   <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
-                                  <template v-else>
-                                    <item-icon :item-id="weaponId" show-item-name />
-                                    <v-chip
-                                      v-if="isWeaponObtained(weaponId)"
-                                      class="obtained-badge"
-                                      color="success"
-                                      size="x-small"
-                                      variant="flat"
-                                    >
-                                      已获得
-                                    </v-chip>
-                                  </template>
+                                  <item-icon v-else :item-id="weaponId" show-item-name />
+                                  <v-chip
+                                    v-if="isWeaponObtained(weaponId)"
+                                    class="obtained-badge"
+                                    color="success"
+                                    size="x-small"
+                                    variant="flat"
+                                  >
+                                    已获得
+                                  </v-chip>
                                 </div>
                               </div>
                             </div>

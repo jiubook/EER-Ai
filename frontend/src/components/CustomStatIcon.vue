@@ -48,11 +48,7 @@ watch([() => props.name, nameRef], () => {
   border-bottom-right-radius: 0;
   border: 2px solid rgba(255, 113, 0, 0.5);
   border-bottom: none;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 113, 0, 0.15),
-    rgba(255, 113, 0, 0.05)
-  );
+  background: linear-gradient(135deg, #ffd7b8, #ffffff);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
   display: flex;
   align-items: center;
