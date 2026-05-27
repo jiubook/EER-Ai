@@ -95,9 +95,7 @@
               <div class="matrix-card-body">
                 <section class="weapon-identity">
                   <div class="weapon-icon-wrap" :class="getWeaponTierClass(entry.weapon_id)">
-                    <div v-if="isCustomEntry(entry.weapon_id)" class="custom-entry-icon">
-                      <v-icon color="#ff5a36" size="28">mdi-diamond-stone</v-icon>
-                    </div>
+                    <custom-stat-icon v-if="isCustomEntry(entry.weapon_id)" hide-name :name="entry.weapon_name || entry.weapon_id" small />
                     <item-icon v-else class="weapon-icon-small" :item-id="entry.weapon_id" />
                     <span class="weapon-tier">{{ getWeaponRarityText(entry.weapon_id) }}</span>
                   </div>
@@ -558,10 +556,7 @@
                 class="weapon-item"
                 @click="onAddCustomStat(entry.index)"
               >
-                <div class="custom-entry-icon">
-                  <v-icon color="#ff5a36" size="28">mdi-diamond-stone</v-icon>
-                </div>
-                <div class="text-caption text-center mt-1">{{ entry.displayName }}</div>
+                <custom-stat-icon :name="entry.displayName" />
               </div>
             </div>
           </template>
@@ -602,6 +597,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import BackToTop from '@/components/BackToTop.vue'
+import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
@@ -1219,20 +1215,6 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
     }
 
     /* 自定义基质条目图标样式 */
-    .custom-entry-icon {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 8px;
-      background: linear-gradient(
-        135deg,
-        rgba(255, 90, 54, 0.08),
-        rgba(255, 90, 54, 0.02)
-      );
-    }
-
     .weapon-icon-wrap.tier-6 {
       border-color: #ff5a36;
       box-shadow: 0 4px 14px rgba(255, 90, 54, 0.28);

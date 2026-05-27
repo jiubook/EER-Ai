@@ -85,12 +85,7 @@
                 'weapon-maxed': isWeaponMaxed(entry.syntheticId),
               }"
             >
-              <div class="custom-matrix-icon">
-                <v-icon color="#ff5a36" size="28">mdi-diamond-stone</v-icon>
-              </div>
-              <div class="item-name-container">
-                <span class="item-name">{{ entry.displayName }}</span>
-              </div>
+              <custom-stat-icon :name="entry.displayName" />
 
               <!-- 满级的彩虹边框 -->
               <div v-if="isWeaponMaxed(entry.syntheticId)" class="rainbow-border" />
@@ -151,9 +146,7 @@
     <v-card v-if="detailWeaponId">
       <v-card-item>
         <template #prepend>
-          <div v-if="isCustomEntry(detailWeaponId)" class="custom-dialog-icon">
-            <v-icon color="#ff5a36" size="36">mdi-diamond-stone</v-icon>
-          </div>
+          <custom-stat-icon v-if="isCustomEntry(detailWeaponId)" hide-name :name="customEntryName || detailWeaponId" />
           <item-icon v-else class="weapon-icon-detail" :item-id="detailWeaponId" />
         </template>
         <v-card-title>
@@ -263,6 +256,7 @@
 
 <script lang="ts" setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
@@ -712,57 +706,6 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   width: 2rem !important;
   height: 2rem !important;
   flex-shrink: 0;
-}
-
-/* 自定义基质图标样式 */
-.custom-matrix-icon {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 90, 54, 0.08),
-    rgba(255, 90, 54, 0.02)
-  );
-  border: 1px solid rgba(255, 90, 54, 0.25);
-}
-
-/* 自定义基质名称容器（复用 ItemIcon 的布局模式） */
-.item-name-container {
-  position: absolute;
-  bottom: 4%;
-  width: 100%;
-  pointer-events: none;
-  text-align: center;
-  line-height: 1;
-}
-
-.item-name {
-  display: inline-block;
-  font-weight: 500;
-  font-size: 0.6rem;
-  text-shadow: 0 0 4px rgb(var(--v-theme-surface));
-  -webkit-text-stroke: 1px rgb(var(--v-theme-surface));
-  paint-order: stroke fill;
-}
-
-/* 自定义基质弹窗图标样式 */
-.custom-dialog-icon {
-  width: 3rem;
-  height: 3rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 90, 54, 0.08),
-    rgba(255, 90, 54, 0.02)
-  );
-  border: 1px solid rgba(255, 90, 54, 0.25);
 }
 
 .rainbow-border {

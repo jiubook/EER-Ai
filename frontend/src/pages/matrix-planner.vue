@@ -66,16 +66,21 @@
                                 'weapon-matched': selectedWeaponForLocation === weaponId
                               }"
                             >
-                              <item-icon :item-id="weaponId" show-item-name />
-                              <v-chip
-                                v-if="isWeaponObtained(weaponId)"
-                                class="obtained-badge"
-                                color="success"
-                                size="x-small"
-                                variant="flat"
-                              >
-                                已获得
-                              </v-chip>
+                              <template v-if="isCustomStatId(weaponId)">
+                                <custom-stat-icon :name="getCustomStatDisplayName(weaponId)" small />
+                              </template>
+                              <template v-else>
+                                <item-icon :item-id="weaponId" show-item-name />
+                                <v-chip
+                                  v-if="isWeaponObtained(weaponId)"
+                                  class="obtained-badge"
+                                  color="success"
+                                  size="x-small"
+                                  variant="flat"
+                                >
+                                  已获得
+                                </v-chip>
+                              </template>
                             </div>
                           </div>
                         </div>
@@ -183,14 +188,7 @@
                                     'weapon-obtained': isWeaponObtained(weaponId)
                                   }"
                                 >
-                                  <template v-if="isCustomStatId(weaponId)">
-                                    <div class="custom-entry-icon-small">
-                                      <v-icon color="#ff5a36" size="24">mdi-diamond-stone</v-icon>
-                                    </div>
-                                    <div class="text-caption text-center mt-1" style="max-width: 4rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                      {{ getCustomStatDisplayName(weaponId) }}
-                                    </div>
-                                  </template>
+                                  <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
                                   <template v-else>
                                     <item-icon :item-id="weaponId" show-item-name />
                                     <v-chip
@@ -428,8 +426,8 @@
                 prepend-inner-icon="mdi-magnify"
                 variant="outlined"
               />
-              <!-- 自定义基质区段（仅预刻券模式显示） -->
-              <template v-if="!noPrecraftMode && selectedRarities.includes('custom') && customMatrixEntries.length > 0">
+              <!-- 自定义基质区段 -->
+              <template v-if="selectedRarities.includes('custom') && customMatrixEntries.length > 0">
                 <div class="d-flex align-center mb-2 mt-4">
                   <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
                   <h4>自定义基质</h4>
@@ -440,18 +438,15 @@
                     :key="entry.syntheticId"
                     class="weapon-item"
                     :class="{
-                      'weapon-selected': isWeaponSelected(entry.syntheticId),
+                      'weapon-selected': noPrecraftMode ? (selectedWeaponForLocation === entry.syntheticId) : isWeaponSelected(entry.syntheticId),
                       'weapon-obtained': isWeaponObtained(entry.syntheticId),
                       'weapon-matched': isWeaponMatchedInPlans(entry.syntheticId),
                     }"
                     @click="handleCustomStatClick(entry)"
                   >
-                    <div class="custom-entry-icon">
-                      <v-icon color="#ff5a36" size="28">mdi-diamond-stone</v-icon>
-                    </div>
-                    <div class="text-caption text-center mt-1">{{ entry.displayName }}</div>
+                    <custom-stat-icon :name="entry.displayName" />
                     <div
-                      v-if="isWeaponSelected(entry.syntheticId)"
+                      v-if="noPrecraftMode ? (selectedWeaponForLocation === entry.syntheticId) : isWeaponSelected(entry.syntheticId)"
                       class="weapon-selected-overlay"
                     >
                       <v-icon color="white" size="small">mdi-check-circle</v-icon>
@@ -520,6 +515,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import BackToTop from '@/components/BackToTop.vue'
+import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type BattleChoice, getDisplayName, useMatrixPlanner } from '@/composables/useMatrixPlanner'
 import { useProfiles } from '@/composables/useProfiles'
@@ -577,6 +573,15 @@ const customMatrixEntries = computed(() => {
 
 /** 处理自定义基质条目点击，添加/移除需求词条 */
 function handleCustomStatClick(entry: { syntheticId: string; index: number }) {
+  if (noPrecraftMode.value) {
+    // 不使用预刻券模式：选中/取消选中以筛选地点
+    if (selectedWeaponForLocation.value === entry.syntheticId) {
+      selectedWeaponForLocation.value = null
+    } else {
+      selectedWeaponForLocation.value = entry.syntheticId
+    }
+    return
+  }
   const stat = customStats.value[entry.index]
   if (!stat) return
   const attribute = getStatDisplayName(stat.attribute)
@@ -638,6 +643,16 @@ const allLocationChoices = computed<LocationChoice[]>(() => {
 
       if (secondaryMatch && skillMatch) {
         matchedWeaponIds.push(weaponId)
+      }
+    }
+
+    // 检查自定义基质是否匹配该地点
+    for (const [index, stat] of customStats.value.entries()) {
+      if (!stat.secondary || !stat.skill) continue
+      const secondary = getStatDisplayName(stat.secondary)
+      const skill = getStatDisplayName(stat.skill)
+      if (alluvium.secondaryStats.includes(secondary) && alluvium.skillStats.includes(skill)) {
+        matchedWeaponIds.push(`custom_stat_${index}`)
       }
     }
 
@@ -951,37 +966,6 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   gap: calc($weapon-icon-size / 10);
 }
 
-/* 自定义基质条目图标样式 */
-.custom-entry-icon {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 90, 54, 0.08),
-    rgba(255, 90, 54, 0.02)
-  );
-  border: 1px solid rgba(255, 90, 54, 0.25);
-}
-
-.custom-entry-icon-small {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 90, 54, 0.08),
-    rgba(255, 90, 54, 0.02)
-  );
-  border: 1px solid rgba(255, 90, 54, 0.25);
-}
-
 .weapon-item {
   width: $weapon-icon-size;
   height: $weapon-icon-size;
@@ -1087,6 +1071,7 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   background: rgba(0, 0, 0, 0.45);
   border-radius: 6px;
   pointer-events: none;
+  z-index: 2;
 }
 
 // 方案更新时的高亮脉冲
