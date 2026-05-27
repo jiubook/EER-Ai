@@ -183,16 +183,26 @@
                                     'weapon-obtained': isWeaponObtained(weaponId)
                                   }"
                                 >
-                                  <item-icon :item-id="weaponId" show-item-name />
-                                  <v-chip
-                                    v-if="isWeaponObtained(weaponId)"
-                                    class="obtained-badge"
-                                    color="success"
-                                    size="x-small"
-                                    variant="flat"
-                                  >
-                                    已获得
-                                  </v-chip>
+                                  <template v-if="isCustomStatId(weaponId)">
+                                    <div class="custom-entry-icon-small">
+                                      <v-icon color="#ff5a36" size="24">mdi-diamond-stone</v-icon>
+                                    </div>
+                                    <div class="text-caption text-center mt-1" style="max-width: 4rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                      {{ getCustomStatDisplayName(weaponId) }}
+                                    </div>
+                                  </template>
+                                  <template v-else>
+                                    <item-icon :item-id="weaponId" show-item-name />
+                                    <v-chip
+                                      v-if="isWeaponObtained(weaponId)"
+                                      class="obtained-badge"
+                                      color="success"
+                                      size="x-small"
+                                      variant="flat"
+                                    >
+                                      已获得
+                                    </v-chip>
+                                  </template>
                                 </div>
                               </div>
                             </div>
@@ -768,6 +778,17 @@ function getRequirementTooltip(index: number): string {
   return parts.join('、') || '未设置'
 }
 
+function isCustomStatId(id: string): boolean {
+  return id.startsWith('custom_stat_')
+}
+
+function getCustomStatDisplayName(id: string): string {
+  const match = id.match(/^custom_stat_(\d+)$/)
+  if (!match) return id
+  const index = Number.parseInt(match[1]!, 10)
+  return customStats.value[index]?.name || `自定义基质 ${index + 1}`
+}
+
 function sortedWeaponIds(weaponIds: string[]): string[] {
   return weaponIds.toSorted((a, b) => {
     const wa = weaponsMap.value.get(a)
@@ -932,6 +953,21 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
 
 /* 自定义基质条目图标样式 */
 .custom-entry-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 90, 54, 0.08),
+    rgba(255, 90, 54, 0.02)
+  );
+  border: 1px solid rgba(255, 90, 54, 0.25);
+}
+
+.custom-entry-icon-small {
   width: 100%;
   height: 100%;
   display: flex;

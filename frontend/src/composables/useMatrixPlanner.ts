@@ -390,7 +390,7 @@ export function useMatrixPlanner() {
       // 识别自定义基质预设的合成 ID
       const customMatch = stat.weaponId.match(/^custom_stat_(\d+)$/)
       if (customMatch) {
-        const index = parseInt(customMatch[1]!, 10)
+        const index = Number.parseInt(customMatch[1]!, 10)
         const name = _customStatNames.value[index]
         return name || `自定义基质 ${index + 1}`
       }
@@ -398,6 +398,23 @@ export function useMatrixPlanner() {
       return weapon ? weapon.name : stat.weaponId
     }
     return '未知'
+  }
+
+  /** 将匹配的自定义基质合成 ID 追加到 matchedWeaponIds 中 */
+  function _appendCustomStatMatches(
+    matchedWeaponIds: string[],
+    selectedAttribute: string[],
+    selectedSecondary: string | null,
+    selectedSkill: string | null,
+    battleSecondaryStats: string[],
+    battleSkillStats: string[],
+  ) {
+    for (const stat of requiredEssenceStats.value) {
+      if (!stat.weaponId || !stat.weaponId.startsWith('custom_stat_')) continue
+      if (requirementMatchesBattle(stat, selectedAttribute, selectedSecondary, selectedSkill, battleSecondaryStats, battleSkillStats)) {
+        matchedWeaponIds.push(stat.weaponId)
+      }
+    }
   }
 
   function buildChoiceForSecondary(
@@ -422,6 +439,7 @@ export function useMatrixPlanner() {
       selectedSecondary,
       null,
     )
+    _appendCustomStatMatches(matchedWeaponIds, selectedAttribute, selectedSecondary, null, [], battleSkillStats)
     return { battleId, battleName, selectedAttribute, selectedSecondary, selectedSkill: null, matchedSelectedIndices, matchedWeaponIds }
   }
 
@@ -447,6 +465,7 @@ export function useMatrixPlanner() {
       null,
       selectedSkill,
     )
+    _appendCustomStatMatches(matchedWeaponIds, selectedAttribute, null, selectedSkill, battleSecondaryStats, [])
     return { battleId, battleName, selectedAttribute, selectedSecondary: null, selectedSkill, matchedSelectedIndices, matchedWeaponIds }
   }
 
