@@ -189,6 +189,9 @@ function getStatDisplayName(statId: string | null): string {
   return getGemTagName(statId)
 }
 
+/** 自定义基质名称缓存，由页面层注入 */
+const _customStatNames = ref<string[]>([])
+
 function clearAllStats(requiredEssenceStats: Ref<PlannerEssenceStat[]>, lastSelectedWeaponId: Ref<string | null>) {
   requiredEssenceStats.value = []
   lastSelectedWeaponId.value = null
@@ -384,6 +387,13 @@ export function useMatrixPlanner() {
   function getEssenceStatDescription(stat: PlannerEssenceStat): string {
     if (stat.isCustom) return '自定义'
     if (stat.weaponId) {
+      // 识别自定义基质预设的合成 ID
+      const customMatch = stat.weaponId.match(/^custom_stat_(\d+)$/)
+      if (customMatch) {
+        const index = parseInt(customMatch[1]!, 10)
+        const name = _customStatNames.value[index]
+        return name || `自定义基质 ${index + 1}`
+      }
       const weapon = weaponsMap.value.get(stat.weaponId)
       return weapon ? weapon.name : stat.weaponId
     }
@@ -525,5 +535,6 @@ export function useMatrixPlanner() {
     bestChoices,
     allChoices,
     clearAllStats: () => clearAllStats(requiredEssenceStats, lastSelectedWeaponId),
+    updateCustomStatNames: (names: string[]) => { _customStatNames.value = names },
   }
 }

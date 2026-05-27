@@ -536,6 +536,7 @@ const {
   getStatDisplayName,
   bestChoices,
   clearAllStats,
+  updateCustomStatNames,
 } = useMatrixPlanner()
 
 // --- 自定义基质相关 ---
@@ -549,6 +550,7 @@ async function fetchCustomStats() {
     const res = await fetch('/api/config')
     const config = await res.json()
     customStats.value = config.treasure_essence_stats || []
+    updateCustomStatNames(customStats.value.map(s => s.name))
   } catch (error) {
     console.error('获取自定义宝藏基质配置失败:', error)
   }
