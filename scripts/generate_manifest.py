@@ -26,9 +26,6 @@ PROTECTED_PATHS: list[str] = [
     "profiles.json",
     "logs/",
     "screenshots/",
-    "_updates/",
-    "_update_temp/",
-    "_updater.bat",
     ".env",
 ]
 
@@ -126,9 +123,16 @@ def generate_manifest(
         files.append(MANIFEST_RELATIVE_PATH)
         files.sort()
 
+    file_hashes = {
+        file_path: compute_file_sha256(dist_dir / file_path)
+        for file_path in files
+        if file_path != MANIFEST_RELATIVE_PATH and (dist_dir / file_path).is_file()
+    }
+
     return {
         "version": version,
         "files": files,
+        "file_hashes": file_hashes,
         "protected": sorted(protected_paths),
     }
 

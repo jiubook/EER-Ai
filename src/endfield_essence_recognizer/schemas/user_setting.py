@@ -3,7 +3,15 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from endfield_essence_recognizer.updater.mirrors import MIRRORS
+from endfield_essence_recognizer.updater.sources import (
+    DEFAULT_UPDATE_FLOW,
+    LEGACY_FLOW_ALIASES,
+    YITULIU_FLOW,
+    normalize_update_flow,
+)
 
 
 class Action(StrEnum):
@@ -37,7 +45,7 @@ class EssenceStats(BaseModel):
 
 
 class UserSetting(BaseModel):
-    _VERSION: ClassVar[int] = 4
+    _VERSION: ClassVar[int] = 5
 
     version: int = _VERSION
 
@@ -63,9 +71,55 @@ class UserSetting(BaseModel):
     """扫描时是否自动翻页"""
 
     update_mirror: str = "github"
-    """更新镜像源：github, ghproxy, fastgit"""
+    """兼容旧字段：GitHub 下载镜像源。"""
+    update_flow: str = DEFAULT_UPDATE_FLOW
+    """更新流程：cn_yituliu, cn_mirrorchyan, github。"""
+    update_github_mirror: str = "github"
+    """GitHub 流程下载镜像源：github, ghproxy, fastgit 等。"""
     update_proxy: str = ""
     """更新代理地址，如 http://127.0.0.1:7890"""
+    update_mirrorchyan_res_id: str = ""
+    """Mirror 酱资源 ID，由 Mirror 酱后台分配。"""
+    update_mirrorchyan_cdk: str = ""
+    """Mirror 酱 CDK；日志中不得输出明文。"""
+    update_mirrorchyan_user_agent: str = "EER_APP"
+    """Mirror 酱来源统计标识。"""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_update_fields(cls, data: Any) -> Any:
+        """在 v5 内兼容旧更新源字段，不提升配置版本。"""
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        legacy_mirror = str(normalized.get("update_mirror") or "")
+
+        if "update_flow" not in normalized:
+            if legacy_mirror in LEGACY_FLOW_ALIASES:
+                normalized["update_flow"] = LEGACY_FLOW_ALIASES[legacy_mirror]
+            else:
+                normalized["update_flow"] = DEFAULT_UPDATE_FLOW
+        else:
+            normalized["update_flow"] = normalize_update_flow(
+                str(normalized.get("update_flow") or "")
+            )
+
+        if "update_github_mirror" not in normalized:
+            normalized["update_github_mirror"] = (
+                legacy_mirror if legacy_mirror in MIRRORS else "github"
+            )
+
+        # 旧 cn 值自动替换为新流程字段；update_mirror 保持 GitHub 镜像语义。
+        if normalized.get("update_mirror") in {YITULIU_FLOW, "cn"}:
+            normalized["update_mirror"] = normalized["update_github_mirror"]
+
+        if normalized.get("update_github_mirror") not in MIRRORS:
+            normalized["update_github_mirror"] = "github"
+        if normalized.get("update_mirror") not in MIRRORS:
+            normalized["update_mirror"] = normalized["update_github_mirror"]
+
+        return normalized
 
     @staticmethod
     def _migrate_v2_to_v3(data: dict) -> None:
@@ -79,11 +133,30 @@ class UserSetting(BaseModel):
         data.setdefault("update_mirror", "github")
         data.setdefault("update_proxy", "")
 
+    @staticmethod
+    def _migrate_v4_to_v5(data: dict) -> None:
+        """v4 → v5: 添加 Mirror 酱配置字段。"""
+        data.setdefault("update_mirrorchyan_res_id", "")
+        data.setdefault("update_mirrorchyan_cdk", "")
+        data.setdefault("update_mirrorchyan_user_agent", "EER_APP")
+        legacy_mirror = data.get("update_mirror")
+        if legacy_mirror == "cn":
+            data["update_flow"] = YITULIU_FLOW
+            data["update_mirror"] = "github"
+            data.setdefault("update_github_mirror", "github")
+        elif legacy_mirror in MIRRORS:
+            data.setdefault("update_flow", DEFAULT_UPDATE_FLOW)
+            data.setdefault("update_github_mirror", legacy_mirror)
+        else:
+            data.setdefault("update_flow", DEFAULT_UPDATE_FLOW)
+            data.setdefault("update_github_mirror", "github")
+
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）
     _MIGRATIONS: ClassVar[dict[int, Any]] = {
         2: _migrate_v2_to_v3.__func__,
         3: _migrate_v3_to_v4.__func__,
+        4: _migrate_v4_to_v5.__func__,
     }
 
     @classmethod

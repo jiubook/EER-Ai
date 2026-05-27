@@ -68,8 +68,8 @@ function scheduleStartupUpdateCheck() {
     void checkForUpdates(false, { silent: true, timeoutMs: 2500 })
   }
 
-  // 等首屏渲染和必要数据请求先开始，避免启动时更新检查抢占交互体验。
-  window.requestAnimationFrame(() => {
+  // 页面加载完成后再等待浏览器空闲，尽量降低后台检查对启动体验的影响。
+  const runWhenIdle = () => {
     const requestIdleCallback = (
       window as Window & {
         requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number
@@ -81,7 +81,14 @@ function scheduleStartupUpdateCheck() {
     } else {
       window.setTimeout(runCheck, 1500)
     }
-  })
+  }
+
+  // 等页面资源完整加载后再做后台检查，避免启动阶段抢占交互体验。
+  if (document.readyState === 'complete') {
+    window.requestAnimationFrame(runWhenIdle)
+  } else {
+    window.addEventListener('load', () => window.requestAnimationFrame(runWhenIdle), { once: true })
+  }
 }
 
 onMounted(() => {

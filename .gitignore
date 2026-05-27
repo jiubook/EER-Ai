@@ -11,6 +11,8 @@ target/
 
 # Virtual environments
 .venv
+.tmp/
+.uv-cache/
 
 # logs
 logs/
@@ -22,6 +24,7 @@ screenshots/
 config.json
 .env
 profiles.json
+version.json
 
 # enfield data table config
 src/endfield_essence_recognizer/data/endfielddata/TableCfg/**.json

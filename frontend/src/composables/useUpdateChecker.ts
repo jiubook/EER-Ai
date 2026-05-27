@@ -3,6 +3,9 @@ import { ref, watch } from 'vue'
 export interface UpdateInfo {
   latestVersion: string
   downloadUrl: string
+  packageType?: string
+  size?: number | null
+  fullSize?: number | null
 }
 
 export interface CheckForUpdatesOptions {
@@ -27,6 +30,7 @@ const downloadSpeed = ref<number>(0)
 const downloadedSize = ref<number>(0)
 const totalSize = ref<number>(0)
 const totalKnown = ref<boolean>(false)
+const selectedFlow = ref<string>('cn_yituliu')
 const selectedMirror = ref<string>('github')
 const proxyEnabled = ref<boolean>(false)
 const proxyPort = ref<string>('7890')
@@ -112,13 +116,13 @@ export function useUpdateChecker() {
       currentVersion.value = await versionResponse.json()
 
       if (result.has_update && result.update_info) {
+        selectedFlow.value = result.update_info.source || selectedFlow.value
         updateInfo.value = {
           latestVersion: result.update_info.version,
           downloadUrl: result.update_info.download_url,
-        }
-        // 如果 API 返回了 CN 镜像，默认使用 CN 镜像
-        if (result.update_info.mirrors?.cn?.downloadUrl) {
-          selectedMirror.value = 'cn'
+          packageType: result.update_info.package_type,
+          size: result.update_info.size,
+          fullSize: result.update_info.full_size,
         }
         hasNewVersionDialog.value = true
       } else if (showIfLatest) {
@@ -230,6 +234,7 @@ export function useUpdateChecker() {
       const proxyUrl = proxyEnabled.value ? `http://127.0.0.1:${proxyPort.value}` : ''
       const currentConfigRes = await fetch('/api/config')
       const currentConfig = await currentConfigRes.json()
+      currentConfig.update_github_mirror = selectedMirror.value
       currentConfig.update_mirror = selectedMirror.value
       currentConfig.update_proxy = proxyUrl
       await fetch('/api/config', {
@@ -295,6 +300,7 @@ export function useUpdateChecker() {
     downloadedSize,
     totalSize,
     totalKnown,
+    selectedFlow,
     selectedMirror,
     proxyEnabled,
     proxyPort,
