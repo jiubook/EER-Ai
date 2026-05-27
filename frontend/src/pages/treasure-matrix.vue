@@ -349,6 +349,36 @@
             请先添加武器到宝藏基质配置，然后点击「计算所有武器的刷取建议」。
           </v-alert>
 
+          <!-- 星级筛选 & 排序切换 -->
+          <div v-if="recommendations.length > 0" class="d-flex align-center flex-wrap gap-2 mb-4">
+            <span class="text-body-2 text-medium-emphasis">显示星级：</span>
+            <v-chip-group v-model="recSelectedRarities" column multiple>
+              <v-chip color="primary" filter size="small" value="custom" variant="outlined">
+                自定义
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="6" variant="outlined">
+                6★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="5" variant="outlined">
+                5★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="4" variant="outlined">
+                4★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="3" variant="outlined">
+                3★
+              </v-chip>
+            </v-chip-group>
+            <v-btn
+              :prepend-icon="recSortMode === 'runs' ? 'mdi-sort-numeric-ascending' : (recSortAsc ? 'mdi-sort-ascending' : 'mdi-sort-descending')"
+              size="small"
+              variant="tonal"
+              @click="toggleRecSort"
+            >
+              {{ recSortMode === 'runs' ? '按刷取次数' : '按等级' }}
+            </v-btn>
+          </div>
+
           <v-card
             v-for="rec in sortedRecommendations"
             :key="rec.weapon_id"
@@ -732,6 +762,24 @@ const useGreaseForSteps = ref<Record<string, Record<string, boolean>>>({})
 // 排序后的推荐列表：初始排序后保持稳定，用户切换冷却脂时不重新排序
 const frozenSortOrder = ref<string[] | null>(null)
 
+// 刷取建议区域的星级筛选（独立于宝藏基质配置的筛选）
+const recSelectedRarities = ref<string[]>(['custom', '6', '5', '4', '3'])
+// 刷取建议排序模式：'runs' = 按刷取次数(默认), 'level' = 按等级
+const recSortMode = ref<'runs' | 'level'>('runs')
+// 等级排序方向：true = 升序, false = 降序
+const recSortAsc = ref(true)
+
+function toggleRecSort() {
+  if (recSortMode.value === 'runs') {
+    recSortMode.value = 'level'
+    recSortAsc.value = true
+  } else if (recSortAsc.value) {
+    recSortAsc.value = false
+  } else {
+    recSortMode.value = 'runs'
+  }
+}
+
 // 账号切换时重新加载缓存
 watch(
   activeProfileName,
@@ -810,14 +858,36 @@ watch(recommendations, (newRecommendations: Recommendation[]) => {
 }, { deep: true })
 
 const sortedRecommendations = computed(() => {
-  if (!frozenSortOrder.value) {
-    return recommendations.value
+  // 星级筛选
+  const filtered = recommendations.value.filter((rec) => {
+    if (isCustomEntry(rec.weapon_id)) {
+      return recSelectedRarities.value.includes('custom')
+    }
+    const rarity = getWeaponRarity(rec.weapon_id)
+    if (rarity === null) return false
+    return recSelectedRarities.value.includes(String(rarity))
+  })
+
+  if (recSortMode.value === 'runs') {
+    // 按刷取次数排序：使用冻结顺序或按刷取次数升序
+    if (frozenSortOrder.value) {
+      const orderMap = new Map(frozenSortOrder.value.map((id, idx) => [id, idx]))
+      return filtered.toSorted((a, b) => {
+        return (orderMap.get(a.weapon_id) ?? 0) - (orderMap.get(b.weapon_id) ?? 0)
+      })
+    }
+    return filtered.toSorted((a, b) => a.total_expected_runs - b.total_expected_runs)
   }
 
-  // 使用冻结的顺序
-  const orderMap = new Map(frozenSortOrder.value.map((id, idx) => [id, idx]))
-  return [...recommendations.value].toSorted((a, b) => {
-    return (orderMap.get(a.weapon_id) ?? 0) - (orderMap.get(b.weapon_id) ?? 0)
+  // 按等级排序：自定义基质优先 → 按稀有度（6★ → 3★ 或反向）
+  return filtered.toSorted((a, b) => {
+    const aCustom = isCustomEntry(a.weapon_id) ? 1 : 0
+    const bCustom = isCustomEntry(b.weapon_id) ? 1 : 0
+    if (aCustom !== bCustom) return bCustom - aCustom
+
+    const aRarity = getWeaponRarity(a.weapon_id) ?? 0
+    const bRarity = getWeaponRarity(b.weapon_id) ?? 0
+    return recSortAsc.value ? bRarity - aRarity : aRarity - bRarity
   })
 })
 
