@@ -802,6 +802,13 @@ function getCustomStatDisplayName(id: string): string {
 
 function sortedWeaponIds(weaponIds: string[]): string[] {
   return weaponIds.toSorted((a, b) => {
+    const aObtained = isWeaponObtained(a)
+    const bObtained = isWeaponObtained(b)
+
+    // 未获得的排在前面
+    if (!aObtained && bObtained) return -1
+    if (aObtained && !bObtained) return 1
+
     const wa = weaponsMap.value.get(a)
     const wb = weaponsMap.value.get(b)
     if (wa && wb) return wb.rarity - wa.rarity

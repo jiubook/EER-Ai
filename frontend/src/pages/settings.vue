@@ -193,7 +193,7 @@
           <v-divider class="my-4" />
 
           <!-- 1-B: 额外属性匹配 -->
-          <h2>额外将以下属性的基质视为宝藏</h2>
+          <h2>自定义基质 | 额外将以下属性的基质视为宝藏</h2>
           <v-row
             v-for="(essenceStat, index) in treasureEssenceStats"
             :key="index"

@@ -5,6 +5,7 @@
  */
 
 import { computed, onUnmounted, ref, type Ref, watch } from 'vue'
+import energyAlluviumsJson from '@/assets/json/energyAlluviums.json'
 import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
@@ -61,98 +62,10 @@ export function getDisplayName(battleName: string): string {
 }
 
 // 能量淤积点数据（刷取位置）
-// 格式与 ef-frontend-v1 的 custom/core/weaponEssence.ts 保持一致，便于手动同步。
-// 更新时直接从 weaponEssence.ts 的 energyAlluviums 复制即可。
-const energyAlluviums: Record<string, EnergyAlluvium> = {
-  '重度能量淤积点·枢纽区': {
-    battleId: '重度能量淤积点·枢纽区',
-    battleName: '重度能量淤积点·枢纽区',
-    imageUrl:
-      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map01_lv001_1.webp',
-    secondaryStats: [
-      '攻击提升', '灼热伤害提升', '电磁伤害提升', '寒冷伤害提升',
-      '自然伤害提升', '源石技艺提升', '终结技充能效率提升', '法术伤害提升',
-    ],
-    skillStats: ['强攻', '压制', '追袭', '粉碎', '巧技', '迸发', '流转', '效益'],
-  },
-  '重度能量淤积点·源石研究园': {
-    battleId: '重度能量淤积点·源石研究园',
-    battleName: '重度能量淤积点·源石研究园',
-    imageUrl:
-      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map01_lv005_1.webp',
-    secondaryStats: [
-      '攻击提升', '物理伤害提升', '电磁伤害提升', '寒冷伤害提升',
-      '自然伤害提升', '暴击率提升', '终结技充能效率提升', '法术伤害提升',
-    ],
-    skillStats: ['压制', '追袭', '昂扬', '巧技', '附术', '医疗', '切骨', '效益'],
-  },
-  '重度能量淤积点·矿脉源区': {
-    battleId: '重度能量淤积点·矿脉源区',
-    battleName: '重度能量淤积点·矿脉源区',
-    imageUrl:
-      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map01_lv006_1.webp',
-    secondaryStats: [
-      '生命提升', '物理伤害提升', '灼热伤害提升', '寒冷伤害提升',
-      '自然伤害提升', '暴击率提升', '源石技艺提升', '治疗效率提升',
-    ],
-    skillStats: ['强攻', '压制', '巧技', '残暴', '附术', '迸发', '夜幕', '效益'],
-  },
-  '重度能量淤积点·供能高地': {
-    battleId: '重度能量淤积点·供能高地',
-    battleName: '重度能量淤积点·供能高地',
-    imageUrl:
-      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map01_lv007_1.webp',
-    secondaryStats: [
-      '攻击提升', '生命提升', '物理伤害提升', '灼热伤害提升',
-      '自然伤害提升', '暴击率提升', '源石技艺提升', '治疗效率提升',
-    ],
-    skillStats: ['追袭', '粉碎', '昂扬', '残暴', '附术', '医疗', '切骨', '流转'],
-  },
-  '重度能量淤积点·武陵城': {
-    battleId: '重度能量淤积点·武陵城',
-    battleName: '重度能量淤积点·武陵城',
-    imageUrl:
-      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map02_lv002_1.webp',
-    secondaryStats: [
-      '攻击提升', '生命提升', '电磁伤害提升', '寒冷伤害提升',
-      '暴击率提升', '终结技充能效率提升', '法术伤害提升', '治疗效率提升',
-    ],
-    skillStats: ['强攻', '粉碎', '残暴', '医疗', '切骨', '迸发', '夜幕', '流转'],
-  },
-  '重度能量淤积点·清波寨': {
-    battleId: '重度能量淤积点·清波寨',
-    battleName: '重度能量淤积点·清波寨',
-    imageUrl:
-      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map02_lv003_1.webp',
-    secondaryStats: [
-      '生命提升', '物理伤害提升', '电磁伤害提升', '寒冷伤害提升',
-      '源石技艺提升', '终结技充能效率提升', '法术伤害提升', '治疗效率提升',
-    ],
-    skillStats: ['压制', '粉碎', '昂扬', '巧技', '医疗', '切骨', '迸发', '夜幕'],
-  },
-  '重度能量淤积点·首墩': {
-    battleId: '重度能量淤积点·首墩',
-    battleName: '重度能量淤积点·首墩',
-    imageUrl:
-      'https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/bg_loading_map02_lv003_1.webp',
-    secondaryStats: [
-      '攻击提升', '物理伤害提升', '灼热伤害提升', '电磁伤害提升',
-      '自然伤害提升', '暴击率提升', '终结技充能效率提升', '法术伤害提升',
-    ],
-    skillStats: ['强攻', '追袭', '昂扬', '残暴', '附术', '夜幕', '流转', '效益'],
-  },
-  '重度能量淤积点·试验园区': {
-    battleId: '重度能量淤积点·试验园区',
-    battleName: '重度能量淤积点·试验园区',
-    imageUrl:
-      'https://待.更.新/',
-    secondaryStats: [
-      '生命提升', '灼热伤害提升', '电磁伤害提升', '寒冷伤害提升',
-      '自然伤害提升', '源石技艺提升', '终结技充能效率提升', '治疗效率提升',
-    ],
-    skillStats: ['压制', '粉碎', '巧技', '残暴', '附术', '切骨', '夜幕', '流转'],
-  },
-}
+// 从 energyAlluviums.json 导入，转换为以 battleName 为 key 的格式
+const energyAlluviums: Record<string, EnergyAlluvium> = Object.fromEntries(
+  Object.values(energyAlluviumsJson).map(item => [item.battleName, item as EnergyAlluvium]),
+)
 
 // 所有属性词条
 const allAttributeStats = ['敏捷提升', '力量提升', '意志提升', '智识提升', '主能力提升']
