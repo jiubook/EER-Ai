@@ -351,22 +351,22 @@
 
           <!-- 星级筛选 & 排序切换 -->
           <div v-if="recommendations.length > 0" class="d-flex align-center flex-wrap gap-2 mb-4">
-            <span class="text-body-2 text-medium-emphasis">显示星级：</span>
+            <span class="text-body-2 text-medium-emphasis">筛选：</span>
             <v-chip-group v-model="recSelectedRarities" column multiple>
-              <v-chip color="primary" filter size="small" value="custom" variant="outlined">
-                自定义
-              </v-chip>
-              <v-chip color="primary" filter size="small" value="6" variant="outlined">
-                6★
-              </v-chip>
-              <v-chip color="primary" filter size="small" value="5" variant="outlined">
-                5★
+              <v-chip color="primary" filter size="small" value="3" variant="outlined">
+                3★
               </v-chip>
               <v-chip color="primary" filter size="small" value="4" variant="outlined">
                 4★
               </v-chip>
-              <v-chip color="primary" filter size="small" value="3" variant="outlined">
-                3★
+              <v-chip color="primary" filter size="small" value="5" variant="outlined">
+                5★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="6" variant="outlined">
+                6★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="custom" variant="outlined">
+                自定义
               </v-chip>
             </v-chip-group>
             <v-btn
