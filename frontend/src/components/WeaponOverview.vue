@@ -64,6 +64,18 @@
         </v-chip-group>
       </div>
 
+      <!-- 自定义基质重合检测按钮 -->
+      <v-btn
+        class="mb-4"
+        color="warning"
+        prepend-icon="mdi-swap-horizontal"
+        size="small"
+        variant="tonal"
+        @click="checkCustomOverlap"
+      >
+        检查自定义基质重合
+      </v-btn>
+
       <!-- 自定义基质区段 -->
       <template v-if="showCustomSection && customMatrixEntries.length > 0">
         <div class="d-flex align-center mb-1 mt-3">
@@ -252,6 +264,48 @@
       </v-card-text>
     </v-card>
   </v-dialog>
+
+  <!-- 自定义基质重合检测弹窗 -->
+  <v-dialog v-model="overlapDialog" max-width="700" persistent>
+    <v-card>
+      <v-card-title class="d-flex align-center">
+        <v-icon class="mr-2" color="warning">mdi-alert-circle-outline</v-icon>
+        自定义基质重合检测
+      </v-card-title>
+      <v-card-text>
+        <v-alert class="mb-4" type="info" variant="tonal">
+          以下自定义基质与内置武器的三个词条完全相同，可选择切换为内置武器。
+        </v-alert>
+        <div
+          v-for="(item, idx) in overlapItems"
+          :key="idx"
+          class="d-flex align-center mb-3 pa-3 border rounded flex-wrap"
+          style="gap: 8px"
+        >
+          <div class="overlap-icon-wrapper">
+            <custom-stat-icon hide-name :name="item.customName" small/>
+          </div>
+          <span class="font-weight-bold">{{ item.customName }}</span>
+          <v-icon size="small">mdi-arrow-left-right</v-icon>
+          <div class="overlap-icon-wrapper">
+            <item-icon class="weapon-icon-overlap" :item-id="item.matchedWeaponId" />
+          </div>
+          <span class="font-weight-bold">{{ item.matchedWeaponName }}</span>
+          <v-spacer />
+          <v-chip-group v-model="item.action" mandatory>
+            <v-chip filter size="small" value="ignore" variant="outlined">本次忽略</v-chip>
+            <v-chip filter size="small" value="suppress" variant="outlined">不再提示</v-chip>
+            <v-chip color="primary" filter size="small" value="switch" variant="outlined">切换</v-chip>
+          </v-chip-group>
+        </div>
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn @click="overlapDialog = false">取消</v-btn>
+        <v-btn color="primary" @click="confirmOverlapActions">确认</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script lang="ts" setup>
@@ -281,7 +335,21 @@ const detailWeaponId = ref<string | null>(null)
 // --- 自定义基质相关 ---
 
 /** 自定义宝藏基质属性配置列表 */
-const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null }>>([])
+const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null; no_prompt_switch?: boolean }>>([])
+
+// --- 自定义基质与内置武器重合检测 ---
+
+interface OverlapItem {
+  customIndex: number
+  customName: string
+  customWeaponId: string
+  matchedWeaponId: string
+  matchedWeaponName: string
+  action: 'ignore' | 'suppress' | 'switch'
+}
+
+const overlapItems = ref<OverlapItem[]>([])
+const overlapDialog = ref(false)
 
 /** 从后端获取配置中的自定义宝藏基质属性列表 */
 async function fetchCustomStats() {
@@ -355,8 +423,119 @@ async function postCustomStatsUpdate() {
   }
 }
 
-onMounted(() => {
-  fetchCustomStats()
+/**
+ * 检查自定义基质与内置武器的词条重合
+ * 匹配规则：三个槽位完全相等（含 null 对 null）
+ */
+function checkCustomOverlap() {
+  const items: OverlapItem[] = []
+  for (let i = 0; i < customStats.value.length; i++) {
+    const stat = customStats.value[i]
+    if (!stat) continue
+    // 跳过已勾选"不再提示"的
+    if (stat.no_prompt_switch) continue
+    // 跳过属性全为空的条目（已被切换清空）
+    if (!stat.attribute && !stat.secondary && !stat.skill) continue
+    // 跳过未在宝藏基质配置中添加的
+    const syntheticId = `custom_stat_${i}`
+    if (!matrixEntryByWeaponId.value.has(syntheticId)) continue
+
+    // 遍历所有内置武器，查找三词条完全匹配
+    for (const [weaponId, weapon] of weaponsMap.value.entries()) {
+      if (
+        weapon.attributeStatId === stat.attribute &&
+        weapon.secondaryStatId === stat.secondary &&
+        weapon.skillStatId === stat.skill
+      ) {
+        items.push({
+          customIndex: i,
+          customName: stat.name || `自定义基质 ${i + 1}`,
+          customWeaponId: syntheticId,
+          matchedWeaponId: weaponId,
+          matchedWeaponName: weapon.name,
+          action: 'ignore',
+        })
+      }
+    }
+  }
+  if (items.length === 0) return
+  overlapItems.value = items
+  overlapDialog.value = true
+}
+
+/** 确认重合操作 */
+async function confirmOverlapActions() {
+  // 记录需要删除的自定义基质索引
+  const indicesToDelete: number[] = []
+
+  for (const item of overlapItems.value) {
+    if (item.action === 'ignore') continue
+
+    const stat = customStats.value[item.customIndex]
+    if (!stat) continue
+
+    if (item.action === 'suppress') {
+      stat.no_prompt_switch = true
+      await postCustomStatsUpdate()
+    }
+
+    if (item.action === 'switch') {
+      // 切换 weapon_id，保留 affix 等级，优先级用武器稀有度默认值（不手动设置）
+      const entry = matrixEntryByWeaponId.value.get(item.customWeaponId)
+      if (entry) {
+        const weapon = weaponsMap.value.get(item.matchedWeaponId)
+        const newEntries = treasureMatrix.value
+          .filter((e) => e.weapon_id !== item.customWeaponId)
+          .concat({
+            weapon_id: item.matchedWeaponId,
+            weapon_name: weapon?.name || item.matchedWeaponName,
+            affix1_level: entry.affix1_level,
+            affix2_level: entry.affix2_level,
+            affix3_level: entry.affix3_level,
+            include_in_calculation: entry.include_in_calculation,
+            // priority 不设置，使用武器稀有度默认值
+          })
+        await updateTreasureMatrix(newEntries)
+      }
+      indicesToDelete.push(item.customIndex)
+    }
+  }
+
+  // 从大到小排序删除，避免索引偏移问题
+  indicesToDelete.sort((a, b) => b - a)
+  for (const index of indicesToDelete) {
+    customStats.value.splice(index, 1)
+  }
+
+  // 更新 treasure_matrix 中所有引用后续自定义基质的索引
+  if (indicesToDelete.length > 0) {
+    const updatedTreasureMatrix = treasureMatrix.value.map((e) => {
+      if (e.weapon_id.startsWith('custom_stat_')) {
+        const currentIndex = Number.parseInt(e.weapon_id.replace('custom_stat_', ''), 10)
+        // 计算删除后的新索引
+        let newIndex = currentIndex
+        for (const deletedIndex of indicesToDelete) {
+          if (currentIndex > deletedIndex) {
+            newIndex--
+          }
+        }
+        if (newIndex !== currentIndex) {
+          return { ...e, weapon_id: `custom_stat_${newIndex}` }
+        }
+      }
+      return e
+    })
+    await updateTreasureMatrix(updatedTreasureMatrix)
+    await postCustomStatsUpdate()
+  }
+
+  overlapDialog.value = false
+  await fetchCustomStats()
+}
+
+onMounted(async () => {
+  await fetchCustomStats()
+  checkCustomOverlap()
 })
 
 const matrixEntryByWeaponId = computed(
@@ -705,6 +884,18 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
 .weapon-icon-same {
   width: 2rem !important;
   height: 2rem !important;
+  flex-shrink: 0;
+}
+
+.weapon-icon-overlap {
+  width: 2rem !important;
+  height: 2rem !important;
+  flex-shrink: 0;
+}
+
+.overlap-icon-wrapper {
+  width: 2rem;
+  height: 2rem;
   flex-shrink: 0;
 }
 

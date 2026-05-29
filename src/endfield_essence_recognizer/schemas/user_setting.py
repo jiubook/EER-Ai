@@ -65,6 +65,8 @@ class EssenceStats(BaseModel):
     """附加属性 ID，None 表示不限制。"""
     skill: str | None = None
     """技能属性 ID，None 表示不限制。"""
+    no_prompt_switch: bool = False
+    """勾选"不再提示"后为 True，跳过对该自定义基质与内置武器的重合检查。"""
 
 
 class UserSetting(BaseModel):
@@ -204,6 +206,7 @@ class UserSetting(BaseModel):
         data.setdefault("same_type_treasure_limit", 1)
         for entry in data.get("treasure_essence_stats", []):
             entry.setdefault("name", "")
+            entry.setdefault("no_prompt_switch", False)
 
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）

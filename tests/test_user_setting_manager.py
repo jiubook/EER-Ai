@@ -303,6 +303,32 @@ def test_user_setting_schema_stability():
     )
 
 
+def test_essence_stats_schema_stability():
+    """检测 EssenceStats schema 变更，提醒开发者更新迁移逻辑"""
+    from endfield_essence_recognizer.schemas.user_setting import EssenceStats
+
+    expected_fields = {
+        "name",
+        "attribute",
+        "secondary",
+        "skill",
+        "no_prompt_switch",
+    }
+
+    actual_fields = set(EssenceStats.model_fields.keys())
+
+    assert actual_fields == expected_fields, (
+        f"EssenceStats schema 已变更！\n"
+        f"新增字段: {actual_fields - expected_fields}\n"
+        f"删除字段: {expected_fields - actual_fields}\n"
+        f"请执行以下步骤：\n"
+        f"1. 更新 UserSetting._VERSION\n"
+        f"2. 在 _migrate_v{UserSetting._VERSION - 1}_to_v{UserSetting._VERSION}() 添加迁移逻辑\n"
+        f"3. 添加对应的迁移测试\n"
+        f"4. 更新此测试的 expected_fields"
+    )
+
+
 def test_config_migration_chain_v2_to_current():
     """测试跨版本链式迁移：v2 → 当前版本（早期 v2，缺少后期新增字段）"""
     early_v2_config = {
