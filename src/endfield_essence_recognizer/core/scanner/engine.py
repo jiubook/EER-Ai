@@ -707,6 +707,8 @@ class DraggableScannerEngine(ScannerEngine):
         self._weapon_essence_levels = {}
         self._total_essence_count = 0
         self._skip_exact_level_counts = {}
+        # 重置已扫描基质指纹集合（用于翻页去重检测）
+        self._scanned_essence_hashes: set[str] = set()
 
         # 重置同类型计数和最佳等级记录
         user_setting._same_type_treasure_counts = {}
@@ -754,7 +756,6 @@ class DraggableScannerEngine(ScannerEngine):
             page_count += 1
             logger.info(f"开始扫描第 {page_count} 页基质...")
 
-            # 确定当前页需要扫描的行范围
             if is_last_page and page_count > 1:
                 # 最后一页：根据渐进滚动比例计算需要跳过的行数
                 skip_rows = self._calculate_skip_rows(
@@ -764,17 +765,45 @@ class DraggableScannerEngine(ScannerEngine):
                 logger.info(
                     f"最后一页：滚动距离 {progressive_drag_distance}px（完整页 {max_drag_distance:.0f}px），跳过前 {start_row} 行已扫描基质"
                 )
+                self._scan_current_page(
+                    stop_event,
+                    user_setting,
+                    icon_x_list,
+                    icon_y_list,
+                    start_row_index=start_row,
+                )
+            elif page_count > 1:
+                # 非首页：先扫描第一行（含操作），检测是否全部重复
+                all_dup = self._scan_single_row(
+                    0, stop_event, user_setting, icon_x_list, icon_y_list
+                )
+                if all_dup:
+                    row_height = icon_y_list[1] - icon_y_list[0]
+                    adjust_distance = round(row_height * 3 / 4)
+                    self._correct_overscroll(drag_start, adjust_distance)
+                    logger.info(
+                        "检测到第一行为重复基质，已向上微调 3/4 行，重新扫描第一行"
+                    )
+                    self._scan_single_row(
+                        0, stop_event, user_setting, icon_x_list, icon_y_list
+                    )
+                # 扫描剩余行（第 2-5 行）
+                self._scan_current_page(
+                    stop_event,
+                    user_setting,
+                    icon_x_list,
+                    icon_y_list,
+                    start_row_index=1,
+                )
             else:
-                start_row = 0
-
-            # 扫描当前页（从指定行开始）
-            self._scan_current_page(
-                stop_event,
-                user_setting,
-                icon_x_list,
-                icon_y_list,
-                start_row_index=start_row,
-            )
+                # 首页：从第一行开始扫描
+                self._scan_current_page(
+                    stop_event,
+                    user_setting,
+                    icon_x_list,
+                    icon_y_list,
+                    start_row_index=0,
+                )
 
             # 如果已经扫描完最后一页，停止扫描
             if is_last_page:
@@ -886,6 +915,9 @@ class DraggableScannerEngine(ScannerEngine):
                     or data.lock_label == LockStatusLabel.MAYBE_LOCKED
                 ):
                     continue
+
+                # 记录基质指纹用于翻页去重检测
+                self._scanned_essence_hashes.add(self._get_essence_hash(data))
 
                 evaluation = evaluate_essence(
                     data, user_setting, self.ctx.static_game_data
@@ -1059,3 +1091,140 @@ class DraggableScannerEngine(ScannerEngine):
         )
 
         return skip_rows
+
+    def _get_essence_hash(self, data: EssenceData) -> str:
+        """
+        生成基质指纹用于去重检测。
+
+        使用稀有度、属性类型和属性等级作为指纹。
+        """
+        stats_str = "_".join(str(s) if s is not None else "?" for s in data.stats)
+        levels_str = "_".join(str(lv) if lv is not None else "?" for lv in data.levels)
+        return f"{data.rarity.value}_{stats_str}_{levels_str}"
+
+    def _scan_single_row(
+        self,
+        row_index: int,
+        stop_event: threading.Event,
+        user_setting: UserSetting,
+        icon_x_list: list[int],
+        icon_y_list: list[int],
+    ) -> bool:
+        """
+        扫描指定的单行基质（含识别、评估、操作），并返回是否全部是已扫描过的基质。
+
+        Args:
+            row_index: 行索引
+            stop_event: 停止事件
+            user_setting: 用户设置
+            icon_x_list: 列 X 坐标列表
+            icon_y_list: 行 Y 坐标列表
+
+        Returns:
+            True 如果该行所有可识别基质都是已扫描过的（全部重复），False 否则
+        """
+        y = icon_y_list[row_index]
+        found_any = False
+        all_duplicates = True
+
+        for j, relative_x in enumerate(icon_x_list):
+            if not self._window_actions.target_is_active:
+                logger.info("终末地窗口不在前台，停止基质扫描。")
+                return False
+
+            if stop_event.is_set():
+                logger.info("基质扫描被中断。")
+                return False
+
+            logger.info(f"正在扫描第 {row_index + 1} 行第 {j + 1} 列的基质...")
+
+            self._window_actions.click(relative_x, y)
+            self._window_actions.wait(0.3)
+
+            data = recognize_essence(
+                self._image_source,
+                self.ctx,
+                self._profile,
+            )
+
+            if (
+                data.abandon_label == AbandonStatusLabel.MAYBE_ABANDONED
+                or data.lock_label == LockStatusLabel.MAYBE_LOCKED
+            ):
+                continue
+
+            found_any = True
+            fingerprint = self._get_essence_hash(data)
+            is_dup = fingerprint in self._scanned_essence_hashes
+            self._scanned_essence_hashes.add(fingerprint)
+
+            if not is_dup:
+                all_duplicates = False
+
+            evaluation = evaluate_essence(data, user_setting, self.ctx.static_game_data)
+
+            if evaluation.quality != EssenceQuality.SKIP:
+                self._total_essence_count += 1
+
+            if (
+                data.rarity == RarityLabel.FIVE
+                and evaluation.matched_weapons
+                and not evaluation.matched_weapons_all_blocked
+            ):
+                self._assign_essence_to_weapon(evaluation.matched_weapons, data.levels)
+
+            if (
+                evaluation.quality == EssenceQuality.TRASH
+                and evaluation.matched_weapons
+            ):
+                logger.opt(colors=True).warning(evaluation.log_message)
+            else:
+                logger.opt(colors=True).success(evaluation.log_message)
+
+            if evaluation.stop_scan:
+                logger.info("已根据设置结束本次基质扫描。")
+                stop_event.set()
+                return False
+
+            actions = decide_actions(data, evaluation, user_setting)
+
+            for action in actions:
+                if action.type == ActionType.CLICK_LOCK:
+                    pos = self._profile.LOCK_BUTTON_POS
+                    self._window_actions.click(pos.x, pos.y)
+                elif action.type == ActionType.CLICK_ABANDON:
+                    pos = self._profile.DEPRECATE_BUTTON_POS
+                    self._window_actions.click(pos.x, pos.y)
+
+                self._window_actions.wait(0.3)
+                logger.opt(colors=True).success(
+                    f"<LIGHT-YELLOW><bold>{action.log_message}</></>"
+                )
+
+        # 有可识别基质且全部重复时返回 True
+        return found_any and all_duplicates
+
+    def _correct_overscroll(
+        self,
+        drag_start: Point,
+        adjust_distance: int,
+    ) -> None:
+        """
+        向上微调指定距离，修正翻页过量。
+
+        与翻页方向相同（从下往上拖），使内容再向下滚动。
+
+        Args:
+            drag_start: 拖动起始位置（与翻页相同）
+            adjust_distance: 微调距离（像素）
+        """
+        logger.info(f"执行微调拖动：向上 {adjust_distance}px")
+        self._window_actions.progressive_drag(
+            drag_start.x,
+            drag_start.y,
+            drag_start.x,
+            drag_start.y - adjust_distance,
+            step=50,
+            max_drag=adjust_distance,
+        )
+        self._window_actions.wait(0.5)
