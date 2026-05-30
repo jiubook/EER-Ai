@@ -139,6 +139,23 @@
                 </v-radio>
                 <v-radio label="和：三项全部 ≥ 设定值" value="all" />
                 <v-radio label="或：任一项 ≥ 设定值(推荐)" value="any" />
+                <v-radio value="sum">
+                  <template #label>
+                    <span class="me-2">三项相加 ≥</span>
+                    <v-text-field
+                      v-model.number="highLevelTreasureSumThreshold"
+                      density="compact"
+                      :disabled="!highLevelTreasureEnabled || highLevelTreasureMatchMode !== 'sum'"
+                      hide-details
+                      :max="15"
+                      :min="3"
+                      style="max-width: 90px"
+                      type="number"
+                      variant="outlined"
+                      @click.stop
+                    />
+                  </template>
+                </v-radio>
               </v-radio-group>
             </v-col>
             <v-col cols="12" md="8">
@@ -378,6 +395,40 @@
             </v-col>
           </v-row>
 
+          <!-- 新增：分组模式 -->
+          <v-row align="center" class="mt-2">
+            <v-col cols="12">
+              <v-radio-group
+                v-model="sameTypeGroupMode"
+                color="primary"
+                density="comfortable"
+                :disabled="!sameTypeTreasureLimitEnabled"
+                inline
+                label="同类型划分方式"
+              >
+                <v-radio label="按基质划分（词条名称完全一致即为同类型）" value="by_stat" />
+                <v-radio label="按武器划分（每把武器独立计数）" value="by_weapon" />
+              </v-radio-group>
+            </v-col>
+          </v-row>
+
+          <!-- 新增：留大弃小 -->
+          <v-row align="center" class="mt-2">
+            <v-col cols="12">
+              <v-switch
+                v-model="sameTypeKeepBest"
+                color="primary"
+                density="comfortable"
+                :disabled="!sameTypeTreasureLimitEnabled"
+                hide-details
+                label="留大弃小（同类型中保留等级更高的基质）"
+              />
+              <v-alert border="start" class="mt-2" type="info" variant="tonal">
+                启用后，遇到同类型基质时会与已保留的基质比较等级。如果新基质的词条等级更高，则替换旧的；否则视为养成材料。扫描开始前会读取账号中已有的基质等级作为基准。
+              </v-alert>
+            </v-col>
+          </v-row>
+
           <v-divider class="my-4" />
 
           <h2>扫描时自动翻页</h2>
@@ -605,7 +656,7 @@ interface EssenceStat {
   skill: string | null
 }
 
-type TreasureMatchMode = 'only' | 'all' | 'any'
+type TreasureMatchMode = 'only' | 'all' | 'any' | 'sum'
 
 
 const selectedWeaponIds = ref<string[]>([])
@@ -619,11 +670,14 @@ const highLevelTreasureAttributeThreshold = ref(3)
 const highLevelTreasureSecondaryThreshold = ref(3)
 const highLevelTreasureSkillThreshold = ref(3)
 const highLevelTreasureMatchMode = ref<TreasureMatchMode>('any')
+const highLevelTreasureSumThreshold = ref(6)
 const highLevelTreasureOnlyCheckAttribute = ref(true)
 const highLevelTreasureOnlyCheckSecondary = ref(true)
 const highLevelTreasureOnlyCheckSkill = ref(true)
 const sameTypeTreasureLimitEnabled = ref(false)
 const sameTypeTreasureLimit = ref(1)
+const sameTypeGroupMode = ref<'by_stat' | 'by_weapon'>('by_stat')
+const sameTypeKeepBest = ref(true)
 const updateFlow = ref('cn_yituliu')
 const updateGithubMirror = ref('github')
 const updateProxyEnabled = ref(false)
@@ -736,11 +790,17 @@ const config = computed(() => {
     high_level_treasure_secondary_threshold: highLevelTreasureSecondaryThreshold.value,
     high_level_treasure_skill_threshold: highLevelTreasureSkillThreshold.value,
     high_level_treasure_match_mode: highLevelTreasureMatchMode.value,
+    high_level_treasure_sum_threshold: Math.min(
+      15,
+      Math.max(3, Number(highLevelTreasureSumThreshold.value) || 6),
+    ),
     high_level_treasure_only_check_attribute: highLevelTreasureOnlyCheckAttribute.value,
     high_level_treasure_only_check_secondary: highLevelTreasureOnlyCheckSecondary.value,
     high_level_treasure_only_check_skill: highLevelTreasureOnlyCheckSkill.value,
     same_type_treasure_limit_enabled: sameTypeTreasureLimitEnabled.value,
     same_type_treasure_limit: Math.max(1, Number(sameTypeTreasureLimit.value) || 1),
+    same_type_group_mode: sameTypeGroupMode.value,
+    same_type_keep_best: sameTypeKeepBest.value,
     update_mirror: updateGithubMirror.value,
     update_flow: updateFlow.value,
     update_github_mirror: updateGithubMirror.value,
@@ -767,11 +827,14 @@ async function getConfig() {
     high_level_treasure_secondary_threshold,
     high_level_treasure_skill_threshold,
     high_level_treasure_match_mode,
+    high_level_treasure_sum_threshold,
     high_level_treasure_only_check_attribute,
     high_level_treasure_only_check_secondary,
     high_level_treasure_only_check_skill,
     same_type_treasure_limit_enabled,
     same_type_treasure_limit,
+    same_type_group_mode,
+    same_type_keep_best,
     update_flow,
     update_github_mirror,
     update_mirror,
@@ -791,11 +854,14 @@ async function getConfig() {
   highLevelTreasureSecondaryThreshold.value = high_level_treasure_secondary_threshold
   highLevelTreasureSkillThreshold.value = high_level_treasure_skill_threshold
   highLevelTreasureMatchMode.value = high_level_treasure_match_mode || 'any'
+  highLevelTreasureSumThreshold.value = high_level_treasure_sum_threshold || 6
   highLevelTreasureOnlyCheckAttribute.value = high_level_treasure_only_check_attribute !== false
   highLevelTreasureOnlyCheckSecondary.value = high_level_treasure_only_check_secondary !== false
   highLevelTreasureOnlyCheckSkill.value = high_level_treasure_only_check_skill !== false
   sameTypeTreasureLimitEnabled.value = same_type_treasure_limit_enabled || false
   sameTypeTreasureLimit.value = same_type_treasure_limit || 1
+  sameTypeGroupMode.value = same_type_group_mode || 'by_stat'
+  sameTypeKeepBest.value = same_type_keep_best !== false
   updateFlow.value = normalizeUpdateFlow(update_flow, update_mirror)
   updateGithubMirror.value = update_github_mirror || getLegacyGithubMirror(update_mirror)
   updateMirrorChyanResId.value = update_mirrorchyan_res_id || ''

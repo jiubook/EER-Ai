@@ -53,6 +53,19 @@ class TreasureMatchMode(StrEnum):
     ANY = "any"
     """Any configured slot can match."""
 
+    SUM = "sum"
+    """三项词条等级之和达到设定阈值即匹配（仅用于高等级属性判定）。"""
+
+
+class SameTypeGroupMode(StrEnum):
+    """同类型宝藏基质的分组方式。"""
+
+    BY_STAT = "by_stat"
+    """按三个词条名称分组（属性组合相同即为同类型）。"""
+
+    BY_WEAPON = "by_weapon"
+    """按武器分组（每把武器独立计数，相同属性组合的不同武器互不影响）。"""
+
 
 class EssenceStats(BaseModel):
     """自定义宝藏基质属性组合，支持可选的显示名称。"""
@@ -72,6 +85,15 @@ class EssenceStats(BaseModel):
 class UserSetting(BaseModel):
     _VERSION: ClassVar[int] = 6
     _same_type_treasure_counts: dict[tuple[str | None, ...], int] = PrivateAttr(
+        default_factory=dict
+    )
+    _same_type_best_levels: dict[tuple[str | None, ...] | str, tuple[int, int, int]] = (
+        PrivateAttr(default_factory=dict)
+    )
+    # 每个分组（stat_key 或 weapon_id）中，等级与已记录最佳等级相等时还可“跳过”
+    # 的次数；由 profile 中已保存的同等级基质数量初始化，用于完整扫描时避免把
+    # 已保存的那几枚误判为多出来的重复品。
+    _same_type_equal_skips: dict[tuple[str | None, ...] | str, int] = PrivateAttr(
         default_factory=dict
     )
 
@@ -96,7 +118,9 @@ class UserSetting(BaseModel):
     high_level_treasure_skill_threshold: int = Field(default=3, ge=1, le=3)
     """高等级技能属性词条的等级阈值（+1~+3）"""
     high_level_treasure_match_mode: TreasureMatchMode = TreasureMatchMode.ANY
-    """高等级属性词条的匹配方式：仅/和/或。"""
+    """高等级属性词条的匹配方式：仅/和/或/三项相加。"""
+    high_level_treasure_sum_threshold: int = Field(default=6, ge=3, le=15)
+    """三项相加模式下，三个词条等级之和的阈值（3~15）。"""
     high_level_treasure_only_check_attribute: bool = True
     """仅模式下是否检查基础属性槽位"""
     high_level_treasure_only_check_secondary: bool = True
@@ -108,6 +132,12 @@ class UserSetting(BaseModel):
     """是否启用同类型宝藏基质数量上限。"""
     same_type_treasure_limit: int = Field(default=1, ge=1, le=999)
     """每类宝藏基质允许保留的数量上限；超过后视为养成材料。"""
+
+    same_type_group_mode: SameTypeGroupMode = SameTypeGroupMode.BY_STAT
+    """同类型宝藏基质的分组方式：按基质划分 / 按武器划分。"""
+
+    same_type_keep_best: bool = True
+    """启用留大弃小策略：同类型中保留等级更高的基质，等级更低的视为养成材料。"""
 
     auto_page_flip: bool = True
     """扫描时是否自动翻页"""
@@ -195,15 +225,18 @@ class UserSetting(BaseModel):
 
     @staticmethod
     def _migrate_v5_to_v6(data: dict) -> None:
-        """v5 → v6: 添加宝藏匹配方式、仅模式分类开关、同类型数量上限和自定义名称。"""
+        """v5 → v6: 添加宝藏匹配方式、仅模式分类开关、同类型数量上限、分组模式和自定义名称。"""
         data.setdefault("treasure_essence_match_mode", "all")
         data.setdefault("high_level_treasure_match_mode", "any")
+        data.setdefault("high_level_treasure_sum_threshold", 6)
         data.pop("high_level_treasure_stats", None)
         data.setdefault("high_level_treasure_only_check_attribute", True)
         data.setdefault("high_level_treasure_only_check_secondary", True)
         data.setdefault("high_level_treasure_only_check_skill", True)
         data.setdefault("same_type_treasure_limit_enabled", False)
         data.setdefault("same_type_treasure_limit", 1)
+        data.setdefault("same_type_group_mode", "by_stat")
+        data.setdefault("same_type_keep_best", True)
         for entry in data.get("treasure_essence_stats", []):
             entry.setdefault("name", "")
             entry.setdefault("no_prompt_switch", False)

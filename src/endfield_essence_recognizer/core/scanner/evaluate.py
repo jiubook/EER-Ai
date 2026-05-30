@@ -8,6 +8,7 @@ from endfield_essence_recognizer.game_data.static_game_data import StaticGameDat
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
     NonFiveStarBehavior,
+    SameTypeGroupMode,
     TreasureMatchMode,
     UserSetting,
 )
@@ -78,6 +79,19 @@ def _evaluate_high_level_treasure(
     levels = data.levels
     mode = setting.high_level_treasure_match_mode
 
+    if mode == TreasureMatchMode.SUM:
+        present_indexes = [
+            i
+            for i, (stat_id, level) in enumerate(zip(stats, levels, strict=True))
+            if stat_id is not None and level is not None
+        ]
+        total = sum(levels[i] for i in present_indexes)  # type: ignore[misc]
+        if total < setting.high_level_treasure_sum_threshold:
+            return False, ""
+        return True, _format_high_level_info(
+            static_game_data, stats, levels, present_indexes
+        )
+
     thresholds = [
         setting.high_level_treasure_attribute_threshold,
         setting.high_level_treasure_secondary_threshold,
@@ -115,10 +129,128 @@ def _evaluate_high_level_treasure(
     )
 
 
+def _level_cmp(current: tuple[int, int, int], existing: tuple[int, int, int]) -> int:
+    """逐维度从左到右比较等级，返回 1（更优）/ 0（相等）/ -1（更差）。"""
+    for c, e in zip(current, existing, strict=True):
+        if c > e:
+            return 1
+        if c < e:
+            return -1
+    return 0
+
+
+def _make_trash_by_limit(
+    evaluation: EvaluationResult, current_count: int, limit: int
+) -> EvaluationResult:
+    """构造因达到数量上限而降级为养成材料的结果。"""
+    return EvaluationResult(
+        quality=EssenceQuality.TRASH,
+        log_message=(
+            "这个基质是<red><bold><underline>养成材料</></></>，"
+            f"因为同类型宝藏基质已扫描到 {current_count} 个，达到设置上限 {limit} 个。"
+        ),
+        matched_weapons=evaluation.matched_weapons,
+        matched_weapons_all_blocked=True,
+        is_high_level=evaluation.is_high_level,
+    )
+
+
+def _claim_as_owned(
+    setting: UserSetting,
+    key: tuple[str | None, ...] | str,
+    current_levels: tuple[int, int, int],
+) -> bool:
+    """留大弃小：判断当前基质是否属于该组“已保存”的那一枚（或其升级版）。
+
+    - 相等：说明就是 profile 里保存的那一枚，在仍有跳过名额时直接认领（不占用数量上限）。
+    - 更优：说明保存的那枚升级了，认领并把阈值提升到新等级，同时消耗一个已存名额。
+    - 更差：返回 False，交由数量上限逻辑判断。
+    """
+    best = setting._same_type_best_levels.get(key)
+    if best is None:
+        return False
+
+    cmp = _level_cmp(current_levels, best)
+    if cmp > 0:
+        setting._same_type_best_levels[key] = current_levels
+        skip = setting._same_type_equal_skips.get(key, 0)
+        if skip > 0:
+            setting._same_type_equal_skips[key] = skip - 1
+        return True
+    if cmp == 0:
+        skip = setting._same_type_equal_skips.get(key, 0)
+        if skip > 0:
+            setting._same_type_equal_skips[key] = skip - 1
+            return True
+    return False
+
+
+def _claim_by_limit(
+    setting: UserSetting,
+    key: tuple[str | None, ...] | str,
+    current_levels: tuple[int, int, int],
+    limit: int,
+) -> bool:
+    """按数量上限认领当前基质：未达上限则保留并计数，同时维护最佳等级。"""
+    count = setting._same_type_treasure_counts.get(key, 0)
+    if count >= limit:
+        return False
+    setting._same_type_treasure_counts[key] = count + 1
+    best = setting._same_type_best_levels.get(key)
+    if best is None or _level_cmp(current_levels, best) > 0:
+        setting._same_type_best_levels[key] = current_levels
+    return True
+
+
+def _apply_stat_group_limit(
+    setting: UserSetting,
+    evaluation: EvaluationResult,
+    stat_key: tuple[str | None, ...],
+    current_levels: tuple[int, int, int],
+    limit: int,
+    keep_best: bool,
+) -> EvaluationResult:
+    """按基质分组（属性组合相同即为同类型）的限制逻辑。"""
+    if keep_best and _claim_as_owned(setting, stat_key, current_levels):
+        return evaluation
+    if _claim_by_limit(setting, stat_key, current_levels, limit):
+        return evaluation
+    return _make_trash_by_limit(
+        evaluation, setting._same_type_treasure_counts.get(stat_key, 0), limit
+    )
+
+
+def _apply_weapon_group_limit(
+    setting: UserSetting,
+    evaluation: EvaluationResult,
+    matched_weapon_ids: set[str],
+    current_levels: tuple[int, int, int],
+    limit: int,
+    keep_best: bool,
+) -> EvaluationResult:
+    """按武器分组（每把武器独立计数）的限制逻辑。"""
+    weapon_ids = sorted(matched_weapon_ids)
+
+    # 第一轮：优先认领属于某把武器的“已保存”基质（相等跳过 / 更优升级）。
+    if keep_best:
+        for weapon_id in weapon_ids:
+            if _claim_as_owned(setting, weapon_id, current_levels):
+                return evaluation
+
+    # 第二轮：按数量上限分配给第一把未达上限的武器。
+    for weapon_id in weapon_ids:
+        if _claim_by_limit(setting, weapon_id, current_levels, limit):
+            return evaluation
+
+    # 所有匹配武器都已达上限
+    return _make_trash_by_limit(evaluation, limit, limit)
+
+
 def _apply_same_type_treasure_limit(
     data: EssenceData,
     setting: UserSetting,
     evaluation: EvaluationResult,
+    matched_weapon_ids: set[str] | None = None,
 ) -> EvaluationResult:
     if (
         evaluation.quality != EssenceQuality.TREASURE
@@ -126,23 +258,27 @@ def _apply_same_type_treasure_limit(
     ):
         return evaluation
 
-    stat_key = tuple(data.stats)
-    current_count = setting._same_type_treasure_counts.get(stat_key, 0)
     limit = setting.same_type_treasure_limit
-    if current_count >= limit:
-        return EvaluationResult(
-            quality=EssenceQuality.TRASH,
-            log_message=(
-                "这个基质是<red><bold><underline>养成材料</></></>，"
-                f"因为同类型宝藏基质已扫描到 {current_count} 个，达到设置上限 {limit} 个。"
-            ),
-            matched_weapons=evaluation.matched_weapons,
-            matched_weapons_all_blocked=True,
-            is_high_level=evaluation.is_high_level,
+    keep_best = setting.same_type_keep_best
+    current_levels = (
+        data.levels[0] or 1,
+        data.levels[1] or 1,
+        data.levels[2] or 1,
+    )
+
+    if (
+        setting.same_type_group_mode == SameTypeGroupMode.BY_WEAPON
+        and matched_weapon_ids
+    ):
+        return _apply_weapon_group_limit(
+            setting, evaluation, matched_weapon_ids, current_levels, limit, keep_best
         )
 
-    setting._same_type_treasure_counts[stat_key] = current_count + 1
-    return evaluation
+    # 默认按基质分组（包括自定义基质匹配和无匹配武器的情况）
+    stat_key = tuple(data.stats)
+    return _apply_stat_group_limit(
+        setting, evaluation, stat_key, current_levels, limit, keep_best
+    )
 
 
 def evaluate_essence(
@@ -259,6 +395,7 @@ def evaluate_essence(
                 matched_weapons_all_blocked=False,
                 is_high_level=is_high_level_treasure,
             ),
+            matched_weapon_ids=non_trash_weapon_ids,
         )
     else:
         # 所有匹配到的武器都在 trash_weapon_ids 中
@@ -280,6 +417,7 @@ def evaluate_essence(
                     matched_weapons_all_blocked=True,
                     is_high_level=True,
                 ),
+                matched_weapon_ids=matched_weapon_ids,
             )
         else:
             return EvaluationResult(

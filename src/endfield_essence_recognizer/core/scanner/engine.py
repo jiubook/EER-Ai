@@ -342,6 +342,48 @@ class ScannerEngine:
         except Exception as exc:
             logger.debug("未能从账号配置初始化武器等级: {}", exc)
 
+    def _init_same_type_levels_from_profile(self, user_setting: UserSetting) -> None:
+        """从 profile 初始化同类型最佳等级及“跳过名额”，用于留大弃小策略。
+
+        只初始化最佳等级（阈值）和相等跳过名额，不初始化数量上限计数：完整扫描时
+        遇到 profile 里已保存的那几枚基质会走“相等→跳过”，不会被当作多出来的重复品
+        而误判为养成材料；数量上限只统计扫描中真正新增的同类型基质。
+        """
+        try:
+            from endfield_essence_recognizer.api.routes.profiles import (
+                get_profile_manager,
+            )
+
+            profile = get_profile_manager().get_active_profile()
+
+            # 按分组键（武器分组用 weapon_id，基质分组用 stat_key）收集已保存的等级
+            group_levels: dict[tuple[str | None, ...] | str, list[tuple]] = {}
+            for entry in profile.treasure_matrix:
+                levels = (
+                    entry.affix1_level,
+                    entry.affix2_level,
+                    entry.affix3_level,
+                )
+                group_levels.setdefault(entry.weapon_id, []).append(levels)
+                weapon = self.ctx.static_game_data.get_weapon(entry.weapon_id)
+                if weapon:
+                    stat_key = (
+                        weapon.stat1_id,
+                        weapon.stat2_id,
+                        weapon.stat3_id,
+                    )
+                    group_levels.setdefault(stat_key, []).append(levels)
+
+            # 每组以最高等级作为阈值，并以等于该阈值的数量作为相等跳过名额
+            for key, levels_list in group_levels.items():
+                best = max(levels_list)
+                user_setting._same_type_best_levels[key] = best
+                user_setting._same_type_equal_skips[key] = sum(
+                    1 for lv in levels_list if lv == best
+                )
+        except Exception as exc:
+            logger.debug("未能从账号配置初始化同类型最佳等级: {}", exc)
+
     def _get_stat_tuple(self, weapon_ids: set[str]) -> tuple:
         """获取一组武器的属性组合作为 hashable key。"""
         for wid in weapon_ids:
@@ -491,8 +533,17 @@ class ScannerEngine:
         self._total_essence_count = 0
         self._skip_exact_level_counts = {}
 
+        # 重置同类型计数和最佳等级记录
+        user_setting._same_type_treasure_counts = {}
+        user_setting._same_type_best_levels = {}
+        user_setting._same_type_equal_skips = {}
+
         # 从 profile 初始化已有武器等级，用于同等级跳过判断
         self._init_weapon_levels_from_profile()
+
+        # 从 profile 初始化同类型最佳等级，用于留大弃小策略
+        if user_setting.same_type_treasure_limit_enabled:
+            self._init_same_type_levels_from_profile(user_setting)
 
         icon_x_list = self._profile.essence_icon_x_list
         icon_y_list = self._profile.essence_icon_y_list
@@ -656,8 +707,17 @@ class DraggableScannerEngine(ScannerEngine):
         self._total_essence_count = 0
         self._skip_exact_level_counts = {}
 
+        # 重置同类型计数和最佳等级记录
+        user_setting._same_type_treasure_counts = {}
+        user_setting._same_type_best_levels = {}
+        user_setting._same_type_equal_skips = {}
+
         # 从 profile 初始化已有武器等级，用于同等级跳过判断
         self._init_weapon_levels_from_profile()
+
+        # 从 profile 初始化同类型最佳等级，用于留大弃小策略
+        if user_setting.same_type_treasure_limit_enabled:
+            self._init_same_type_levels_from_profile(user_setting)
 
         # 检查是否启用自动翻页
         auto_page_flip = user_setting.auto_page_flip
