@@ -587,9 +587,10 @@ class ScannerEngine:
             if evaluation.quality != EssenceQuality.SKIP:
                 self._total_essence_count += 1
 
-            # 按优先级将基质分配给单把武器
+            # 按优先级将基质分配给单把武器（仅无暇基质才会同步到 profiles.json）
             if (
-                evaluation.matched_weapons
+                data.rarity == RarityLabel.FIVE
+                and evaluation.matched_weapons
                 and not evaluation.matched_weapons_all_blocked
             ):
                 self._assign_essence_to_weapon(evaluation.matched_weapons, data.levels)
@@ -894,9 +895,10 @@ class DraggableScannerEngine(ScannerEngine):
                 if evaluation.quality != EssenceQuality.SKIP:
                     self._total_essence_count += 1
 
-                # 按优先级将基质分配给单把武器
+                # 按优先级将基质分配给单把武器（仅无暇基质才会同步到 profiles.json）
                 if (
-                    evaluation.matched_weapons
+                    data.rarity == RarityLabel.FIVE
+                    and evaluation.matched_weapons
                     and not evaluation.matched_weapons_all_blocked
                 ):
                     self._assign_essence_to_weapon(

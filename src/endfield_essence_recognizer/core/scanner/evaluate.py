@@ -129,6 +129,91 @@ def _evaluate_high_level_treasure(
     )
 
 
+def _evaluate_non_five_star_high_level(
+    data: EssenceData,
+    setting: UserSetting,
+    static_game_data: StaticGameData,
+) -> tuple[bool, str]:
+    """评估非无瑕基质的高等级属性词条。
+
+    如果启用了独立设置，使用非无暇基质专用的高等级判定设置；
+    否则使用宝藏基质判定规则中的高等级设置。
+    """
+    # 判断是否使用独立设置
+    if setting.non_five_star_separate_high_level_settings:
+        # 使用非无暇基质专用的高等级判定设置
+        thresholds = [
+            setting.non_five_star_high_level_attribute_threshold,
+            setting.non_five_star_high_level_secondary_threshold,
+            setting.non_five_star_high_level_skill_threshold,
+        ]
+        mode = setting.non_five_star_high_level_match_mode
+        sum_threshold = setting.non_five_star_high_level_sum_threshold
+        only_flags = [
+            setting.non_five_star_high_level_only_check_attribute,
+            setting.non_five_star_high_level_only_check_secondary,
+            setting.non_five_star_high_level_only_check_skill,
+        ]
+    else:
+        # 使用宝藏基质判定规则中的高等级设置
+        if not setting.high_level_treasure_enabled:
+            return False, ""
+        thresholds = [
+            setting.high_level_treasure_attribute_threshold,
+            setting.high_level_treasure_secondary_threshold,
+            setting.high_level_treasure_skill_threshold,
+        ]
+        mode = setting.high_level_treasure_match_mode
+        sum_threshold = setting.high_level_treasure_sum_threshold
+        only_flags = [
+            setting.high_level_treasure_only_check_attribute,
+            setting.high_level_treasure_only_check_secondary,
+            setting.high_level_treasure_only_check_skill,
+        ]
+
+    stats = data.stats
+    levels = data.levels
+
+    if mode == TreasureMatchMode.SUM:
+        present_indexes = [
+            i
+            for i, (stat_id, level) in enumerate(zip(stats, levels, strict=True))
+            if stat_id is not None and level is not None
+        ]
+        total = sum(levels[i] for i in present_indexes)  # type: ignore[misc]
+        if total < sum_threshold:
+            return False, ""
+        return True, _format_high_level_info(
+            static_game_data, stats, levels, present_indexes
+        )
+
+    original_slot_matches = [
+        stat_id is not None and level is not None and level >= threshold
+        for stat_id, level, threshold in zip(stats, levels, thresholds, strict=True)
+    ]
+
+    if mode == TreasureMatchMode.ONLY:
+        eval_matches = [
+            m for m, f in zip(original_slot_matches, only_flags, strict=True) if f
+        ]
+    else:
+        eval_matches = original_slot_matches
+
+    if mode == TreasureMatchMode.ANY:
+        matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
+    else:
+        matched_indexes = (
+            list(range(len(STAT_SLOTS))) if all(original_slot_matches) else []
+        )
+
+    if not _matches_by_mode(eval_matches, len(eval_matches), mode):
+        return False, ""
+
+    return True, _format_high_level_info(
+        static_game_data, stats, levels, matched_indexes
+    )
+
+
 def _level_cmp(current: tuple[int, int, int], existing: tuple[int, int, int]) -> int:
     """逐维度从左到右比较等级，返回 1（更优）/ 0（相等）/ -1（更差）。"""
     for c, e in zip(current, existing, strict=True):
@@ -315,6 +400,27 @@ def evaluate_essence(
                 log_message="这个基质是<dim>非无瑕基质</>，已根据设置结束本次扫描。",
                 stop_scan=True,
             )
+        if setting.non_five_star_behavior == NonFiveStarBehavior.HIGH_LEVEL_ONLY:
+            # 仅对非无瑕基质进行高等级属性词条判定，不判定武器匹配
+            is_high_level, high_level_info = _evaluate_non_five_star_high_level(
+                data, setting, static_game_data
+            )
+            if is_high_level:
+                return _apply_same_type_treasure_limit(
+                    data,
+                    setting,
+                    EvaluationResult(
+                        quality=EssenceQuality.TREASURE,
+                        log_message=f"这个基质是<green><bold><underline>宝藏</></></>（非无瑕基质），因为它有高等级属性词条{high_level_info}。",
+                        is_high_level=True,
+                    ),
+                )
+            else:
+                return EvaluationResult(
+                    quality=EssenceQuality.TRASH,
+                    log_message="这个基质是<red><bold><underline>养成材料</></></>（非无瑕基质），它没有高等级属性词条。",
+                    is_high_level=False,
+                )
 
     stats = data.stats
 

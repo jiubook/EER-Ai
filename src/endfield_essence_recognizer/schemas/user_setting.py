@@ -40,6 +40,9 @@ class NonFiveStarBehavior(StrEnum):
     STOP = "stop"
     """Stop the current scan when a non-5-star essence is encountered."""
 
+    HIGH_LEVEL_ONLY = "high_level_only"
+    """仅对非无瑕基质进行高等级属性词条判定，不判定武器匹配。"""
+
 
 class TreasureMatchMode(StrEnum):
     """How configured treasure conditions are matched."""
@@ -127,6 +130,26 @@ class UserSetting(BaseModel):
     """仅模式下是否检查附加属性槽位"""
     high_level_treasure_only_check_skill: bool = True
     """仅模式下是否检查技能属性槽位"""
+
+    # 非无瑕基质专用的高等级判定设置
+    non_five_star_separate_high_level_settings: bool = False
+    """是否为非无瑕基质启用独立的高等级属性词条判定设置"""
+    non_five_star_high_level_attribute_threshold: int = Field(default=3, ge=1, le=6)
+    """非无瑕基质高等级基础属性词条的等级阈值（+1~+6）"""
+    non_five_star_high_level_secondary_threshold: int = Field(default=3, ge=1, le=6)
+    """非无瑕基质高等级附加属性词条的等级阈值（+1~+6）"""
+    non_five_star_high_level_skill_threshold: int = Field(default=3, ge=1, le=3)
+    """非无瑕基质高等级技能属性词条的等级阈值（+1~+3）"""
+    non_five_star_high_level_match_mode: TreasureMatchMode = TreasureMatchMode.ANY
+    """非无瑕基质高等级属性词条的匹配方式：仅/和/或/三项相加。"""
+    non_five_star_high_level_sum_threshold: int = Field(default=6, ge=3, le=15)
+    """非无瑕基质三项相加模式下，三个词条等级之和的阈值（3~15）。"""
+    non_five_star_high_level_only_check_attribute: bool = True
+    """非无瑕基质仅模式下是否检查基础属性槽位"""
+    non_five_star_high_level_only_check_secondary: bool = True
+    """非无瑕基质仅模式下是否检查附加属性槽位"""
+    non_five_star_high_level_only_check_skill: bool = True
+    """非无瑕基质仅模式下是否检查技能属性槽位"""
 
     same_type_treasure_limit_enabled: bool = False
     """是否启用同类型宝藏基质数量上限。"""
@@ -240,6 +263,16 @@ class UserSetting(BaseModel):
         for entry in data.get("treasure_essence_stats", []):
             entry.setdefault("name", "")
             entry.setdefault("no_prompt_switch", False)
+        # 非无瑕基质专用的高等级判定设置
+        data.setdefault("non_five_star_separate_high_level_settings", False)
+        data.setdefault("non_five_star_high_level_attribute_threshold", 3)
+        data.setdefault("non_five_star_high_level_secondary_threshold", 3)
+        data.setdefault("non_five_star_high_level_skill_threshold", 3)
+        data.setdefault("non_five_star_high_level_match_mode", "any")
+        data.setdefault("non_five_star_high_level_sum_threshold", 6)
+        data.setdefault("non_five_star_high_level_only_check_attribute", True)
+        data.setdefault("non_five_star_high_level_only_check_secondary", True)
+        data.setdefault("non_five_star_high_level_only_check_skill", True)
 
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）

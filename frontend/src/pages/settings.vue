@@ -359,11 +359,138 @@
             <v-radio label="跳过对它的操作" value="skip" />
             <v-radio label="继续操作（当作无瑕基质进行操作）" value="process" />
             <v-radio label="结束本次扫描" value="stop" />
+            <v-radio label="仅高等级判定（只按高等级属性词条判定，不匹配武器）" value="high_level_only" />
           </v-radio-group>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
             "跳过对它的操作"只是不锁定/解锁/弃用该基质，扫描会继续前往下一个基质；"结束本次扫描"等同于再次按下
-            ] 中断扫描，并会保留已扫描到的统计数据。
+            ] 中断扫描，并会保留已扫描到的统计数据。"仅高等级判定"会使用下方的高等级属性词条判定规则，但不进行武器匹配。
           </v-alert>
+
+          <!-- 非无瑕基质高等级判定设置 -->
+          <v-expand-transition>
+            <div v-if="nonFiveStarBehavior === 'high_level_only'">
+              <v-divider class="my-4" />
+              <h2>非无瑕基质高等级属性词条判定设置</h2>
+              <v-alert border="start" class="mb-4" type="info" variant="tonal">
+                启用"区分设置"后，非无瑕基质将使用独立的高等级判定阈值；否则使用宝藏基质判定规则中的高等级设置。
+              </v-alert>
+
+              <v-switch
+                v-model="nonFiveStarSeparateHighLevelSettings"
+                color="primary"
+                density="comfortable"
+                hide-details
+                label="区分设置（为非无瑕基质启用独立的高等级判定阈值）"
+              />
+
+              <v-expand-transition>
+                <div v-if="nonFiveStarSeparateHighLevelSettings">
+                  <v-row align="center" class="my-4">
+                    <v-col cols="12" md="4">
+                      <v-radio-group
+                        v-model="nonFiveStarHighLevelMatchMode"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        label="满足方式"
+                      >
+                        <v-radio value="only">
+                          <template #label>
+                            <span>仅：只检查</span>
+                            <v-chip
+                              class="mx-1"
+                              :color="nonFiveStarHighLevelOnlyCheckAttribute ? 'primary' : 'grey'"
+                              size="small"
+                              :variant="nonFiveStarHighLevelOnlyCheckAttribute ? 'flat' : 'outlined'"
+                              @click.stop="nonFiveStarHighLevelOnlyCheckAttribute = !nonFiveStarHighLevelOnlyCheckAttribute"
+                            >基础</v-chip>
+                            <v-chip
+                              class="mx-1"
+                              :color="nonFiveStarHighLevelOnlyCheckSecondary ? 'primary' : 'grey'"
+                              size="small"
+                              :variant="nonFiveStarHighLevelOnlyCheckSecondary ? 'flat' : 'outlined'"
+                              @click.stop="nonFiveStarHighLevelOnlyCheckSecondary = !nonFiveStarHighLevelOnlyCheckSecondary"
+                            >附加</v-chip>
+                            <v-chip
+                              class="mx-1"
+                              :color="nonFiveStarHighLevelOnlyCheckSkill ? 'primary' : 'grey'"
+                              size="small"
+                              :variant="nonFiveStarHighLevelOnlyCheckSkill ? 'flat' : 'outlined'"
+                              @click.stop="nonFiveStarHighLevelOnlyCheckSkill = !nonFiveStarHighLevelOnlyCheckSkill"
+                            >技能</v-chip>
+                            <span>项</span>
+                          </template>
+                        </v-radio>
+                        <v-radio label="和：三项全部 ≥ 设定值" value="all" />
+                        <v-radio label="或：任一项 ≥ 设定值(推荐)" value="any" />
+                        <v-radio value="sum">
+                          <template #label>
+                            <span class="me-2">三项相加 ≥</span>
+                            <v-text-field
+                              v-model.number="nonFiveStarHighLevelSumThreshold"
+                              density="compact"
+                              :disabled="nonFiveStarHighLevelMatchMode !== 'sum'"
+                              hide-details
+                              :max="15"
+                              :min="3"
+                              style="max-width: 90px"
+                              type="number"
+                              variant="outlined"
+                              @click.stop
+                            />
+                          </template>
+                        </v-radio>
+                      </v-radio-group>
+                    </v-col>
+                    <v-col cols="12" md="8">
+                      <v-slider
+                        v-model="nonFiveStarHighLevelAttributeThreshold"
+                        color="primary"
+                        label="基础属性"
+                        :max="6"
+                        :min="1"
+                        show-ticks="always"
+                        :step="1"
+                        thumb-label
+                        tick-size="4"
+                        :ticks="{ 1: '+1', 2: '+2', 3: '+3', 4: '+4', 5: '+5', 6: '+6' }"
+                      >
+                        <template #thumb-label="{ modelValue }">+{{ modelValue }}</template>
+                      </v-slider>
+                      <v-slider
+                        v-model="nonFiveStarHighLevelSecondaryThreshold"
+                        color="primary"
+                        label="附加属性"
+                        :max="6"
+                        :min="1"
+                        show-ticks="always"
+                        :step="1"
+                        thumb-label
+                        tick-size="4"
+                        :ticks="{ 1: '+1', 2: '+2', 3: '+3', 4: '+4', 5: '+5', 6: '+6' }"
+                      >
+                        <template #thumb-label="{ modelValue }">+{{ modelValue }}</template>
+                      </v-slider>
+                      <v-slider
+                        v-model="nonFiveStarHighLevelSkillThreshold"
+                        color="primary"
+                        label="技能属性"
+                        :max="3"
+                        :min="1"
+                        show-ticks="always"
+                        :step="1"
+                        thumb-label
+                        tick-size="4"
+                        :ticks="{ 1: '+1', 2: '+2', 3: '+3' }"
+                      >
+                        <template #thumb-label="{ modelValue }">+{{ modelValue }}</template>
+                      </v-slider>
+                    </v-col>
+                  </v-row>
+                </div>
+              </v-expand-transition>
+            </div>
+          </v-expand-transition>
 
           <v-divider class="my-4" />
 
@@ -674,6 +801,15 @@ const highLevelTreasureSumThreshold = ref(6)
 const highLevelTreasureOnlyCheckAttribute = ref(true)
 const highLevelTreasureOnlyCheckSecondary = ref(true)
 const highLevelTreasureOnlyCheckSkill = ref(true)
+const nonFiveStarSeparateHighLevelSettings = ref(false)
+const nonFiveStarHighLevelAttributeThreshold = ref(3)
+const nonFiveStarHighLevelSecondaryThreshold = ref(3)
+const nonFiveStarHighLevelSkillThreshold = ref(3)
+const nonFiveStarHighLevelMatchMode = ref<TreasureMatchMode>('any')
+const nonFiveStarHighLevelSumThreshold = ref(6)
+const nonFiveStarHighLevelOnlyCheckAttribute = ref(true)
+const nonFiveStarHighLevelOnlyCheckSecondary = ref(true)
+const nonFiveStarHighLevelOnlyCheckSkill = ref(true)
 const sameTypeTreasureLimitEnabled = ref(false)
 const sameTypeTreasureLimit = ref(1)
 const sameTypeGroupMode = ref<'by_stat' | 'by_weapon'>('by_stat')
@@ -797,6 +933,18 @@ const config = computed(() => {
     high_level_treasure_only_check_attribute: highLevelTreasureOnlyCheckAttribute.value,
     high_level_treasure_only_check_secondary: highLevelTreasureOnlyCheckSecondary.value,
     high_level_treasure_only_check_skill: highLevelTreasureOnlyCheckSkill.value,
+    non_five_star_separate_high_level_settings: nonFiveStarSeparateHighLevelSettings.value,
+    non_five_star_high_level_attribute_threshold: nonFiveStarHighLevelAttributeThreshold.value,
+    non_five_star_high_level_secondary_threshold: nonFiveStarHighLevelSecondaryThreshold.value,
+    non_five_star_high_level_skill_threshold: nonFiveStarHighLevelSkillThreshold.value,
+    non_five_star_high_level_match_mode: nonFiveStarHighLevelMatchMode.value,
+    non_five_star_high_level_sum_threshold: Math.min(
+      15,
+      Math.max(3, Number(nonFiveStarHighLevelSumThreshold.value) || 6),
+    ),
+    non_five_star_high_level_only_check_attribute: nonFiveStarHighLevelOnlyCheckAttribute.value,
+    non_five_star_high_level_only_check_secondary: nonFiveStarHighLevelOnlyCheckSecondary.value,
+    non_five_star_high_level_only_check_skill: nonFiveStarHighLevelOnlyCheckSkill.value,
     same_type_treasure_limit_enabled: sameTypeTreasureLimitEnabled.value,
     same_type_treasure_limit: Math.max(1, Number(sameTypeTreasureLimit.value) || 1),
     same_type_group_mode: sameTypeGroupMode.value,
@@ -831,6 +979,15 @@ async function getConfig() {
     high_level_treasure_only_check_attribute,
     high_level_treasure_only_check_secondary,
     high_level_treasure_only_check_skill,
+    non_five_star_separate_high_level_settings,
+    non_five_star_high_level_attribute_threshold,
+    non_five_star_high_level_secondary_threshold,
+    non_five_star_high_level_skill_threshold,
+    non_five_star_high_level_match_mode,
+    non_five_star_high_level_sum_threshold,
+    non_five_star_high_level_only_check_attribute,
+    non_five_star_high_level_only_check_secondary,
+    non_five_star_high_level_only_check_skill,
     same_type_treasure_limit_enabled,
     same_type_treasure_limit,
     same_type_group_mode,
@@ -858,6 +1015,15 @@ async function getConfig() {
   highLevelTreasureOnlyCheckAttribute.value = high_level_treasure_only_check_attribute !== false
   highLevelTreasureOnlyCheckSecondary.value = high_level_treasure_only_check_secondary !== false
   highLevelTreasureOnlyCheckSkill.value = high_level_treasure_only_check_skill !== false
+  nonFiveStarSeparateHighLevelSettings.value = non_five_star_separate_high_level_settings || false
+  nonFiveStarHighLevelAttributeThreshold.value = non_five_star_high_level_attribute_threshold || 3
+  nonFiveStarHighLevelSecondaryThreshold.value = non_five_star_high_level_secondary_threshold || 3
+  nonFiveStarHighLevelSkillThreshold.value = non_five_star_high_level_skill_threshold || 3
+  nonFiveStarHighLevelMatchMode.value = non_five_star_high_level_match_mode || 'any'
+  nonFiveStarHighLevelSumThreshold.value = non_five_star_high_level_sum_threshold || 6
+  nonFiveStarHighLevelOnlyCheckAttribute.value = non_five_star_high_level_only_check_attribute !== false
+  nonFiveStarHighLevelOnlyCheckSecondary.value = non_five_star_high_level_only_check_secondary !== false
+  nonFiveStarHighLevelOnlyCheckSkill.value = non_five_star_high_level_only_check_skill !== false
   sameTypeTreasureLimitEnabled.value = same_type_treasure_limit_enabled || false
   sameTypeTreasureLimit.value = same_type_treasure_limit || 1
   sameTypeGroupMode.value = same_type_group_mode || 'by_stat'
