@@ -830,6 +830,11 @@ class DraggableScannerEngine(ScannerEngine):
                 logger.info(
                     f"检测到滚动条到底，已渐进滚动 {progressive_drag_distance}px，下一页将是最后一页。"
                 )
+            else:
+                self._align_grid_rows_after_drag(drag_start, icon_x_list, icon_y_list)
+                if scrollbar_pos and self._check_scrollbar_at_bottom(scrollbar_pos):
+                    is_last_page = True
+                    logger.info("行对齐微调后检测到滚动条到底，下一页将作为最后一页。")
 
         if page_count >= max_pages:
             logger.info(f"已达到最大页数限制 ({max_pages})，扫描停止。")
@@ -1091,6 +1096,146 @@ class DraggableScannerEngine(ScannerEngine):
         )
 
         return skip_rows
+
+    def _align_grid_rows_after_drag(
+        self,
+        drag_start: Point,
+        icon_x_list: list[int],
+        icon_y_list: list[int],
+    ) -> None:
+        """Detect row-center drift after dragging and apply a small snap correction."""
+        if len(icon_y_list) < 2 or not icon_x_list:
+            logger.debug("Skip row alignment: not enough grid coordinates")
+            return
+
+        row_height = icon_y_list[1] - icon_y_list[0]
+        if row_height <= 0:
+            logger.debug("Skip row alignment: invalid row_height={}", row_height)
+            return
+
+        offset = self._detect_grid_row_offset(icon_x_list, icon_y_list, row_height)
+        if offset is None:
+            return
+
+        # Click centers tolerate small drift; avoid jitter from visual noise.
+        min_adjust = max(10, round(row_height * 0.08))
+        if abs(offset) < min_adjust:
+            logger.debug("Row alignment offset={}px, no correction needed", offset)
+            return
+
+        max_adjust = round(row_height * 0.45)
+        adjust = max(-max_adjust, min(max_adjust, offset))
+        if adjust != offset:
+            logger.debug(
+                "Row alignment correction clamped: offset={}px, adjust={}px",
+                offset,
+                adjust,
+            )
+
+        logger.info(
+            "Row alignment correction after page drag: offset={}px, adjust={}px",
+            offset,
+            adjust,
+        )
+        self._window_actions.progressive_drag(
+            drag_start.x,
+            drag_start.y,
+            drag_start.x,
+            drag_start.y + adjust,
+            step=25,
+            max_drag=abs(adjust),
+        )
+        self._window_actions.wait(0.25)
+
+    def _detect_grid_row_offset(
+        self,
+        icon_x_list: list[int],
+        icon_y_list: list[int],
+        row_height: int,
+    ) -> int | None:
+        """Estimate actual card-center offset from configured click rows."""
+        search_radius = max(1, round(row_height * 0.45))
+        patch_radius = max(8, round(row_height * 0.12))
+        x_radius = patch_radius
+        margin = patch_radius + search_radius + 2
+
+        x0 = max(0, min(icon_x_list) - x_radius)
+        x1 = max(icon_x_list) + x_radius + 1
+        y0 = max(0, min(icon_y_list) - margin)
+        y1 = max(icon_y_list) + margin + 1
+        client_width, client_height = self._image_source.get_client_size()
+        x1 = min(client_width, x1)
+        y1 = min(client_height, y1)
+        if x1 <= x0 or y1 <= y0:
+            return None
+
+        try:
+            screenshot = self._image_source.screenshot(
+                Region(Point(x0, y0), Point(x1, y1))
+            )
+        except Exception as e:
+            logger.debug("Row alignment screenshot failed: {}", e)
+            return None
+
+        if screenshot.size == 0:
+            return None
+
+        gray = screenshot[:, :, :3].astype(np.float32).mean(axis=2)
+        local_xs = [x - x0 for x in icon_x_list]
+        local_ys = [y - y0 for y in icon_y_list]
+
+        def patch_score(cx: int, cy: int) -> float:
+            left = max(0, cx - x_radius)
+            right = min(gray.shape[1], cx + x_radius + 1)
+            top = max(0, cy - patch_radius)
+            bottom = min(gray.shape[0], cy + patch_radius + 1)
+            patch = gray[top:bottom, left:right]
+            if patch.size == 0:
+                return 0.0
+
+            texture = float(patch.std())
+            edge = 0.0
+            if patch.shape[0] > 1:
+                edge += float(np.abs(np.diff(patch, axis=0)).mean())
+            if patch.shape[1] > 1:
+                edge += float(np.abs(np.diff(patch, axis=1)).mean())
+            return texture + edge
+
+        def offset_score(offset: int) -> float:
+            scores: list[float] = []
+            for cy in local_ys:
+                y = cy + offset
+                if y < patch_radius or y >= gray.shape[0] - patch_radius:
+                    continue
+                for cx in local_xs:
+                    scores.append(patch_score(cx, y))
+            return float(np.mean(scores)) if scores else 0.0
+
+        candidates = list(range(-search_radius, search_radius + 1, 4))
+        if 0 not in candidates:
+            candidates.append(0)
+
+        scored = [(offset, offset_score(offset)) for offset in candidates]
+        best_offset, best_score = max(scored, key=lambda item: item[1])
+        zero_score = next(score for offset, score in scored if offset == 0)
+
+        # Only correct when shifted click rows are clearly more content-like.
+        if best_score <= zero_score * 1.08:
+            logger.debug(
+                "Row alignment not confident: best_offset={} best={:.2f} zero={:.2f}",
+                best_offset,
+                best_score,
+                zero_score,
+            )
+            return None
+
+        logger.debug(
+            "Row alignment detected: best_offset={} best={:.2f} zero={:.2f}",
+            best_offset,
+            best_score,
+            zero_score,
+        )
+        return best_offset
 
     def _get_essence_hash(self, data: EssenceData) -> str:
         """
