@@ -906,7 +906,7 @@ const filteredMatrixEntries = computed(() => {
   // 过滤稀有度（自定义条目按 6★ 处理）
   entries = entries.filter((entry) => {
     if (isCustomEntry(entry.weapon_id)) {
-      return selectedRarities.value.includes('6')
+      return selectedRarities.value.includes('custom')
     }
     const weapon = weaponsMap.value.get(entry.weapon_id)
     if (!weapon) return false
