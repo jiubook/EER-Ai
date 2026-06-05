@@ -333,7 +333,7 @@ def test_config_migration_chain_v2_to_current():
     assert migrated.fix_grid_row_offset_after_page_flip is True
     assert migrated.fix_page_flip_overscroll is False
     assert migrated.update_mirror == "github"
-    assert migrated.update_flow == "cn_yituliu"
+    assert migrated.update_flow == "github"
     assert migrated.treasure_essence_match_mode == "all"
 
 
@@ -418,7 +418,7 @@ def test_migration_sets_all_required_fields():
     assert migrated.update_mirrorchyan_res_id == ""
     assert migrated.update_mirrorchyan_cdk == ""
     assert migrated.update_mirrorchyan_user_agent == "EER_APP"
-    assert migrated.update_flow == "cn_yituliu"
+    assert migrated.update_flow == "github"
     assert migrated.update_github_mirror == "github"
 
     # v5→v6 补充的字段（宝藏基质匹配和同类型限制）

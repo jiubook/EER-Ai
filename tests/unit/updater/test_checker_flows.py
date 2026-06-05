@@ -90,8 +90,13 @@ async def test_yituliu_flow_only_requests_yituliu():
 
 
 @pytest.mark.asyncio
-async def test_mirror_chyan_flow_only_requests_mirror_chyan():
+async def test_mirror_chyan_flow_only_requests_mirror_chyan(monkeypatch):
     """Mirror 酱流程只应请求 Mirror 酱接口。"""
+    # mirror_chyan 在当前版本默认禁用，测试时临时启用以验证独立流程
+    from endfield_essence_recognizer.updater import sources
+
+    monkeypatch.setitem(sources.UPDATE_FLOW_ENABLED, sources.MIRROR_CHYAN_FLOW, True)
+
     mirror_url = checker.MIRROR_CHYAN_LATEST_URL.format(res_id="EER")
     FakeAsyncClient.routes = {
         mirror_url: FakeResponse(
