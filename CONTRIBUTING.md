@@ -341,3 +341,70 @@ uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-reco
 
 > **注意**：第 3 步需要 Rust 工具链。如果不需要本地构建更新器，可以跳过第 3 步，
 > 但打包产物中将不包含 `_internal/eer_updater.exe`，应用内更新功能将无法使用。
+
+---
+
+## 发版流程 (Release Process)
+
+以下为完整的发版步骤，供维护者参考。
+
+### 1. 更新游戏数据
+
+如有需要，按以下顺序更新游戏数据文件：
+
+1. **更新模板匹配模板** — 如有新版本游戏界面变更，需要更新模板匹配所用的截图模板。
+2. **更新武器 / 基质数据** — 使用数据转换脚本更新游戏数据：
+   ```bash
+   uv run .\scripts\transform_weapon_data.py ...\TableCfg .\resources\data\v2
+   ```
+   该脚本会读取原始游戏数据，生成 JSON 文件。
+3. **更新武器图片**
+4. **更新能量淤积点数据** — 更新前端静态 JSON 文件 `frontend/src/assets/json/energyAlluviums.json`。
+
+### 2. 更新版本号并提交
+
+1. 修改 `pyproject.toml` 中的版本号：
+
+   ```toml
+   version = "X.Y.Z"  # 改为新版本号
+   ```
+
+2. 同步 `uv.lock`：
+
+   ```bash
+   uv sync
+   ```
+
+3. 提交并推送：
+
+   ```bash
+   git add pyproject.toml uv.lock
+   git commit -m "chore: release X.Y.Z"
+   git push
+   ```
+
+4. 创建并推送标签（GitHub Actions 检测到标签后会自动构建并创建 Release）：
+
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+### 3. 下载构建产物
+
+发布后 GitHub Actions 会自动构建，生成以下两个文件：
+
+- `endfield-essence-recognizer-B-windows.zip` — 完整包
+- `incremental-A-to-B-windows.zip` — 增量更新包
+
+下载后上传至一图流 CDN（对应资源目录）。
+
+### 4. 生成一图流 Version JSON
+
+构建完成后，在本地执行以下命令生成 `version.json`：
+
+```bash
+uv run python scripts/generate_yituliu_json.py --output version.json --use-api
+```
+
+执行后根目录会生成 `version.json`，将其上传至一图流 CDN 即可。
