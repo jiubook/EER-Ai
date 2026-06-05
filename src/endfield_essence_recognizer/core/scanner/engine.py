@@ -777,7 +777,7 @@ class DraggableScannerEngine(ScannerEngine):
                 all_dup = self._scan_single_row(
                     0, stop_event, user_setting, icon_x_list, icon_y_list
                 )
-                if all_dup:
+                if all_dup and user_setting.fix_page_flip_overscroll:
                     row_height = icon_y_list[1] - icon_y_list[0]
                     adjust_distance = round(row_height * 3 / 4)
                     self._correct_overscroll(drag_start, adjust_distance)
@@ -786,6 +786,10 @@ class DraggableScannerEngine(ScannerEngine):
                     )
                     self._scan_single_row(
                         0, stop_event, user_setting, icon_x_list, icon_y_list
+                    )
+                elif all_dup:
+                    logger.debug(
+                        "Skip page flip overscroll correction: disabled by user setting"
                     )
                 # 扫描剩余行（第 2-5 行）
                 self._scan_current_page(
@@ -831,7 +835,14 @@ class DraggableScannerEngine(ScannerEngine):
                     f"检测到滚动条到底，已渐进滚动 {progressive_drag_distance}px，下一页将是最后一页。"
                 )
             else:
-                self._align_grid_rows_after_drag(drag_start, icon_x_list, icon_y_list)
+                if user_setting.fix_grid_row_offset_after_page_flip:
+                    self._align_grid_rows_after_drag(
+                        drag_start, icon_x_list, icon_y_list
+                    )
+                else:
+                    logger.debug(
+                        "Skip row alignment after page drag: disabled by user setting"
+                    )
                 if scrollbar_pos and self._check_scrollbar_at_bottom(scrollbar_pos):
                     is_last_page = True
                     logger.info("行对齐微调后检测到滚动条到底，下一页将作为最后一页。")

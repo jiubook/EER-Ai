@@ -164,6 +164,10 @@ class UserSetting(BaseModel):
 
     auto_page_flip: bool = True
     """扫描时是否自动翻页"""
+    fix_grid_row_offset_after_page_flip: bool = True
+    """是否启用翻页后网格行偏移修复（实验性质）"""
+    fix_page_flip_overscroll: bool = False
+    """是否启用翻页滚动过量修正（实验性质）"""
 
     update_mirror: str = "github"
     """兼容旧字段：GitHub 下载镜像源。"""
@@ -260,6 +264,8 @@ class UserSetting(BaseModel):
         data.setdefault("same_type_treasure_limit", 1)
         data.setdefault("same_type_group_mode", "by_stat")
         data.setdefault("same_type_keep_best", True)
+        data.setdefault("fix_grid_row_offset_after_page_flip", True)
+        data.setdefault("fix_page_flip_overscroll", False)
         for entry in data.get("treasure_essence_stats", []):
             entry.setdefault("name", "")
             entry.setdefault("no_prompt_switch", False)

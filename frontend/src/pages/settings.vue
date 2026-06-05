@@ -569,6 +569,31 @@
             hide-details
             label="启用自动翻页扫描"
           />
+          <v-expand-transition>
+            <div v-if="autoPageFlip" class="mt-2">
+              <v-switch
+                v-model="fixGridRowOffsetAfterPageFlip"
+                color="primary"
+                density="comfortable"
+                hide-details
+                label="修复翻页后网格行偏移（实验性质）"
+              />
+              <v-alert border="start" class="mt-2" type="warning" variant="tonal">
+                默认开启。若翻页后扫描位置异常，可以关闭此实验修复回退到原有翻页行为。
+              </v-alert>
+              <v-switch
+                v-model="fixPageFlipOverscroll"
+                class="mt-2"
+                color="primary"
+                density="comfortable"
+                hide-details
+                label="修正翻页滚动过量（实验性质）"
+              />
+              <v-alert border="start" class="mt-2" type="warning" variant="tonal">
+                默认关闭。开启后，若翻页后第一行被判定为已扫描过的重复基质，会向上微调 3/4 行并重扫第一行。
+              </v-alert>
+            </div>
+          </v-expand-transition>
         </v-expansion-panel-text>
       </v-expansion-panel>
 
@@ -792,6 +817,8 @@ const treasureAction = ref('lock')
 const trashAction = ref('unlock')
 const nonFiveStarBehavior = ref('process')
 const autoPageFlip = ref(true)
+const fixGridRowOffsetAfterPageFlip = ref(true)
+const fixPageFlipOverscroll = ref(false)
 const highLevelTreasureEnabled = ref(false)
 const highLevelTreasureAttributeThreshold = ref(3)
 const highLevelTreasureSecondaryThreshold = ref(3)
@@ -921,6 +948,8 @@ const config = computed(() => {
     trash_action: trashAction.value,
     non_five_star_behavior: nonFiveStarBehavior.value,
     auto_page_flip: autoPageFlip.value,
+    fix_grid_row_offset_after_page_flip: fixGridRowOffsetAfterPageFlip.value,
+    fix_page_flip_overscroll: fixPageFlipOverscroll.value,
     high_level_treasure_enabled: highLevelTreasureEnabled.value,
     high_level_treasure_attribute_threshold: highLevelTreasureAttributeThreshold.value,
     high_level_treasure_secondary_threshold: highLevelTreasureSecondaryThreshold.value,
@@ -970,6 +999,8 @@ async function getConfig() {
     trash_action,
     non_five_star_behavior,
     auto_page_flip,
+    fix_grid_row_offset_after_page_flip,
+    fix_page_flip_overscroll,
     high_level_treasure_enabled,
     high_level_treasure_attribute_threshold,
     high_level_treasure_secondary_threshold,
@@ -1006,6 +1037,8 @@ async function getConfig() {
   trashAction.value = trash_action
   nonFiveStarBehavior.value = non_five_star_behavior || 'process'
   autoPageFlip.value = auto_page_flip !== undefined ? auto_page_flip : true
+  fixGridRowOffsetAfterPageFlip.value = fix_grid_row_offset_after_page_flip !== false
+  fixPageFlipOverscroll.value = fix_page_flip_overscroll === true
   highLevelTreasureEnabled.value = high_level_treasure_enabled
   highLevelTreasureAttributeThreshold.value = high_level_treasure_attribute_threshold
   highLevelTreasureSecondaryThreshold.value = high_level_treasure_secondary_threshold

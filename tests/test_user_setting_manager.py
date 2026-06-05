@@ -244,6 +244,8 @@ def test_user_setting_schema_stability():
         "same_type_group_mode",
         "same_type_keep_best",
         "auto_page_flip",
+        "fix_grid_row_offset_after_page_flip",
+        "fix_page_flip_overscroll",
         "update_mirror",
         "update_flow",
         "update_github_mirror",
@@ -328,6 +330,8 @@ def test_config_migration_chain_v2_to_current():
     # 验证关键字段的默认值（只验证几个代表性字段）
     assert migrated.non_five_star_behavior == "process"
     assert migrated.auto_page_flip is True
+    assert migrated.fix_grid_row_offset_after_page_flip is True
+    assert migrated.fix_page_flip_overscroll is False
     assert migrated.update_mirror == "github"
     assert migrated.update_flow == "cn_yituliu"
     assert migrated.treasure_essence_match_mode == "all"
@@ -428,6 +432,8 @@ def test_migration_sets_all_required_fields():
     assert migrated.same_type_treasure_limit == 1
     assert migrated.same_type_group_mode == "by_stat"
     assert migrated.same_type_keep_best is True
+    assert migrated.fix_grid_row_offset_after_page_flip is True
+    assert migrated.fix_page_flip_overscroll is False
 
     # v5→v6 补充的字段（非无瑕基质专用的高等级判定设置）
     assert migrated.non_five_star_separate_high_level_settings is False

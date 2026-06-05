@@ -20,8 +20,12 @@ from endfield_essence_recognizer.core.recognition.tasks.ui import UISceneLabel
 from endfield_essence_recognizer.core.recognition.template_recognizer import (
     TemplateRecognizer,
 )
+from endfield_essence_recognizer.core.scanner import engine as scanner_engine_module
 from endfield_essence_recognizer.core.scanner.context import ScannerContext
-from endfield_essence_recognizer.core.scanner.engine import ScannerEngine
+from endfield_essence_recognizer.core.scanner.engine import (
+    DraggableScannerEngine,
+    ScannerEngine,
+)
 from endfield_essence_recognizer.schemas.user_setting import UserSetting
 from endfield_essence_recognizer.services.user_setting_manager import UserSettingManager
 
@@ -263,6 +267,111 @@ def test_scanner_engine_screenshot_count(
 
     # 1 call for check_scene + 1 call for recognize_essence
     assert image_source.screenshot.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("enabled", "expected_calls"),
+    [
+        (True, 1),
+        (False, 0),
+    ],
+)
+def test_draggable_scanner_row_alignment_setting(
+    mock_scanner_context,
+    mock_user_setting_manager,
+    mock_profile,
+    monkeypatch,
+    enabled,
+    expected_calls,
+):
+    setting = UserSetting(auto_page_flip=True)
+    setting.fix_grid_row_offset_after_page_flip = enabled
+    mock_user_setting_manager.get_user_setting.return_value = setting
+
+    mock_profile.essence_icon_x_list = [100]
+    mock_profile.essence_icon_y_list = [200, 300]
+    mock_profile.DRAG_START_POS = Point(100, 900)
+    mock_profile.DRAG_END_POS = Point(100, 100)
+    mock_profile.SCROLLBAR_CHECK_POS = None
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    align_mock = MagicMock()
+    monkeypatch.setattr(scanner_engine_module, "check_scene", lambda *_args: True)
+    monkeypatch.setattr(engine, "_scan_current_page", MagicMock())
+    monkeypatch.setattr(engine, "_scan_single_row", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        engine,
+        "_progressive_drag",
+        MagicMock(side_effect=[(800, False), (100, True)]),
+    )
+    monkeypatch.setattr(engine, "_align_grid_rows_after_drag", align_mock)
+    monkeypatch.setattr(
+        engine, "_check_scrollbar_at_bottom", MagicMock(return_value=False)
+    )
+
+    engine.execute(threading.Event())
+
+    assert align_mock.call_count == expected_calls
+
+
+@pytest.mark.parametrize(
+    ("enabled", "expected_calls"),
+    [
+        (True, 1),
+        (False, 0),
+    ],
+)
+def test_draggable_scanner_overscroll_setting(
+    mock_scanner_context,
+    mock_user_setting_manager,
+    mock_profile,
+    monkeypatch,
+    enabled,
+    expected_calls,
+):
+    setting = UserSetting(auto_page_flip=True)
+    setting.fix_grid_row_offset_after_page_flip = False
+    setting.fix_page_flip_overscroll = enabled
+    mock_user_setting_manager.get_user_setting.return_value = setting
+
+    mock_profile.essence_icon_x_list = [100]
+    mock_profile.essence_icon_y_list = [200, 300]
+    mock_profile.DRAG_START_POS = Point(100, 900)
+    mock_profile.DRAG_END_POS = Point(100, 100)
+    mock_profile.SCROLLBAR_CHECK_POS = None
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    correct_mock = MagicMock()
+    monkeypatch.setattr(scanner_engine_module, "check_scene", lambda *_args: True)
+    monkeypatch.setattr(engine, "_scan_current_page", MagicMock())
+    monkeypatch.setattr(engine, "_scan_single_row", MagicMock(return_value=True))
+    monkeypatch.setattr(
+        engine,
+        "_progressive_drag",
+        MagicMock(side_effect=[(800, False), (100, True)]),
+    )
+    monkeypatch.setattr(engine, "_correct_overscroll", correct_mock)
+    monkeypatch.setattr(
+        engine, "_check_scrollbar_at_bottom", MagicMock(return_value=False)
+    )
+
+    engine.execute(threading.Event())
+
+    assert correct_mock.call_count == expected_calls
 
 
 def test_exact_level_skip_isolated_by_level(
