@@ -18,7 +18,10 @@ export function useUpdateMirrors() {
     } catch (error) {
       console.error('获取更新源列表失败：', error)
       mirrorOptions.value = [{ title: 'GitHub 官方', value: 'github' }]
-      flowOptions.value = [{ title: '一图流 API (CN 镜像)', value: 'cn_yituliu' }]
+      flowOptions.value = [
+        { title: 'GitHub Release', value: 'github' },
+        { title: '一图流 API (CN 镜像)', value: 'cn_yituliu' },
+      ]
     }
   })
 

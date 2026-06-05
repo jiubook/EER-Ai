@@ -118,22 +118,31 @@
                       :color="highLevelTreasureOnlyCheckAttribute ? 'primary' : 'grey'"
                       size="small"
                       :variant="highLevelTreasureOnlyCheckAttribute ? 'flat' : 'outlined'"
-                      @click.stop="highLevelTreasureOnlyCheckAttribute = !highLevelTreasureOnlyCheckAttribute"
-                    >基础</v-chip>
+                      @click.stop="
+                        highLevelTreasureOnlyCheckAttribute = !highLevelTreasureOnlyCheckAttribute
+                      "
+                      >基础</v-chip
+                    >
                     <v-chip
                       class="mx-1"
                       :color="highLevelTreasureOnlyCheckSecondary ? 'primary' : 'grey'"
                       size="small"
                       :variant="highLevelTreasureOnlyCheckSecondary ? 'flat' : 'outlined'"
-                      @click.stop="highLevelTreasureOnlyCheckSecondary = !highLevelTreasureOnlyCheckSecondary"
-                    >附加</v-chip>
+                      @click.stop="
+                        highLevelTreasureOnlyCheckSecondary = !highLevelTreasureOnlyCheckSecondary
+                      "
+                      >附加</v-chip
+                    >
                     <v-chip
                       class="mx-1"
                       :color="highLevelTreasureOnlyCheckSkill ? 'primary' : 'grey'"
                       size="small"
                       :variant="highLevelTreasureOnlyCheckSkill ? 'flat' : 'outlined'"
-                      @click.stop="highLevelTreasureOnlyCheckSkill = !highLevelTreasureOnlyCheckSkill"
-                    >技能</v-chip>
+                      @click.stop="
+                        highLevelTreasureOnlyCheckSkill = !highLevelTreasureOnlyCheckSkill
+                      "
+                      >技能</v-chip
+                    >
                     <span>项</span>
                   </template>
                 </v-radio>
@@ -211,11 +220,7 @@
 
           <!-- 1-B: 额外属性匹配 -->
           <h2>自定义基质 | 额外将以下属性的基质视为宝藏</h2>
-          <v-row
-            v-for="(essenceStat, index) in treasureEssenceStats"
-            :key="index"
-            align="center"
-          >
+          <v-row v-for="(essenceStat, index) in treasureEssenceStats" :key="index" align="center">
             <v-col cols="12" md="3" sm="6">
               <v-text-field
                 v-model="essenceStat.name"
@@ -327,7 +332,12 @@
                 color="primary"
                 prepend-icon="mdi-plus"
                 @click="
-                  treasureEssenceStats.push({ name: '', attribute: null, secondary: null, skill: null })
+                  treasureEssenceStats.push({
+                    name: '',
+                    attribute: null,
+                    secondary: null,
+                    skill: null,
+                  })
                 "
               >
                 添加自定义宝藏基质
@@ -342,7 +352,12 @@
                 icon="mdi-plus"
                 variant="text"
                 @click="
-                  treasureEssenceStats.push({ name: '', attribute: null, secondary: null, skill: null })
+                  treasureEssenceStats.push({
+                    name: '',
+                    attribute: null,
+                    secondary: null,
+                    skill: null,
+                  })
                 "
               />
             </v-col>
@@ -359,11 +374,15 @@
             <v-radio label="跳过对它的操作" value="skip" />
             <v-radio label="继续操作（当作无瑕基质进行操作）" value="process" />
             <v-radio label="结束本次扫描" value="stop" />
-            <v-radio label="仅高等级判定（只按高等级属性词条判定，不匹配武器）" value="high_level_only" />
+            <v-radio
+              label="仅高等级判定（只按高等级属性词条判定，不匹配武器）"
+              value="high_level_only"
+            />
           </v-radio-group>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
             "跳过对它的操作"只是不锁定/解锁/弃用该基质，扫描会继续前往下一个基质；"结束本次扫描"等同于再次按下
-            ] 中断扫描，并会保留已扫描到的统计数据。"仅高等级判定"会使用下方的高等级属性词条判定规则，但不进行武器匹配。
+            ]
+            中断扫描，并会保留已扫描到的统计数据。"仅高等级判定"会使用下方的高等级属性词条判定规则，但不进行武器匹配。
           </v-alert>
 
           <!-- 非无瑕基质高等级判定设置 -->
@@ -401,23 +420,39 @@
                               class="mx-1"
                               :color="nonFiveStarHighLevelOnlyCheckAttribute ? 'primary' : 'grey'"
                               size="small"
-                              :variant="nonFiveStarHighLevelOnlyCheckAttribute ? 'flat' : 'outlined'"
-                              @click.stop="nonFiveStarHighLevelOnlyCheckAttribute = !nonFiveStarHighLevelOnlyCheckAttribute"
-                            >基础</v-chip>
+                              :variant="
+                                nonFiveStarHighLevelOnlyCheckAttribute ? 'flat' : 'outlined'
+                              "
+                              @click.stop="
+                                nonFiveStarHighLevelOnlyCheckAttribute =
+                                  !nonFiveStarHighLevelOnlyCheckAttribute
+                              "
+                              >基础</v-chip
+                            >
                             <v-chip
                               class="mx-1"
                               :color="nonFiveStarHighLevelOnlyCheckSecondary ? 'primary' : 'grey'"
                               size="small"
-                              :variant="nonFiveStarHighLevelOnlyCheckSecondary ? 'flat' : 'outlined'"
-                              @click.stop="nonFiveStarHighLevelOnlyCheckSecondary = !nonFiveStarHighLevelOnlyCheckSecondary"
-                            >附加</v-chip>
+                              :variant="
+                                nonFiveStarHighLevelOnlyCheckSecondary ? 'flat' : 'outlined'
+                              "
+                              @click.stop="
+                                nonFiveStarHighLevelOnlyCheckSecondary =
+                                  !nonFiveStarHighLevelOnlyCheckSecondary
+                              "
+                              >附加</v-chip
+                            >
                             <v-chip
                               class="mx-1"
                               :color="nonFiveStarHighLevelOnlyCheckSkill ? 'primary' : 'grey'"
                               size="small"
                               :variant="nonFiveStarHighLevelOnlyCheckSkill ? 'flat' : 'outlined'"
-                              @click.stop="nonFiveStarHighLevelOnlyCheckSkill = !nonFiveStarHighLevelOnlyCheckSkill"
-                            >技能</v-chip>
+                              @click.stop="
+                                nonFiveStarHighLevelOnlyCheckSkill =
+                                  !nonFiveStarHighLevelOnlyCheckSkill
+                              "
+                              >技能</v-chip
+                            >
                             <span>项</span>
                           </template>
                         </v-radio>
@@ -590,7 +625,8 @@
                 label="修正翻页滚动过量（实验性质）"
               />
               <v-alert border="start" class="mt-2" type="warning" variant="tonal">
-                默认关闭。开启后，若翻页后第一行被判定为已扫描过的重复基质，会向上微调 3/4 行并重扫第一行。
+                默认关闭。开启后，若翻页后第一行被判定为已扫描过的重复基质，会向上微调 3/4
+                行并重扫第一行。
               </v-alert>
             </div>
           </v-expand-transition>
@@ -810,7 +846,6 @@ interface EssenceStat {
 
 type TreasureMatchMode = 'only' | 'all' | 'any' | 'sum'
 
-
 const selectedWeaponIds = ref<string[]>([])
 const treasureEssenceStats = ref<EssenceStat[]>([])
 const treasureAction = ref('lock')
@@ -841,7 +876,7 @@ const sameTypeTreasureLimitEnabled = ref(false)
 const sameTypeTreasureLimit = ref(1)
 const sameTypeGroupMode = ref<'by_stat' | 'by_weapon'>('by_stat')
 const sameTypeKeepBest = ref(true)
-const updateFlow = ref('cn_yituliu')
+const updateFlow = ref('github')
 const updateGithubMirror = ref('github')
 const updateProxyEnabled = ref(false)
 const updateProxyPort = ref('7890')
@@ -863,7 +898,7 @@ const selectedMirrorName = computed(() => {
 
 const selectedFlowName = computed(() => {
   const flow = flowOptions.value.find((m) => m.value === updateFlow.value)
-  return flow ? flow.title : '一图流 API (CN 镜像)'
+  return flow ? flow.title : 'GitHub Release'
 })
 
 function getWeaponStatsDescription(weaponId: string): string {
@@ -1054,8 +1089,10 @@ async function getConfig() {
   nonFiveStarHighLevelSkillThreshold.value = non_five_star_high_level_skill_threshold || 3
   nonFiveStarHighLevelMatchMode.value = non_five_star_high_level_match_mode || 'any'
   nonFiveStarHighLevelSumThreshold.value = non_five_star_high_level_sum_threshold || 6
-  nonFiveStarHighLevelOnlyCheckAttribute.value = non_five_star_high_level_only_check_attribute !== false
-  nonFiveStarHighLevelOnlyCheckSecondary.value = non_five_star_high_level_only_check_secondary !== false
+  nonFiveStarHighLevelOnlyCheckAttribute.value =
+    non_five_star_high_level_only_check_attribute !== false
+  nonFiveStarHighLevelOnlyCheckSecondary.value =
+    non_five_star_high_level_only_check_secondary !== false
   nonFiveStarHighLevelOnlyCheckSkill.value = non_five_star_high_level_only_check_skill !== false
   sameTypeTreasureLimitEnabled.value = same_type_treasure_limit_enabled || false
   sameTypeTreasureLimit.value = same_type_treasure_limit || 1
@@ -1093,7 +1130,7 @@ function normalizeUpdateFlow(value: string | undefined, legacyMirror: string | u
   if (value === 'cn') return 'cn_yituliu'
   if (value === 'cn_yituliu' || value === 'cn_mirrorchyan' || value === 'github') return value
   if (legacyMirror === 'cn') return 'cn_yituliu'
-  return 'cn_yituliu'
+  return 'github'
 }
 
 async function postConfig() {
