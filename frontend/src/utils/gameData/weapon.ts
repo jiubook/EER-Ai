@@ -1,6 +1,8 @@
 import { useStaticData } from '@/utils/gameData/staticData'
 
 export interface EssenceStat {
+  /** 自定义显示名称，用于武器总览页面展示 */
+  name?: string
   attribute: string | null
   secondary: string | null
   skill: string | null

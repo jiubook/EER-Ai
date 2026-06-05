@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from endfield_essence_recognizer.updater.mirrors import MIRRORS
 from endfield_essence_recognizer.updater.sources import (
@@ -37,20 +37,74 @@ class NonFiveStarBehavior(StrEnum):
     SKIP = "skip"
     """Skip any operations on non-5-star essences."""
 
+    STOP = "stop"
+    """Stop the current scan when a non-5-star essence is encountered."""
+
+    HIGH_LEVEL_ONLY = "high_level_only"
+    """仅对非无瑕基质进行高等级属性词条判定，不判定武器匹配。"""
+
+
+class TreasureMatchMode(StrEnum):
+    """How configured treasure conditions are matched."""
+
+    ONLY = "only"
+    """Only configured slots are checked; unconfigured slots are ignored."""
+
+    ALL = "all"
+    """All three slots must be configured and matched."""
+
+    ANY = "any"
+    """Any configured slot can match."""
+
+    SUM = "sum"
+    """三项词条等级之和达到设定阈值即匹配（仅用于高等级属性判定）。"""
+
+
+class SameTypeGroupMode(StrEnum):
+    """同类型宝藏基质的分组方式。"""
+
+    BY_STAT = "by_stat"
+    """按三个词条名称分组（属性组合相同即为同类型）。"""
+
+    BY_WEAPON = "by_weapon"
+    """按武器分组（每把武器独立计数，相同属性组合的不同武器互不影响）。"""
+
 
 class EssenceStats(BaseModel):
-    attribute: str | None
-    secondary: str | None
-    skill: str | None
+    """自定义宝藏基质属性组合，支持可选的显示名称。"""
+
+    name: str = ""
+    """自定义显示名称，用于武器总览页面展示。"""
+    attribute: str | None = None
+    """基础属性 ID，None 表示不限制。"""
+    secondary: str | None = None
+    """附加属性 ID，None 表示不限制。"""
+    skill: str | None = None
+    """技能属性 ID，None 表示不限制。"""
+    no_prompt_switch: bool = False
+    """勾选"不再提示"后为 True，跳过对该自定义基质与内置武器的重合检查。"""
 
 
 class UserSetting(BaseModel):
-    _VERSION: ClassVar[int] = 5
+    _VERSION: ClassVar[int] = 6
+    _same_type_treasure_counts: dict[tuple[str | None, ...], int] = PrivateAttr(
+        default_factory=dict
+    )
+    _same_type_best_levels: dict[tuple[str | None, ...] | str, tuple[int, int, int]] = (
+        PrivateAttr(default_factory=dict)
+    )
+    # 每个分组（stat_key 或 weapon_id）中，等级与已记录最佳等级相等时还可“跳过”
+    # 的次数；由 profile 中已保存的同等级基质数量初始化，用于完整扫描时避免把
+    # 已保存的那几枚误判为多出来的重复品。
+    _same_type_equal_skips: dict[tuple[str | None, ...] | str, int] = PrivateAttr(
+        default_factory=dict
+    )
 
     version: int = _VERSION
 
     trash_weapon_ids: list[str] = []
     treasure_essence_stats: list[EssenceStats] = []
+    treasure_essence_match_mode: TreasureMatchMode = TreasureMatchMode.ALL
 
     treasure_action: Action = Action.LOCK
     trash_action: Action = Action.UNLOCK
@@ -66,9 +120,54 @@ class UserSetting(BaseModel):
     """高等级附加属性词条的等级阈值（+1~+6）"""
     high_level_treasure_skill_threshold: int = Field(default=3, ge=1, le=3)
     """高等级技能属性词条的等级阈值（+1~+3）"""
+    high_level_treasure_match_mode: TreasureMatchMode = TreasureMatchMode.ANY
+    """高等级属性词条的匹配方式：仅/和/或/三项相加。"""
+    high_level_treasure_sum_threshold: int = Field(default=6, ge=3, le=15)
+    """三项相加模式下，三个词条等级之和的阈值（3~15）。"""
+    high_level_treasure_only_check_attribute: bool = True
+    """仅模式下是否检查基础属性槽位"""
+    high_level_treasure_only_check_secondary: bool = True
+    """仅模式下是否检查附加属性槽位"""
+    high_level_treasure_only_check_skill: bool = True
+    """仅模式下是否检查技能属性槽位"""
+
+    # 非无瑕基质专用的高等级判定设置
+    non_five_star_separate_high_level_settings: bool = False
+    """是否为非无瑕基质启用独立的高等级属性词条判定设置"""
+    non_five_star_high_level_attribute_threshold: int = Field(default=3, ge=1, le=6)
+    """非无瑕基质高等级基础属性词条的等级阈值（+1~+6）"""
+    non_five_star_high_level_secondary_threshold: int = Field(default=3, ge=1, le=6)
+    """非无瑕基质高等级附加属性词条的等级阈值（+1~+6）"""
+    non_five_star_high_level_skill_threshold: int = Field(default=3, ge=1, le=3)
+    """非无瑕基质高等级技能属性词条的等级阈值（+1~+3）"""
+    non_five_star_high_level_match_mode: TreasureMatchMode = TreasureMatchMode.ANY
+    """非无瑕基质高等级属性词条的匹配方式：仅/和/或/三项相加。"""
+    non_five_star_high_level_sum_threshold: int = Field(default=6, ge=3, le=15)
+    """非无瑕基质三项相加模式下，三个词条等级之和的阈值（3~15）。"""
+    non_five_star_high_level_only_check_attribute: bool = True
+    """非无瑕基质仅模式下是否检查基础属性槽位"""
+    non_five_star_high_level_only_check_secondary: bool = True
+    """非无瑕基质仅模式下是否检查附加属性槽位"""
+    non_five_star_high_level_only_check_skill: bool = True
+    """非无瑕基质仅模式下是否检查技能属性槽位"""
+
+    same_type_treasure_limit_enabled: bool = False
+    """是否启用同类型宝藏基质数量上限。"""
+    same_type_treasure_limit: int = Field(default=1, ge=1, le=999)
+    """每类宝藏基质允许保留的数量上限；超过后视为养成材料。"""
+
+    same_type_group_mode: SameTypeGroupMode = SameTypeGroupMode.BY_STAT
+    """同类型宝藏基质的分组方式：按基质划分 / 按武器划分。"""
+
+    same_type_keep_best: bool = True
+    """启用留大弃小策略：同类型中保留等级更高的基质，等级更低的视为养成材料。"""
 
     auto_page_flip: bool = True
     """扫描时是否自动翻页"""
+    fix_grid_row_offset_after_page_flip: bool = True
+    """是否启用翻页后网格行偏移修复（实验性质）"""
+    fix_page_flip_overscroll: bool = False
+    """是否启用翻页滚动过量修正（实验性质）"""
 
     update_mirror: str = "github"
     """兼容旧字段：GitHub 下载镜像源。"""
@@ -151,12 +250,43 @@ class UserSetting(BaseModel):
             data.setdefault("update_flow", DEFAULT_UPDATE_FLOW)
             data.setdefault("update_github_mirror", "github")
 
+    @staticmethod
+    def _migrate_v5_to_v6(data: dict) -> None:
+        """v5 → v6: 添加宝藏匹配方式、仅模式分类开关、同类型数量上限、分组模式和自定义名称。"""
+        data.setdefault("treasure_essence_match_mode", "all")
+        data.setdefault("high_level_treasure_match_mode", "any")
+        data.setdefault("high_level_treasure_sum_threshold", 6)
+        data.pop("high_level_treasure_stats", None)
+        data.setdefault("high_level_treasure_only_check_attribute", True)
+        data.setdefault("high_level_treasure_only_check_secondary", True)
+        data.setdefault("high_level_treasure_only_check_skill", True)
+        data.setdefault("same_type_treasure_limit_enabled", False)
+        data.setdefault("same_type_treasure_limit", 1)
+        data.setdefault("same_type_group_mode", "by_stat")
+        data.setdefault("same_type_keep_best", True)
+        data.setdefault("fix_grid_row_offset_after_page_flip", True)
+        data.setdefault("fix_page_flip_overscroll", False)
+        for entry in data.get("treasure_essence_stats", []):
+            entry.setdefault("name", "")
+            entry.setdefault("no_prompt_switch", False)
+        # 非无瑕基质专用的高等级判定设置
+        data.setdefault("non_five_star_separate_high_level_settings", False)
+        data.setdefault("non_five_star_high_level_attribute_threshold", 3)
+        data.setdefault("non_five_star_high_level_secondary_threshold", 3)
+        data.setdefault("non_five_star_high_level_skill_threshold", 3)
+        data.setdefault("non_five_star_high_level_match_mode", "any")
+        data.setdefault("non_five_star_high_level_sum_threshold", 6)
+        data.setdefault("non_five_star_high_level_only_check_attribute", True)
+        data.setdefault("non_five_star_high_level_only_check_secondary", True)
+        data.setdefault("non_five_star_high_level_only_check_skill", True)
+
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）
     _MIGRATIONS: ClassVar[dict[int, Any]] = {
         2: _migrate_v2_to_v3.__func__,
         3: _migrate_v3_to_v4.__func__,
         4: _migrate_v4_to_v5.__func__,
+        5: _migrate_v5_to_v6.__func__,
     }
 
     @classmethod

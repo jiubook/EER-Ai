@@ -58,6 +58,15 @@
               >
                 6★
               </v-chip>
+              <v-chip
+                color="primary"
+                filter
+                size="small"
+                value="custom"
+                variant="outlined"
+              >
+                自定义
+              </v-chip>
             </v-chip-group>
           </div>
 
@@ -86,7 +95,8 @@
               <div class="matrix-card-body">
                 <section class="weapon-identity">
                   <div class="weapon-icon-wrap" :class="getWeaponTierClass(entry.weapon_id)">
-                    <item-icon class="weapon-icon-small" :item-id="entry.weapon_id" />
+                    <custom-stat-icon v-if="isCustomEntry(entry.weapon_id)" hide-name :name="entry.weapon_name || entry.weapon_id" small />
+                    <item-icon v-else class="weapon-icon-small" :item-id="entry.weapon_id" />
                     <span class="weapon-tier">{{ getWeaponRarityText(entry.weapon_id) }}</span>
                   </div>
                   <div class="weapon-info">
@@ -339,6 +349,36 @@
             请先添加武器到宝藏基质配置，然后点击「计算所有武器的刷取建议」。
           </v-alert>
 
+          <!-- 星级筛选 & 排序切换 -->
+          <div v-if="recommendations.length > 0" class="d-flex align-center flex-wrap gap-2 mb-4">
+            <span class="text-body-2 text-medium-emphasis">筛选：</span>
+            <v-chip-group v-model="recSelectedRarities" column multiple>
+              <v-chip color="primary" filter size="small" value="3" variant="outlined">
+                3★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="4" variant="outlined">
+                4★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="5" variant="outlined">
+                5★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="6" variant="outlined">
+                6★
+              </v-chip>
+              <v-chip color="primary" filter size="small" value="custom" variant="outlined">
+                自定义
+              </v-chip>
+            </v-chip-group>
+            <v-btn
+              :prepend-icon="recSortMode === 'runs' ? 'mdi-sort-numeric-ascending' : (recSortAsc ? 'mdi-sort-ascending' : 'mdi-sort-descending')"
+              size="small"
+              variant="tonal"
+              @click="toggleRecSort"
+            >
+              {{ recSortMode === 'runs' ? '按刷取次数' : '按等级' }}
+            </v-btn>
+          </div>
+
           <v-card
             v-for="rec in sortedRecommendations"
             :key="rec.weapon_id"
@@ -347,9 +387,10 @@
           >
             <v-card-item>
               <template #prepend>
-                <item-icon class="weapon-icon-small" :item-id="rec.weapon_id" />
+                <custom-stat-icon v-if="isCustomEntry(rec.weapon_id)" hide-name :name="getCustomStatName(rec.weapon_id)" small />
+                <item-icon v-else class="weapon-icon-small" :item-id="rec.weapon_id" />
               </template>
-              <v-card-title>{{ rec.weapon_name }}</v-card-title>
+              <v-card-title>{{ isCustomEntry(rec.weapon_id) ? getCustomStatName(rec.weapon_id) : rec.weapon_name }}</v-card-title>
               <v-card-subtitle>
                 当前: +{{ rec.current_levels[0] }} / +{{ rec.current_levels[1] }} / +{{ rec.current_levels[2] }}
                 → 目标: +{{ rec.target_levels[0] }} / +{{ rec.target_levels[1] }} / +{{ rec.target_levels[2] }}
@@ -533,6 +574,23 @@
             prepend-inner-icon="mdi-magnify"
             variant="outlined"
           />
+          <!-- 自定义基质区段 -->
+          <template v-if="customMatrixEntries.length > 0">
+            <h4 class="mt-4 mb-2 d-flex align-center">
+              <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+              自定义基质
+            </h4>
+            <div class="weapon-grid">
+              <div
+                v-for="entry in customMatrixEntries"
+                :key="entry.syntheticId"
+                class="weapon-item"
+                @click="onAddCustomStat(entry.index)"
+              >
+                <custom-stat-icon :name="entry.displayName" />
+              </div>
+            </div>
+          </template>
           <template v-for="wType in weaponTypes" :key="wType.id">
             <h4 class="mt-4 mb-2 d-flex align-center">
               <img
@@ -570,6 +628,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import BackToTop from '@/components/BackToTop.vue'
+import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
@@ -596,6 +655,58 @@ const { weaponsMap, weaponTypes } = useStaticData()
 const showAddWeaponDialog = ref(false)
 const weaponSearch = ref('')
 const computing = ref(false)
+
+// --- 自定义基质相关 ---
+
+/** 判断是否为自定义基质条目（weapon_id 以 custom_stat_ 开头） */
+function isCustomEntry(weaponId: string): boolean {
+  return weaponId.startsWith('custom_stat_')
+}
+
+/** 获取自定义基质的显示名称 */
+function getCustomStatName(weaponId: string): string {
+  const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+  return customStats.value[index]?.name || `自定义基质 ${index + 1}`
+}
+
+/** 自定义宝藏基质属性配置列表，用于读取自定义条目的属性名 */
+const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null }>>([])
+
+/** 从后端获取配置中的自定义宝藏基质属性列表 */
+async function fetchCustomStats() {
+  try {
+    const res = await fetch('/api/config')
+    const config = await res.json()
+    customStats.value = config.treasure_essence_stats || []
+  } catch (error) {
+    console.error('获取自定义宝藏基质配置失败:', error)
+  }
+}
+
+/** 自定义基质条目列表，用于添加武器对话框展示 */
+const customMatrixEntries = computed(() => {
+  return customStats.value.map((stat, index) => ({
+    syntheticId: `custom_stat_${index}`,
+    displayName: stat.name || `自定义基质 ${index + 1}`,
+    index,
+  }))
+})
+
+/** 添加自定义基质条目到宝藏基质配置 */
+async function onAddCustomStat(index: number) {
+  const syntheticId = `custom_stat_${index}`
+  // 检查是否已添加
+  if (matrixEntries.value.some((e) => e.weapon_id === syntheticId)) return
+  const stat = customStats.value[index]
+  await addTreasureMatrixEntry({
+    weapon_id: syntheticId,
+    weapon_name: stat?.name || `自定义基质 ${index + 1}`,
+    affix1_level: 1,
+    affix2_level: 1,
+    affix3_level: 1,
+  })
+  showAddWeaponDialog.value = false
+}
 
 const targetAffix1 = ref(6)
 const targetAffix2 = ref(6)
@@ -650,6 +761,24 @@ const useGreaseForSteps = ref<Record<string, Record<string, boolean>>>({})
 
 // 排序后的推荐列表：初始排序后保持稳定，用户切换冷却脂时不重新排序
 const frozenSortOrder = ref<string[] | null>(null)
+
+// 刷取建议区域的星级筛选（独立于宝藏基质配置的筛选）
+const recSelectedRarities = ref<string[]>(['custom', '6', '5', '4', '3'])
+// 刷取建议排序模式：'runs' = 按刷取次数(默认), 'level' = 按等级
+const recSortMode = ref<'runs' | 'level'>('runs')
+// 等级排序方向：true = 升序, false = 降序
+const recSortAsc = ref(true)
+
+function toggleRecSort() {
+  if (recSortMode.value === 'runs') {
+    recSortMode.value = 'level'
+    recSortAsc.value = true
+  } else if (recSortAsc.value) {
+    recSortAsc.value = false
+  } else {
+    recSortMode.value = 'runs'
+  }
+}
 
 // 账号切换时重新加载缓存
 watch(
@@ -729,14 +858,36 @@ watch(recommendations, (newRecommendations: Recommendation[]) => {
 }, { deep: true })
 
 const sortedRecommendations = computed(() => {
-  if (!frozenSortOrder.value) {
-    return recommendations.value
+  // 星级筛选
+  const filtered = recommendations.value.filter((rec) => {
+    if (isCustomEntry(rec.weapon_id)) {
+      return recSelectedRarities.value.includes('custom')
+    }
+    const rarity = getWeaponRarity(rec.weapon_id)
+    if (rarity === null) return false
+    return recSelectedRarities.value.includes(String(rarity))
+  })
+
+  if (recSortMode.value === 'runs') {
+    // 按刷取次数排序：使用冻结顺序或按刷取次数升序
+    if (frozenSortOrder.value) {
+      const orderMap = new Map(frozenSortOrder.value.map((id, idx) => [id, idx]))
+      return filtered.toSorted((a, b) => {
+        return (orderMap.get(a.weapon_id) ?? 0) - (orderMap.get(b.weapon_id) ?? 0)
+      })
+    }
+    return filtered.toSorted((a, b) => a.total_expected_runs - b.total_expected_runs)
   }
 
-  // 使用冻结的顺序
-  const orderMap = new Map(frozenSortOrder.value.map((id, idx) => [id, idx]))
-  return [...recommendations.value].toSorted((a, b) => {
-    return (orderMap.get(a.weapon_id) ?? 0) - (orderMap.get(b.weapon_id) ?? 0)
+  // 按等级排序：自定义基质优先 → 按稀有度（6★ → 3★ 或反向）
+  return filtered.toSorted((a, b) => {
+    const aCustom = isCustomEntry(a.weapon_id) ? 1 : 0
+    const bCustom = isCustomEntry(b.weapon_id) ? 1 : 0
+    if (aCustom !== bCustom) return bCustom - aCustom
+
+    const aRarity = getWeaponRarity(a.weapon_id) ?? 0
+    const bRarity = getWeaponRarity(b.weapon_id) ?? 0
+    return recSortAsc.value ? bRarity - aRarity : aRarity - bRarity
   })
 })
 
@@ -752,8 +903,11 @@ const matrixEntries = computed({
 const filteredMatrixEntries = computed(() => {
   let entries = matrixEntries.value
 
-  // 过滤稀有度
+  // 过滤稀有度（自定义条目按 6★ 处理）
   entries = entries.filter((entry) => {
+    if (isCustomEntry(entry.weapon_id)) {
+      return selectedRarities.value.includes('custom')
+    }
     const weapon = weaponsMap.value.get(entry.weapon_id)
     if (!weapon) return false
     return selectedRarities.value.includes(String(weapon.rarity))
@@ -769,6 +923,11 @@ const filteredMatrixEntries = computed(() => {
 
   // 按优先级降序排序，优先级相同时按稀有度降序排序（6★ -> 3★）
   return entries.toSorted((a, b) => {
+    // 自定义条目始终排在最前面
+    const aCustom = isCustomEntry(a.weapon_id) ? 1 : 0
+    const bCustom = isCustomEntry(b.weapon_id) ? 1 : 0
+    if (aCustom !== bCustom) return bCustom - aCustom
+
     const pa = a.priority || 0
     const pb = b.priority || 0
     if (pa !== pb) return pb - pa
@@ -779,7 +938,23 @@ const filteredMatrixEntries = computed(() => {
   })
 })
 
+/**
+ * 获取武器的属性名称列表
+ * 自定义条目从 customStats 配置中读取
+ */
 function getWeaponTraitNames(weaponId: string): string[] {
+  // 自定义条目：从配置中读取属性
+  if (isCustomEntry(weaponId)) {
+    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+    const stat = customStats.value[index]
+    if (!stat) return ['自定义基质']
+    const parts: string[] = []
+    if (stat.attribute) parts.push(getGemTagName(stat.attribute))
+    if (stat.secondary) parts.push(getGemTagName(stat.secondary))
+    if (stat.skill) parts.push(getGemTagName(stat.skill))
+    return parts.length > 0 ? parts : ['自定义基质']
+  }
+
   const stats = getStatsForWeapon(weaponId)
   const parts: string[] = []
   if (stats.attribute) parts.push(getGemTagName(stats.attribute))
@@ -788,7 +963,12 @@ function getWeaponTraitNames(weaponId: string): string[] {
   return parts.length > 0 ? parts : ['无属性']
 }
 
+/**
+ * 获取武器稀有度
+ * 自定义条目默认为 6★
+ */
 function getWeaponRarity(weaponId: string): number | null {
+  if (isCustomEntry(weaponId)) return 6
   return weaponsMap.value.get(weaponId)?.rarity ?? null
 }
 
@@ -973,6 +1153,9 @@ async function computeAll() {
         // 必须勾选了"参与计算"
         if (entry.include_in_calculation === false) return false
 
+        // 自定义基质始终参与计算
+        if (isCustomEntry(entry.weapon_id)) return true
+
         // 必须在选中的稀有度范围内
         const weapon = weaponsMap.value.get(entry.weapon_id)
         if (!weapon) return false
@@ -1022,6 +1205,7 @@ function navigateToPlanner() {
 
 onMounted(() => {
   fetchProfiles()
+  fetchCustomStats()
 })
 </script>
 
@@ -1110,6 +1294,7 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
       border-radius: 8px;
     }
 
+    /* 自定义基质条目图标样式 */
     .weapon-icon-wrap.tier-6 {
       border-color: #ff5a36;
       box-shadow: 0 4px 14px rgba(255, 90, 54, 0.28);

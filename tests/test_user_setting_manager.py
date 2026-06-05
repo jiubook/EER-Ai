@@ -21,13 +21,13 @@ def manager(settings_file):
 
 
 def test_manager_initial_state(manager, settings_file):
-    """Test the initial state of the UserSettingManager."""
+    """测试 UserSettingManager 的初始状态。"""
     assert manager._user_setting_file == settings_file
     assert isinstance(manager.get_user_setting(), UserSetting)
 
 
 def test_get_user_setting_returns_copy(manager):
-    """Test that get_user_setting returns a deep copy of the settings."""
+    """测试 get_user_setting 返回配置的深拷贝。"""
     s1 = manager.get_user_setting()
     s2 = manager.get_user_setting()
     assert s1 == s2
@@ -35,21 +35,26 @@ def test_get_user_setting_returns_copy(manager):
 
 
 def test_load_user_setting_file_not_exists(manager, settings_file):
-    """Test that loading from a non-existent file creates a default setting file."""
+    """测试从不存在的文件加载时创建默认配置文件。"""
     assert not settings_file.exists()
     manager.load_user_setting()
     assert settings_file.exists()
-    # Should be default settings
+    # 应该是默认配置
     assert manager.get_user_setting().trash_weapon_ids == []
 
 
 def test_load_user_setting_valid_file(manager, settings_file):
-    """Test that a valid setting file is correctly loaded into memory."""
+    """测试有效的配置文件能正确加载到内存。"""
     data = {
         "version": UserSetting._VERSION,
         "trash_weapon_ids": ["weapon_1"],
         "treasure_essence_stats": [
-            {"attribute": "atk", "secondary": "crit", "skill": None}
+            {
+                "name": "自定义基质",
+                "attribute": "atk",
+                "secondary": "crit",
+                "skill": None,
+            }
         ],
     }
     settings_file.write_text(json.dumps(data), encoding="utf-8")
@@ -59,19 +64,20 @@ def test_load_user_setting_valid_file(manager, settings_file):
     assert setting.trash_weapon_ids == ["weapon_1"]
     assert len(setting.treasure_essence_stats) == 1
     assert setting.treasure_essence_stats[0].attribute == "atk"
+    assert setting.treasure_essence_stats[0].name == "自定义基质"
 
 
 def test_load_user_setting_invalid_version_backups_file(manager, settings_file):
-    """Test that a file with an invalid version is backed up and replaced with defaults."""
+    """测试无效版本的文件被备份并替换为默认配置。"""
     data = {
-        "version": -1,  # Wrong version
+        "version": -1,  # 错误版本
         "trash_weapon_ids": ["old_weapon"],
     }
     settings_file.write_text(json.dumps(data), encoding="utf-8")
 
     manager.load_user_setting()
 
-    # Check backup exists (with timestamp)
+    # 检查备份文件存在（带时间戳）
     backup_files = list(settings_file.parent.glob("settings.backup.*.json"))
     assert len(backup_files) == 1
     backup_file = backup_files[0]
@@ -79,9 +85,9 @@ def test_load_user_setting_invalid_version_backups_file(manager, settings_file):
         "old_weapon"
     ]
 
-    # Current setting should be default
+    # 当前配置应该是默认值
     assert manager.get_user_setting().trash_weapon_ids == []
-    # New file should be saved with defaults
+    # 新文件应该已保存默认配置
     assert settings_file.exists()
     assert (
         json.loads(settings_file.read_text(encoding="utf-8"))["version"]
@@ -90,12 +96,12 @@ def test_load_user_setting_invalid_version_backups_file(manager, settings_file):
 
 
 def test_load_user_setting_corrupt_json_backups_file(manager, settings_file):
-    """Test that a corrupt JSON file is backed up and replaced with defaults."""
+    """测试损坏的 JSON 文件被备份并替换为默认配置。"""
     settings_file.write_text("not a json", encoding="utf-8")
 
     manager.load_user_setting()
 
-    # Check backup exists (with timestamp)
+    # 检查备份文件存在（带时间戳）
     backup_files = list(settings_file.parent.glob("settings.backup.*.json"))
     assert len(backup_files) == 1
     backup_file = backup_files[0]
@@ -105,7 +111,7 @@ def test_load_user_setting_corrupt_json_backups_file(manager, settings_file):
 
 
 def test_update_from_dict_version_mismatch(manager):
-    """Test that update_from_dict raises ConfigVersionMismatchError on version mismatch."""
+    """测试 update_from_dict 在版本不匹配时抛出 ConfigVersionMismatchError。"""
     data = {"version": -1, "trash_weapon_ids": ["test"]}
     with pytest.raises(ConfigVersionMismatchError) as excinfo:
         manager.update_from_dict(data)
@@ -114,7 +120,7 @@ def test_update_from_dict_version_mismatch(manager):
 
 
 def test_update_from_user_setting_version_mismatch(manager):
-    """Test that update_from_user_setting raises ConfigVersionMismatchError on version mismatch."""
+    """测试 update_from_user_setting 在版本不匹配时抛出 ConfigVersionMismatchError。"""
     other = UserSetting()
     other.version = -1
     with pytest.raises(ConfigVersionMismatchError) as excinfo:
@@ -124,8 +130,8 @@ def test_update_from_user_setting_version_mismatch(manager):
 
 
 def test_save_user_setting(manager, settings_file):
-    """Test that save_user_setting correctly persists in-memory settings to disk."""
-    # Accessing private member for test setup
+    """测试 save_user_setting 能正确将内存中的配置持久化到磁盘。"""
+    # 访问私有成员用于测试设置
     setting = manager._user_setting
     setting.trash_weapon_ids = ["test_save"]
     manager.save_user_setting()
@@ -136,7 +142,7 @@ def test_save_user_setting(manager, settings_file):
 
 
 def test_update_from_dict(manager, settings_file):
-    """Test that update_from_dict updates settings and saves to disk."""
+    """测试 update_from_dict 更新配置并保存到磁盘。"""
     manager.update_from_dict({"trash_weapon_ids": ["dict_update"]})
     assert manager.get_user_setting().trash_weapon_ids == ["dict_update"]
     assert json.loads(settings_file.read_text(encoding="utf-8"))[
@@ -145,7 +151,7 @@ def test_update_from_dict(manager, settings_file):
 
 
 def test_update_from_user_setting(manager, settings_file):
-    """Test that update_from_user_setting updates settings and saves to disk."""
+    """测试 update_from_user_setting 更新配置并保存到磁盘。"""
     new_setting = UserSetting(trash_weapon_ids=["model_update"])
     manager.update_from_user_setting(new_setting)
     assert manager.get_user_setting().trash_weapon_ids == ["model_update"]
@@ -155,43 +161,9 @@ def test_update_from_user_setting(manager, settings_file):
 
 
 def test_update_from_dict_invalid_data(manager):
-    """Test that update_from_dict raises an exception when provided with invalid data."""
+    """测试 update_from_dict 在提供无效数据时抛出异常。"""
     with pytest.raises(ValidationError):
         manager.update_from_dict({"trash_weapon_ids": "not a list"})
-
-
-def test_config_migration_from_v3_to_v4():
-    """测试从 v3 迁移到 v4"""
-    old_config = {
-        "version": 3,
-        "trash_weapon_ids": ["weapon_1"],
-        "treasure_essence_stats": [],
-        "treasure_action": "lock",
-        "trash_action": "unlock",
-        "non_five_star_behavior": "process",
-        "high_level_treasure_enabled": False,
-        "high_level_treasure_attribute_threshold": 3,
-        "high_level_treasure_secondary_threshold": 3,
-        "high_level_treasure_skill_threshold": 3,
-        "auto_page_flip": True,
-        # v3 没有 update_mirror 和 update_proxy
-    }
-
-    migrated = UserSetting.migrate_from_old_version(old_config)
-
-    # 验证旧数据保留
-    assert migrated.trash_weapon_ids == ["weapon_1"]
-    assert migrated.auto_page_flip is True
-    # 验证新字段有默认值
-    assert migrated.update_mirror == "github"
-    assert migrated.update_flow == "cn_yituliu"
-    assert migrated.update_github_mirror == "github"
-    assert migrated.update_proxy == ""
-    # 验证版本更新
-    assert migrated.version == UserSetting._VERSION
-    assert migrated.update_mirrorchyan_res_id == ""
-    assert migrated.update_mirrorchyan_cdk == ""
-    assert migrated.update_mirrorchyan_user_agent == "EER_APP"
 
 
 def test_config_migration_invalid_version():
@@ -245,6 +217,7 @@ def test_user_setting_schema_stability():
         "version",
         "trash_weapon_ids",
         "treasure_essence_stats",
+        "treasure_essence_match_mode",
         "treasure_action",
         "trash_action",
         "non_five_star_behavior",
@@ -252,7 +225,27 @@ def test_user_setting_schema_stability():
         "high_level_treasure_attribute_threshold",
         "high_level_treasure_secondary_threshold",
         "high_level_treasure_skill_threshold",
+        "high_level_treasure_match_mode",
+        "high_level_treasure_sum_threshold",
+        "high_level_treasure_only_check_attribute",
+        "high_level_treasure_only_check_secondary",
+        "high_level_treasure_only_check_skill",
+        "non_five_star_separate_high_level_settings",
+        "non_five_star_high_level_attribute_threshold",
+        "non_five_star_high_level_secondary_threshold",
+        "non_five_star_high_level_skill_threshold",
+        "non_five_star_high_level_match_mode",
+        "non_five_star_high_level_sum_threshold",
+        "non_five_star_high_level_only_check_attribute",
+        "non_five_star_high_level_only_check_secondary",
+        "non_five_star_high_level_only_check_skill",
+        "same_type_treasure_limit_enabled",
+        "same_type_treasure_limit",
+        "same_type_group_mode",
+        "same_type_keep_best",
         "auto_page_flip",
+        "fix_grid_row_offset_after_page_flip",
+        "fix_page_flip_overscroll",
         "update_mirror",
         "update_flow",
         "update_github_mirror",
@@ -277,12 +270,44 @@ def test_user_setting_schema_stability():
     )
 
 
-def test_config_migration_chain_v2_to_v4():
-    """测试跨版本链式迁移：v2 → v3 → v4（早期 v2，缺少后期新增字段）"""
+def test_essence_stats_schema_stability():
+    """检测 EssenceStats schema 变更，提醒开发者更新迁移逻辑"""
+    from endfield_essence_recognizer.schemas.user_setting import EssenceStats
+
+    expected_fields = {
+        "name",
+        "attribute",
+        "secondary",
+        "skill",
+        "no_prompt_switch",
+    }
+
+    actual_fields = set(EssenceStats.model_fields.keys())
+
+    assert actual_fields == expected_fields, (
+        f"EssenceStats schema 已变更！\n"
+        f"新增字段: {actual_fields - expected_fields}\n"
+        f"删除字段: {expected_fields - actual_fields}\n"
+        f"请执行以下步骤：\n"
+        f"1. 更新 UserSetting._VERSION\n"
+        f"2. 在 _migrate_v{UserSetting._VERSION - 1}_to_v{UserSetting._VERSION}() 添加迁移逻辑\n"
+        f"3. 添加对应的迁移测试\n"
+        f"4. 更新此测试的 expected_fields"
+    )
+
+
+def test_config_migration_chain_v2_to_current():
+    """测试跨版本链式迁移：v2 → 当前版本（早期 v2，缺少后期新增字段）
+
+    注意：此测试主要验证迁移链的完整性，不验证所有字段的默认值。
+    字段遗漏检测由 test_migration_sets_all_required_fields 负责。
+    """
     early_v2_config = {
         "version": 2,
         "trash_weapon_ids": ["weapon_v2"],
-        "treasure_essence_stats": [],
+        "treasure_essence_stats": [
+            {"attribute": "atk", "secondary": None, "skill": "fire"}
+        ],
         "treasure_action": "lock",
         "trash_action": "unlock",
         "high_level_treasure_enabled": False,
@@ -294,19 +319,22 @@ def test_config_migration_chain_v2_to_v4():
 
     migrated = UserSetting.migrate_from_old_version(early_v2_config)
 
+    # 验证迁移链完整性
     assert migrated.version == UserSetting._VERSION
+
+    # 验证旧数据保留
     assert migrated.trash_weapon_ids == ["weapon_v2"]
-    # v2→v3 补充的字段
+    assert len(migrated.treasure_essence_stats) == 1
+    assert migrated.treasure_essence_stats[0].attribute == "atk"
+
+    # 验证关键字段的默认值（只验证几个代表性字段）
     assert migrated.non_five_star_behavior == "process"
     assert migrated.auto_page_flip is True
-    # v3→v4 补充的字段
+    assert migrated.fix_grid_row_offset_after_page_flip is True
+    assert migrated.fix_page_flip_overscroll is False
     assert migrated.update_mirror == "github"
     assert migrated.update_flow == "cn_yituliu"
-    assert migrated.update_github_mirror == "github"
-    assert migrated.update_proxy == ""
-    assert migrated.update_mirrorchyan_res_id == ""
-    assert migrated.update_mirrorchyan_cdk == ""
-    assert migrated.update_mirrorchyan_user_agent == "EER_APP"
+    assert migrated.treasure_essence_match_mode == "all"
 
 
 def test_migrations_completeness():
@@ -320,6 +348,103 @@ def test_migrations_completeness():
             f"缺少迁移函数：v{v} → v{v + 1}\n"
             f"请在 UserSetting 中添加 _migrate_v{v}_to_v{v + 1} 方法"
         )
+
+
+def test_migration_sets_all_required_fields():
+    """测试迁移函数是否为所有新增字段设置了默认值
+
+    从最旧版本（v2）迁移到当前版本后，所有字段都应该有值。
+    这个测试确保迁移函数不会遗漏任何字段。
+
+    注意：由于 Pydantic 模型有默认值，即使迁移函数没有设置字段，
+    模型也会使用默认值。所以这个测试检查的是迁移后的字典是否包含所有字段，
+    而不是检查字段的值。
+
+    - v1→v2: 基础字段（trash_weapon_ids, treasure_essence_stats, treasure_action, trash_action, high_level_treasure_*）
+    """
+    # 最简化的 v2 配置（只有必需字段）
+    minimal_v2_config = {
+        "version": 2,
+        "trash_weapon_ids": [],
+        "treasure_essence_stats": [],
+        "treasure_action": "lock",
+        "trash_action": "unlock",
+        "high_level_treasure_enabled": False,
+        "high_level_treasure_attribute_threshold": 3,
+        "high_level_treasure_secondary_threshold": 3,
+        "high_level_treasure_skill_threshold": 3,
+    }
+
+    # 先手动执行迁移函数，检查迁移后的字典
+    from copy import deepcopy
+
+    migrated_data = deepcopy(minimal_v2_config)
+
+    # 执行所有迁移函数
+    for version in range(2, UserSetting._VERSION):
+        migration_func = UserSetting._MIGRATIONS.get(version)
+        if migration_func:
+            migration_func(migrated_data)
+
+    # 检查迁移后的字典是否包含所有期望的字段
+    expected_fields = set(UserSetting.model_fields.keys())
+    actual_fields = set(migrated_data.keys())
+
+    # 排除 version 字段，因为它在迁移过程中会被更新
+    expected_fields.discard("version")
+    actual_fields.discard("version")
+
+    missing_fields = expected_fields - actual_fields
+    assert not missing_fields, (
+        f"迁移函数遗漏了以下字段: {missing_fields}\n"
+        f"请在相应的迁移函数中添加 data.setdefault() 调用"
+    )
+
+    # 验证迁移后的配置可以正确解析
+    migrated = UserSetting.migrate_from_old_version(minimal_v2_config)
+
+    # 验证关键字段的默认值
+    assert migrated.version == UserSetting._VERSION
+
+    # v2→v3 补充的字段
+    assert migrated.non_five_star_behavior == "process"
+    assert migrated.auto_page_flip is True
+
+    # v3→v4 补充的字段
+    assert migrated.update_mirror == "github"
+    assert migrated.update_proxy == ""
+
+    # v4→v5 补充的字段（Mirror 酱配置）
+    assert migrated.update_mirrorchyan_res_id == ""
+    assert migrated.update_mirrorchyan_cdk == ""
+    assert migrated.update_mirrorchyan_user_agent == "EER_APP"
+    assert migrated.update_flow == "cn_yituliu"
+    assert migrated.update_github_mirror == "github"
+
+    # v5→v6 补充的字段（宝藏基质匹配和同类型限制）
+    assert migrated.treasure_essence_match_mode == "all"
+    assert migrated.high_level_treasure_match_mode == "any"
+    assert migrated.high_level_treasure_sum_threshold == 6
+    assert migrated.high_level_treasure_only_check_attribute is True
+    assert migrated.high_level_treasure_only_check_secondary is True
+    assert migrated.high_level_treasure_only_check_skill is True
+    assert migrated.same_type_treasure_limit_enabled is False
+    assert migrated.same_type_treasure_limit == 1
+    assert migrated.same_type_group_mode == "by_stat"
+    assert migrated.same_type_keep_best is True
+    assert migrated.fix_grid_row_offset_after_page_flip is True
+    assert migrated.fix_page_flip_overscroll is False
+
+    # v5→v6 补充的字段（非无瑕基质专用的高等级判定设置）
+    assert migrated.non_five_star_separate_high_level_settings is False
+    assert migrated.non_five_star_high_level_attribute_threshold == 3
+    assert migrated.non_five_star_high_level_secondary_threshold == 3
+    assert migrated.non_five_star_high_level_skill_threshold == 3
+    assert migrated.non_five_star_high_level_match_mode == "any"
+    assert migrated.non_five_star_high_level_sum_threshold == 6
+    assert migrated.non_five_star_high_level_only_check_attribute is True
+    assert migrated.non_five_star_high_level_only_check_secondary is True
+    assert migrated.non_five_star_high_level_only_check_skill is True
 
 
 def test_legacy_cn_update_mirror_normalizes_to_yituliu_flow():

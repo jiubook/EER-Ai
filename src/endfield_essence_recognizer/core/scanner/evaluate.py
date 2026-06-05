@@ -6,9 +6,364 @@ from endfield_essence_recognizer.core.scanner.models import (
 )
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
 from endfield_essence_recognizer.schemas.user_setting import (
+    EssenceStats,
     NonFiveStarBehavior,
+    SameTypeGroupMode,
+    TreasureMatchMode,
     UserSetting,
 )
+
+STAT_SLOTS = ("attribute", "secondary", "skill")
+
+
+def _matches_by_mode(
+    matches: list[bool], configured_count: int, mode: TreasureMatchMode
+) -> bool:
+    if configured_count == 0:
+        return False
+    if mode == TreasureMatchMode.ANY:
+        return any(matches)
+    if mode == TreasureMatchMode.ALL:
+        return configured_count == len(STAT_SLOTS) and all(matches)
+    return all(matches)
+
+
+def _matches_treasure_stats(
+    treasure_stat: EssenceStats, stats: list[str | None], mode: TreasureMatchMode
+) -> bool:
+    configured_values = [
+        treasure_stat.attribute,
+        treasure_stat.secondary,
+        treasure_stat.skill,
+    ]
+    matches = [
+        expected == actual
+        for expected, actual in zip(configured_values, stats, strict=True)
+        if expected is not None
+    ]
+    return _matches_by_mode(matches, len(matches), mode)
+
+
+def _stat_display_name(static_game_data: StaticGameData, stat_id: str | None) -> str:
+    if stat_id is None:
+        return "未知属性"
+    stat = static_game_data.get_stat(stat_id)
+    return stat.name if stat is not None else stat_id
+
+
+def _format_high_level_info(
+    static_game_data: StaticGameData,
+    stats: list[str | None],
+    levels: list[int | None],
+    indexes: list[int],
+) -> str:
+    parts = [
+        f"{_stat_display_name(static_game_data, stats[index])}+{levels[index]}"
+        for index in indexes
+        if stats[index] is not None and levels[index] is not None
+    ]
+    if not parts:
+        return ""
+    return f"（含高等级属性词条：{'、'.join(parts)}）"
+
+
+def _evaluate_high_level_treasure(
+    data: EssenceData,
+    setting: UserSetting,
+    static_game_data: StaticGameData,
+) -> tuple[bool, str]:
+    if not setting.high_level_treasure_enabled:
+        return False, ""
+
+    stats = data.stats
+    levels = data.levels
+    mode = setting.high_level_treasure_match_mode
+
+    if mode == TreasureMatchMode.SUM:
+        present_indexes = [
+            i
+            for i, (stat_id, level) in enumerate(zip(stats, levels, strict=True))
+            if stat_id is not None and level is not None
+        ]
+        total = sum(levels[i] for i in present_indexes)  # type: ignore[misc]
+        if total < setting.high_level_treasure_sum_threshold:
+            return False, ""
+        return True, _format_high_level_info(
+            static_game_data, stats, levels, present_indexes
+        )
+
+    thresholds = [
+        setting.high_level_treasure_attribute_threshold,
+        setting.high_level_treasure_secondary_threshold,
+        setting.high_level_treasure_skill_threshold,
+    ]
+    original_slot_matches = [
+        stat_id is not None and level is not None and level >= threshold
+        for stat_id, level, threshold in zip(stats, levels, thresholds, strict=True)
+    ]
+
+    if mode == TreasureMatchMode.ONLY:
+        only_flags = [
+            setting.high_level_treasure_only_check_attribute,
+            setting.high_level_treasure_only_check_secondary,
+            setting.high_level_treasure_only_check_skill,
+        ]
+        eval_matches = [
+            m for m, f in zip(original_slot_matches, only_flags, strict=True) if f
+        ]
+    else:
+        eval_matches = original_slot_matches
+
+    if mode == TreasureMatchMode.ANY:
+        matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
+    else:
+        matched_indexes = (
+            list(range(len(STAT_SLOTS))) if all(original_slot_matches) else []
+        )
+
+    if not _matches_by_mode(eval_matches, len(eval_matches), mode):
+        return False, ""
+
+    return True, _format_high_level_info(
+        static_game_data, stats, levels, matched_indexes
+    )
+
+
+def _evaluate_non_five_star_high_level(
+    data: EssenceData,
+    setting: UserSetting,
+    static_game_data: StaticGameData,
+) -> tuple[bool, str]:
+    """评估非无瑕基质的高等级属性词条。
+
+    如果启用了独立设置，使用非无暇基质专用的高等级判定设置；
+    否则使用宝藏基质判定规则中的高等级设置。
+    """
+    # 判断是否使用独立设置
+    if setting.non_five_star_separate_high_level_settings:
+        # 使用非无暇基质专用的高等级判定设置
+        thresholds = [
+            setting.non_five_star_high_level_attribute_threshold,
+            setting.non_five_star_high_level_secondary_threshold,
+            setting.non_five_star_high_level_skill_threshold,
+        ]
+        mode = setting.non_five_star_high_level_match_mode
+        sum_threshold = setting.non_five_star_high_level_sum_threshold
+        only_flags = [
+            setting.non_five_star_high_level_only_check_attribute,
+            setting.non_five_star_high_level_only_check_secondary,
+            setting.non_five_star_high_level_only_check_skill,
+        ]
+    else:
+        # 使用宝藏基质判定规则中的高等级设置
+        if not setting.high_level_treasure_enabled:
+            return False, ""
+        thresholds = [
+            setting.high_level_treasure_attribute_threshold,
+            setting.high_level_treasure_secondary_threshold,
+            setting.high_level_treasure_skill_threshold,
+        ]
+        mode = setting.high_level_treasure_match_mode
+        sum_threshold = setting.high_level_treasure_sum_threshold
+        only_flags = [
+            setting.high_level_treasure_only_check_attribute,
+            setting.high_level_treasure_only_check_secondary,
+            setting.high_level_treasure_only_check_skill,
+        ]
+
+    stats = data.stats
+    levels = data.levels
+
+    if mode == TreasureMatchMode.SUM:
+        present_indexes = [
+            i
+            for i, (stat_id, level) in enumerate(zip(stats, levels, strict=True))
+            if stat_id is not None and level is not None
+        ]
+        total = sum(levels[i] for i in present_indexes)  # type: ignore[misc]
+        if total < sum_threshold:
+            return False, ""
+        return True, _format_high_level_info(
+            static_game_data, stats, levels, present_indexes
+        )
+
+    original_slot_matches = [
+        stat_id is not None and level is not None and level >= threshold
+        for stat_id, level, threshold in zip(stats, levels, thresholds, strict=True)
+    ]
+
+    if mode == TreasureMatchMode.ONLY:
+        eval_matches = [
+            m for m, f in zip(original_slot_matches, only_flags, strict=True) if f
+        ]
+    else:
+        eval_matches = original_slot_matches
+
+    if mode == TreasureMatchMode.ANY:
+        matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
+    else:
+        matched_indexes = (
+            list(range(len(STAT_SLOTS))) if all(original_slot_matches) else []
+        )
+
+    if not _matches_by_mode(eval_matches, len(eval_matches), mode):
+        return False, ""
+
+    return True, _format_high_level_info(
+        static_game_data, stats, levels, matched_indexes
+    )
+
+
+def _level_cmp(current: tuple[int, int, int], existing: tuple[int, int, int]) -> int:
+    """逐维度从左到右比较等级，返回 1（更优）/ 0（相等）/ -1（更差）。"""
+    for c, e in zip(current, existing, strict=True):
+        if c > e:
+            return 1
+        if c < e:
+            return -1
+    return 0
+
+
+def _make_trash_by_limit(
+    evaluation: EvaluationResult, current_count: int, limit: int
+) -> EvaluationResult:
+    """构造因达到数量上限而降级为养成材料的结果。"""
+    return EvaluationResult(
+        quality=EssenceQuality.TRASH,
+        log_message=(
+            "这个基质是<red><bold><underline>养成材料</></></>，"
+            f"因为同类型宝藏基质已扫描到 {current_count} 个，达到设置上限 {limit} 个。"
+        ),
+        matched_weapons=evaluation.matched_weapons,
+        matched_weapons_all_blocked=True,
+        is_high_level=evaluation.is_high_level,
+    )
+
+
+def _claim_as_owned(
+    setting: UserSetting,
+    key: tuple[str | None, ...] | str,
+    current_levels: tuple[int, int, int],
+) -> bool:
+    """留大弃小：判断当前基质是否属于该组“已保存”的那一枚（或其升级版）。
+
+    - 相等：说明就是 profile 里保存的那一枚，在仍有跳过名额时直接认领（不占用数量上限）。
+    - 更优：说明保存的那枚升级了，认领并把阈值提升到新等级，同时消耗一个已存名额。
+    - 更差：返回 False，交由数量上限逻辑判断。
+    """
+    best = setting._same_type_best_levels.get(key)
+    if best is None:
+        return False
+
+    cmp = _level_cmp(current_levels, best)
+    if cmp > 0:
+        setting._same_type_best_levels[key] = current_levels
+        skip = setting._same_type_equal_skips.get(key, 0)
+        if skip > 0:
+            setting._same_type_equal_skips[key] = skip - 1
+        return True
+    if cmp == 0:
+        skip = setting._same_type_equal_skips.get(key, 0)
+        if skip > 0:
+            setting._same_type_equal_skips[key] = skip - 1
+            return True
+    return False
+
+
+def _claim_by_limit(
+    setting: UserSetting,
+    key: tuple[str | None, ...] | str,
+    current_levels: tuple[int, int, int],
+    limit: int,
+) -> bool:
+    """按数量上限认领当前基质：未达上限则保留并计数，同时维护最佳等级。"""
+    count = setting._same_type_treasure_counts.get(key, 0)
+    if count >= limit:
+        return False
+    setting._same_type_treasure_counts[key] = count + 1
+    best = setting._same_type_best_levels.get(key)
+    if best is None or _level_cmp(current_levels, best) > 0:
+        setting._same_type_best_levels[key] = current_levels
+    return True
+
+
+def _apply_stat_group_limit(
+    setting: UserSetting,
+    evaluation: EvaluationResult,
+    stat_key: tuple[str | None, ...],
+    current_levels: tuple[int, int, int],
+    limit: int,
+    keep_best: bool,
+) -> EvaluationResult:
+    """按基质分组（属性组合相同即为同类型）的限制逻辑。"""
+    if keep_best and _claim_as_owned(setting, stat_key, current_levels):
+        return evaluation
+    if _claim_by_limit(setting, stat_key, current_levels, limit):
+        return evaluation
+    return _make_trash_by_limit(
+        evaluation, setting._same_type_treasure_counts.get(stat_key, 0), limit
+    )
+
+
+def _apply_weapon_group_limit(
+    setting: UserSetting,
+    evaluation: EvaluationResult,
+    matched_weapon_ids: set[str],
+    current_levels: tuple[int, int, int],
+    limit: int,
+    keep_best: bool,
+) -> EvaluationResult:
+    """按武器分组（每把武器独立计数）的限制逻辑。"""
+    weapon_ids = sorted(matched_weapon_ids)
+
+    # 第一轮：优先认领属于某把武器的“已保存”基质（相等跳过 / 更优升级）。
+    if keep_best:
+        for weapon_id in weapon_ids:
+            if _claim_as_owned(setting, weapon_id, current_levels):
+                return evaluation
+
+    # 第二轮：按数量上限分配给第一把未达上限的武器。
+    for weapon_id in weapon_ids:
+        if _claim_by_limit(setting, weapon_id, current_levels, limit):
+            return evaluation
+
+    # 所有匹配武器都已达上限
+    return _make_trash_by_limit(evaluation, limit, limit)
+
+
+def _apply_same_type_treasure_limit(
+    data: EssenceData,
+    setting: UserSetting,
+    evaluation: EvaluationResult,
+    matched_weapon_ids: set[str] | None = None,
+) -> EvaluationResult:
+    if (
+        evaluation.quality != EssenceQuality.TREASURE
+        or not setting.same_type_treasure_limit_enabled
+    ):
+        return evaluation
+
+    limit = setting.same_type_treasure_limit
+    keep_best = setting.same_type_keep_best
+    current_levels = (
+        data.levels[0] or 1,
+        data.levels[1] or 1,
+        data.levels[2] or 1,
+    )
+
+    if (
+        setting.same_type_group_mode == SameTypeGroupMode.BY_WEAPON
+        and matched_weapon_ids
+    ):
+        return _apply_weapon_group_limit(
+            setting, evaluation, matched_weapon_ids, current_levels, limit, keep_best
+        )
+
+    # 默认按基质分组（包括自定义基质匹配和无匹配武器的情况）
+    stat_key = tuple(data.stats)
+    return _apply_stat_group_limit(
+        setting, evaluation, stat_key, current_levels, limit, keep_best
+    )
 
 
 def evaluate_essence(
@@ -33,59 +388,59 @@ def evaluate_essence(
     Returns:
         EvaluationResult containing the decision, log message, and reasoning.
     """
-    if (
-        data.rarity != RarityLabel.FIVE
-        and setting.non_five_star_behavior == NonFiveStarBehavior.SKIP
-    ):
-        return EvaluationResult(
-            quality=EssenceQuality.SKIP,
-            log_message="这个基质是<dim>非无瑕基质</>，已根据设置跳过处理。",
-        )
+    if data.rarity != RarityLabel.FIVE:
+        if setting.non_five_star_behavior == NonFiveStarBehavior.SKIP:
+            return EvaluationResult(
+                quality=EssenceQuality.SKIP,
+                log_message="这个基质是<dim>非无瑕基质</>，已根据设置跳过处理。",
+            )
+        if setting.non_five_star_behavior == NonFiveStarBehavior.STOP:
+            return EvaluationResult(
+                quality=EssenceQuality.SKIP,
+                log_message="这个基质是<dim>非无瑕基质</>，已根据设置结束本次扫描。",
+                stop_scan=True,
+            )
+        if setting.non_five_star_behavior == NonFiveStarBehavior.HIGH_LEVEL_ONLY:
+            # 仅对非无瑕基质进行高等级属性词条判定，不判定武器匹配
+            is_high_level, high_level_info = _evaluate_non_five_star_high_level(
+                data, setting, static_game_data
+            )
+            if is_high_level:
+                return _apply_same_type_treasure_limit(
+                    data,
+                    setting,
+                    EvaluationResult(
+                        quality=EssenceQuality.TREASURE,
+                        log_message=f"这个基质是<green><bold><underline>宝藏</></></>（非无瑕基质），因为它有高等级属性词条{high_level_info}。",
+                        is_high_level=True,
+                    ),
+                )
+            else:
+                return EvaluationResult(
+                    quality=EssenceQuality.TRASH,
+                    log_message="这个基质是<red><bold><underline>养成材料</></></>（非无瑕基质），它没有高等级属性词条。",
+                    is_high_level=False,
+                )
 
     stats = data.stats
-    levels = data.levels
 
-    # Check attribute levels: if high-level evaluation is enabled, record whether it is a high-level treasure
-    is_high_level_treasure = False
-    high_level_info = ""
-    if setting.high_level_treasure_enabled:
-        # The order of stats is [attribute, secondary, skill], corresponding to termType [0, 1, 2]
-        thresholds = [
-            setting.high_level_treasure_attribute_threshold,  # attribute threshold
-            setting.high_level_treasure_secondary_threshold,  # secondary stat threshold
-            setting.high_level_treasure_skill_threshold,  # skill stat threshold
-        ]
-        # Mapping for V2 StatType to threshold index
-        type_to_index = {
-            "ATTRIBUTE": 0,
-            "SECONDARY": 1,
-            "SKILL": 2,
-        }
-        for stat_id, level in zip(stats, levels, strict=True):
-            if stat_id is not None and level is not None:
-                stat = static_game_data.get_stat(stat_id)
-                if stat is not None:
-                    idx = type_to_index.get(stat.type)
-                    if idx is not None:
-                        threshold = thresholds[idx]
-                        if level >= threshold:
-                            is_high_level_treasure = True
-                            high_level_info = (
-                                f"（含高等级属性词条：{stat.name}+{level}）"
-                            )
-                            break
+    is_high_level_treasure, high_level_info = _evaluate_high_level_treasure(
+        data, setting, static_game_data
+    )
 
     # 尝试匹配用户自定义的宝藏基质条件
     for treasure_stat in setting.treasure_essence_stats:
-        if (
-            treasure_stat.attribute in stats
-            and treasure_stat.secondary in stats
-            and treasure_stat.skill in stats
+        if _matches_treasure_stats(
+            treasure_stat, stats, setting.treasure_essence_match_mode
         ):
-            return EvaluationResult(
-                quality=EssenceQuality.TREASURE,
-                log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合你设定的宝藏基质条件{high_level_info}。",
-                is_high_level=is_high_level_treasure,
+            return _apply_same_type_treasure_limit(
+                data,
+                setting,
+                EvaluationResult(
+                    quality=EssenceQuality.TREASURE,
+                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合你设定的宝藏基质条件{high_level_info}。",
+                    is_high_level=is_high_level_treasure,
+                ),
             )
 
     # 尝试匹配已实装武器
@@ -96,10 +451,14 @@ def evaluate_essence(
     if not matched_weapon_ids:
         # 未匹配到任何已实装武器
         if is_high_level_treasure:
-            return EvaluationResult(
-                quality=EssenceQuality.TREASURE,
-                log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它有高等级属性词条{high_level_info}。<dim>（但不匹配任何已实装武器）</>",
-                is_high_level=True,
+            return _apply_same_type_treasure_limit(
+                data,
+                setting,
+                EvaluationResult(
+                    quality=EssenceQuality.TREASURE,
+                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它有高等级属性词条{high_level_info}。<dim>（但不匹配任何已实装武器）</>",
+                    is_high_level=True,
+                ),
             )
         else:
             return EvaluationResult(
@@ -132,12 +491,17 @@ def evaluate_essence(
         ]
         weapons_description_str = "、".join(weapon_descriptions)
 
-        return EvaluationResult(
-            quality=EssenceQuality.TREASURE,
-            log_message=f"这个基质是<green><bold><underline>宝藏</></></>，它完美契合武器{weapons_description_str}{high_level_info}。",
-            matched_weapons=non_trash_weapon_ids,
-            matched_weapons_all_blocked=False,
-            is_high_level=is_high_level_treasure,
+        return _apply_same_type_treasure_limit(
+            data,
+            setting,
+            EvaluationResult(
+                quality=EssenceQuality.TREASURE,
+                log_message=f"这个基质是<green><bold><underline>宝藏</></></>，它完美契合武器{weapons_description_str}{high_level_info}。",
+                matched_weapons=non_trash_weapon_ids,
+                matched_weapons_all_blocked=False,
+                is_high_level=is_high_level_treasure,
+            ),
+            matched_weapon_ids=non_trash_weapon_ids,
         )
     else:
         # 所有匹配到的武器都在 trash_weapon_ids 中
@@ -149,12 +513,17 @@ def evaluate_essence(
         weapons_description_str = "、".join(weapon_descriptions)
 
         if is_high_level_treasure:
-            return EvaluationResult(
-                quality=EssenceQuality.TREASURE,
-                log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它有高等级属性词条{high_level_info}。<yellow>即使它匹配的所有武器{weapons_description_str}均已被用户手动拦截。</>",
-                matched_weapons=matched_weapon_ids,
-                matched_weapons_all_blocked=True,
-                is_high_level=True,
+            return _apply_same_type_treasure_limit(
+                data,
+                setting,
+                EvaluationResult(
+                    quality=EssenceQuality.TREASURE,
+                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它有高等级属性词条{high_level_info}。<yellow>即使它匹配的所有武器{weapons_description_str}均已被用户手动拦截。</>",
+                    matched_weapons=matched_weapon_ids,
+                    matched_weapons_all_blocked=True,
+                    is_high_level=True,
+                ),
+                matched_weapon_ids=matched_weapon_ids,
             )
         else:
             return EvaluationResult(

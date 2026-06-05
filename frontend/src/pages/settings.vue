@@ -1,6 +1,7 @@
 <template>
   <v-container>
-    <v-expansion-panels color="primary-darken-1" :model-value="[0, 1, 2]" multiple>
+    <v-expansion-panels color="primary-darken-1" :model-value="[0, 1, 2, 3, 4]" multiple>
+      <!-- Panel 0: 武器基质预设 -->
       <v-expansion-panel :value="0">
         <v-expansion-panel-title>武器基质预设</v-expansion-panel-title>
         <v-expansion-panel-text>
@@ -86,9 +87,12 @@
           </template>
         </v-expansion-panel-text>
       </v-expansion-panel>
+
+      <!-- Panel 1: 宝藏基质判定规则 -->
       <v-expansion-panel :value="1">
-        <v-expansion-panel-title>自定义宝藏基质</v-expansion-panel-title>
+        <v-expansion-panel-title>宝藏基质判定规则</v-expansion-panel-title>
         <v-expansion-panel-text>
+          <!-- 1-A: 高等级属性判定 -->
           <h2>如果基质的某个词条初始属性较高，也将其视为宝藏</h2>
           <v-row align="center" class="my-4">
             <v-col cols="12" md="4">
@@ -99,6 +103,60 @@
                 hide-details
                 label="启用高等级基质属性词条判定"
               />
+              <v-radio-group
+                v-model="highLevelTreasureMatchMode"
+                color="primary"
+                density="compact"
+                hide-details
+                label="满足方式"
+              >
+                <v-radio value="only">
+                  <template #label>
+                    <span>仅：只检查</span>
+                    <v-chip
+                      class="mx-1"
+                      :color="highLevelTreasureOnlyCheckAttribute ? 'primary' : 'grey'"
+                      size="small"
+                      :variant="highLevelTreasureOnlyCheckAttribute ? 'flat' : 'outlined'"
+                      @click.stop="highLevelTreasureOnlyCheckAttribute = !highLevelTreasureOnlyCheckAttribute"
+                    >基础</v-chip>
+                    <v-chip
+                      class="mx-1"
+                      :color="highLevelTreasureOnlyCheckSecondary ? 'primary' : 'grey'"
+                      size="small"
+                      :variant="highLevelTreasureOnlyCheckSecondary ? 'flat' : 'outlined'"
+                      @click.stop="highLevelTreasureOnlyCheckSecondary = !highLevelTreasureOnlyCheckSecondary"
+                    >附加</v-chip>
+                    <v-chip
+                      class="mx-1"
+                      :color="highLevelTreasureOnlyCheckSkill ? 'primary' : 'grey'"
+                      size="small"
+                      :variant="highLevelTreasureOnlyCheckSkill ? 'flat' : 'outlined'"
+                      @click.stop="highLevelTreasureOnlyCheckSkill = !highLevelTreasureOnlyCheckSkill"
+                    >技能</v-chip>
+                    <span>项</span>
+                  </template>
+                </v-radio>
+                <v-radio label="和：三项全部 ≥ 设定值" value="all" />
+                <v-radio label="或：任一项 ≥ 设定值(推荐)" value="any" />
+                <v-radio value="sum">
+                  <template #label>
+                    <span class="me-2">三项相加 ≥</span>
+                    <v-text-field
+                      v-model.number="highLevelTreasureSumThreshold"
+                      density="compact"
+                      :disabled="!highLevelTreasureEnabled || highLevelTreasureMatchMode !== 'sum'"
+                      hide-details
+                      :max="15"
+                      :min="3"
+                      style="max-width: 90px"
+                      type="number"
+                      variant="outlined"
+                      @click.stop
+                    />
+                  </template>
+                </v-radio>
+              </v-radio-group>
             </v-col>
             <v-col cols="12" md="8">
               <v-slider
@@ -146,29 +204,33 @@
               >
                 <template #thumb-label="{ modelValue }">+{{ modelValue }}</template>
               </v-slider>
-              <v-alert
-                v-if="highLevelTreasureEnabled"
-                border="start"
-                class="mt-2"
-                type="info"
-                variant="tonal"
-              >
-                当前效果：如果基质的基础属性等级 ≥{{
-                  highLevelTreasureAttributeThreshold
-                }}，或者附加属性等级 ≥{{ highLevelTreasureSecondaryThreshold }}，或者技能属性等级
-                ≥{{ highLevelTreasureSkillThreshold }}，则也将其视为宝藏。
-              </v-alert>
             </v-col>
           </v-row>
+
           <v-divider class="my-4" />
-          <h2>额外将以下属性的基质视为宝藏</h2>
-          <v-alert v-if="false" border="start" class="my-4" type="info" variant="tonal">
-            请点击右侧（或者下方）的加号按钮添加新的基质属性行，点击删除按钮删除对应行。上下箭头按钮可调整行顺序。
-          </v-alert>
-          <v-row v-for="(essenceStat, index) in treasureEssenceStats" :key="index" align="center">
+
+          <!-- 1-B: 额外属性匹配 -->
+          <h2>自定义基质 | 额外将以下属性的基质视为宝藏</h2>
+          <v-row
+            v-for="(essenceStat, index) in treasureEssenceStats"
+            :key="index"
+            align="center"
+          >
+            <v-col cols="12" md="3" sm="6">
+              <v-text-field
+                v-model="essenceStat.name"
+                density="comfortable"
+                hide-details
+                label="自定义名称"
+                placeholder="可选，用于武器总览显示"
+                prepend-inner-icon="mdi-diamond-stone"
+                variant="outlined"
+              />
+            </v-col>
             <v-col cols="12" md="3" sm="6">
               <v-select
                 v-model="essenceStat.attribute"
+                clearable
                 density="comfortable"
                 hide-details
                 :items="
@@ -184,6 +246,7 @@
             <v-col cols="12" md="3" sm="6">
               <v-select
                 v-model="essenceStat.secondary"
+                clearable
                 density="comfortable"
                 hide-details
                 :items="
@@ -199,6 +262,7 @@
             <v-col cols="12" md="3" sm="6">
               <v-select
                 v-model="essenceStat.skill"
+                clearable
                 density="comfortable"
                 hide-details
                 :items="
@@ -211,56 +275,59 @@
                 variant="outlined"
               />
             </v-col>
-            <v-col cols="12" md="3" sm="6">
-              <v-btn
-                color="primary"
-                icon="mdi-plus"
-                variant="text"
-                @click="
-                  treasureEssenceStats.splice(index, 0, {
-                    attribute: null,
-                    secondary: null,
-                    skill: null,
-                  })
-                "
-              />
-              <v-btn
-                color="error"
-                icon="mdi-delete"
-                variant="text"
-                @click="treasureEssenceStats.splice(index, 1)"
-              />
-              <v-btn
-                :disabled="index === 0"
-                icon="mdi-chevron-up"
-                variant="text"
-                @click="
-                  () => {
-                    const stat = treasureEssenceStats.splice(index, 1)[0]!
-                    treasureEssenceStats.splice(index - 1, 0, stat)
-                  }
-                "
-              />
-              <v-btn
-                :disabled="index === treasureEssenceStats.length - 1"
-                icon="mdi-chevron-down"
-                variant="text"
-                @click="
-                  () => {
-                    const stat = treasureEssenceStats.splice(index, 1)[0]!
-                    treasureEssenceStats.splice(index + 1, 0, stat)
-                  }
-                "
-              />
+            <v-col cols="12">
+              <div class="d-flex ga-1">
+                <v-btn
+                  color="primary"
+                  icon="mdi-plus"
+                  variant="text"
+                  @click="
+                    treasureEssenceStats.splice(index, 0, {
+                      name: '',
+                      attribute: null,
+                      secondary: null,
+                      skill: null,
+                    })
+                  "
+                />
+                <v-btn
+                  color="error"
+                  icon="mdi-delete"
+                  variant="text"
+                  @click="treasureEssenceStats.splice(index, 1)"
+                />
+                <v-btn
+                  :disabled="index === 0"
+                  icon="mdi-chevron-up"
+                  variant="text"
+                  @click="
+                    () => {
+                      const stat = treasureEssenceStats.splice(index, 1)[0]!
+                      treasureEssenceStats.splice(index - 1, 0, stat)
+                    }
+                  "
+                />
+                <v-btn
+                  :disabled="index === treasureEssenceStats.length - 1"
+                  icon="mdi-chevron-down"
+                  variant="text"
+                  @click="
+                    () => {
+                      const stat = treasureEssenceStats.splice(index, 1)[0]!
+                      treasureEssenceStats.splice(index + 1, 0, stat)
+                    }
+                  "
+                />
+              </div>
             </v-col>
           </v-row>
           <v-row v-if="treasureEssenceStats.length === 0" class="my-4">
-            <v-col cols="12" md="9" sm="6">
+            <v-col cols="12">
               <v-btn
                 color="primary"
                 prepend-icon="mdi-plus"
                 @click="
-                  treasureEssenceStats.push({ attribute: null, secondary: null, skill: null })
+                  treasureEssenceStats.push({ name: '', attribute: null, secondary: null, skill: null })
                 "
               >
                 添加自定义宝藏基质
@@ -275,34 +342,222 @@
                 icon="mdi-plus"
                 variant="text"
                 @click="
-                  treasureEssenceStats.push({ attribute: null, secondary: null, skill: null })
+                  treasureEssenceStats.push({ name: '', attribute: null, secondary: null, skill: null })
                 "
               />
             </v-col>
           </v-row>
         </v-expansion-panel-text>
       </v-expansion-panel>
+
+      <!-- Panel 2: 扫描行为设置 -->
       <v-expansion-panel :value="2">
-        <v-expansion-panel-title>操作设置</v-expansion-panel-title>
+        <v-expansion-panel-title>扫描行为设置</v-expansion-panel-title>
         <v-expansion-panel-text>
-          <h2>界面设置</h2>
-          <v-row class="my-4">
-            <v-col cols="12" md="6">
+          <h2>遇到非无瑕基质（即遇到非橙色基质）时，该如何操作？</h2>
+          <v-radio-group v-model="nonFiveStarBehavior" color="primary" density="comfortable" inline>
+            <v-radio label="跳过对它的操作" value="skip" />
+            <v-radio label="继续操作（当作无瑕基质进行操作）" value="process" />
+            <v-radio label="结束本次扫描" value="stop" />
+            <v-radio label="仅高等级判定（只按高等级属性词条判定，不匹配武器）" value="high_level_only" />
+          </v-radio-group>
+          <v-alert border="start" class="mb-4" type="info" variant="tonal">
+            "跳过对它的操作"只是不锁定/解锁/弃用该基质，扫描会继续前往下一个基质；"结束本次扫描"等同于再次按下
+            ] 中断扫描，并会保留已扫描到的统计数据。"仅高等级判定"会使用下方的高等级属性词条判定规则，但不进行武器匹配。
+          </v-alert>
+
+          <!-- 非无瑕基质高等级判定设置 -->
+          <v-expand-transition>
+            <div v-if="nonFiveStarBehavior === 'high_level_only'">
+              <v-divider class="my-4" />
+              <h2>非无瑕基质高等级属性词条判定设置</h2>
+              <v-alert border="start" class="mb-4" type="info" variant="tonal">
+                启用"区分设置"后，非无瑕基质将使用独立的高等级判定阈值；否则使用宝藏基质判定规则中的高等级设置。
+              </v-alert>
+
               <v-switch
-                v-model="statusPollingEnabled"
+                v-model="nonFiveStarSeparateHighLevelSettings"
                 color="primary"
                 density="comfortable"
                 hide-details
-                label="启用轮询状态更新"
-                @update:model-value="onStatusPollingToggle"
+                label="区分设置（为非无瑕基质启用独立的高等级判定阈值）"
+              />
+
+              <v-expand-transition>
+                <div v-if="nonFiveStarSeparateHighLevelSettings">
+                  <v-row align="center" class="my-4">
+                    <v-col cols="12" md="4">
+                      <v-radio-group
+                        v-model="nonFiveStarHighLevelMatchMode"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        label="满足方式"
+                      >
+                        <v-radio value="only">
+                          <template #label>
+                            <span>仅：只检查</span>
+                            <v-chip
+                              class="mx-1"
+                              :color="nonFiveStarHighLevelOnlyCheckAttribute ? 'primary' : 'grey'"
+                              size="small"
+                              :variant="nonFiveStarHighLevelOnlyCheckAttribute ? 'flat' : 'outlined'"
+                              @click.stop="nonFiveStarHighLevelOnlyCheckAttribute = !nonFiveStarHighLevelOnlyCheckAttribute"
+                            >基础</v-chip>
+                            <v-chip
+                              class="mx-1"
+                              :color="nonFiveStarHighLevelOnlyCheckSecondary ? 'primary' : 'grey'"
+                              size="small"
+                              :variant="nonFiveStarHighLevelOnlyCheckSecondary ? 'flat' : 'outlined'"
+                              @click.stop="nonFiveStarHighLevelOnlyCheckSecondary = !nonFiveStarHighLevelOnlyCheckSecondary"
+                            >附加</v-chip>
+                            <v-chip
+                              class="mx-1"
+                              :color="nonFiveStarHighLevelOnlyCheckSkill ? 'primary' : 'grey'"
+                              size="small"
+                              :variant="nonFiveStarHighLevelOnlyCheckSkill ? 'flat' : 'outlined'"
+                              @click.stop="nonFiveStarHighLevelOnlyCheckSkill = !nonFiveStarHighLevelOnlyCheckSkill"
+                            >技能</v-chip>
+                            <span>项</span>
+                          </template>
+                        </v-radio>
+                        <v-radio label="和：三项全部 ≥ 设定值" value="all" />
+                        <v-radio label="或：任一项 ≥ 设定值(推荐)" value="any" />
+                        <v-radio value="sum">
+                          <template #label>
+                            <span class="me-2">三项相加 ≥</span>
+                            <v-text-field
+                              v-model.number="nonFiveStarHighLevelSumThreshold"
+                              density="compact"
+                              :disabled="nonFiveStarHighLevelMatchMode !== 'sum'"
+                              hide-details
+                              :max="15"
+                              :min="3"
+                              style="max-width: 90px"
+                              type="number"
+                              variant="outlined"
+                              @click.stop
+                            />
+                          </template>
+                        </v-radio>
+                      </v-radio-group>
+                    </v-col>
+                    <v-col cols="12" md="8">
+                      <v-slider
+                        v-model="nonFiveStarHighLevelAttributeThreshold"
+                        color="primary"
+                        label="基础属性"
+                        :max="6"
+                        :min="1"
+                        show-ticks="always"
+                        :step="1"
+                        thumb-label
+                        tick-size="4"
+                        :ticks="{ 1: '+1', 2: '+2', 3: '+3', 4: '+4', 5: '+5', 6: '+6' }"
+                      >
+                        <template #thumb-label="{ modelValue }">+{{ modelValue }}</template>
+                      </v-slider>
+                      <v-slider
+                        v-model="nonFiveStarHighLevelSecondaryThreshold"
+                        color="primary"
+                        label="附加属性"
+                        :max="6"
+                        :min="1"
+                        show-ticks="always"
+                        :step="1"
+                        thumb-label
+                        tick-size="4"
+                        :ticks="{ 1: '+1', 2: '+2', 3: '+3', 4: '+4', 5: '+5', 6: '+6' }"
+                      >
+                        <template #thumb-label="{ modelValue }">+{{ modelValue }}</template>
+                      </v-slider>
+                      <v-slider
+                        v-model="nonFiveStarHighLevelSkillThreshold"
+                        color="primary"
+                        label="技能属性"
+                        :max="3"
+                        :min="1"
+                        show-ticks="always"
+                        :step="1"
+                        thumb-label
+                        tick-size="4"
+                        :ticks="{ 1: '+1', 2: '+2', 3: '+3' }"
+                      >
+                        <template #thumb-label="{ modelValue }">+{{ modelValue }}</template>
+                      </v-slider>
+                    </v-col>
+                  </v-row>
+                </div>
+              </v-expand-transition>
+            </div>
+          </v-expand-transition>
+
+          <v-divider class="my-4" />
+
+          <h2>同类型宝藏基质达到指定数量后，该如何处理？</h2>
+          <v-alert border="start" class="mb-4" type="info" variant="tonal">
+            启用后，扫描中同一组基础属性、附加属性、技能属性的宝藏基质达到上限后，后续同类型基质会视为养成材料并执行养成材料操作。
+          </v-alert>
+          <v-row align="center">
+            <v-col cols="12" md="6">
+              <v-switch
+                v-model="sameTypeTreasureLimitEnabled"
+                color="primary"
+                density="comfortable"
+                hide-details
+                label="启用同类型宝藏基质数量上限"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model.number="sameTypeTreasureLimit"
+                density="comfortable"
+                :disabled="!sameTypeTreasureLimitEnabled"
+                hide-details
+                label="每类最多保留数量"
+                :min="1"
+                type="number"
+                variant="outlined"
+              />
+            </v-col>
+          </v-row>
+
+          <!-- 新增：分组模式 -->
+          <v-row align="center" class="mt-2">
+            <v-col cols="12">
+              <v-radio-group
+                v-model="sameTypeGroupMode"
+                color="primary"
+                density="comfortable"
+                :disabled="!sameTypeTreasureLimitEnabled"
+                inline
+                label="同类型划分方式"
+              >
+                <v-radio label="按基质划分（词条名称完全一致即为同类型）" value="by_stat" />
+                <v-radio label="按武器划分（每把武器独立计数）" value="by_weapon" />
+              </v-radio-group>
+            </v-col>
+          </v-row>
+
+          <!-- 新增：留大弃小 -->
+          <v-row align="center" class="mt-2">
+            <v-col cols="12">
+              <v-switch
+                v-model="sameTypeKeepBest"
+                color="primary"
+                density="comfortable"
+                :disabled="!sameTypeTreasureLimitEnabled"
+                hide-details
+                label="留大弃小（同类型中保留等级更高的基质）"
               />
               <v-alert border="start" class="mt-2" type="info" variant="tonal">
-                启用后，前端会轮询更新扫描状态和基质数量。禁用可减少网络请求以避免日志膨胀。
-                <!-- [TODO] uvicorn 日志改等级? 之后默认启用 -->
+                启用后，遇到同类型基质时会与已保留的基质比较等级。如果新基质的词条等级更高，则替换旧的；否则视为养成材料。扫描开始前会读取账号中已有的基质等级作为基准。
               </v-alert>
             </v-col>
           </v-row>
+
           <v-divider class="my-4" />
+
           <h2>扫描时自动翻页</h2>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
             启用后，扫描完当前页会自动拖动翻页继续扫描，直到滚动条到达底部。
@@ -314,16 +569,41 @@
             hide-details
             label="启用自动翻页扫描"
           />
-          <v-divider class="my-4" />
-          <h2>遇到非无瑕基质（即遇到非橙色基质）时，该如何操作？</h2>
-          <v-radio-group v-model="nonFiveStarBehavior" color="primary" density="comfortable" inline>
-            <v-radio label="跳过对它的操作" value="skip" />
-            <v-radio label="继续操作（当作无瑕基质进行操作）" value="process" />
-          </v-radio-group>
-          <v-divider class="my-4" />
+          <v-expand-transition>
+            <div v-if="autoPageFlip" class="mt-2">
+              <v-switch
+                v-model="fixGridRowOffsetAfterPageFlip"
+                color="primary"
+                density="comfortable"
+                hide-details
+                label="修复翻页后网格行偏移（实验性质）"
+              />
+              <v-alert border="start" class="mt-2" type="warning" variant="tonal">
+                默认开启。若翻页后扫描位置异常，可以关闭此实验修复回退到原有翻页行为。
+              </v-alert>
+              <v-switch
+                v-model="fixPageFlipOverscroll"
+                class="mt-2"
+                color="primary"
+                density="comfortable"
+                hide-details
+                label="修正翻页滚动过量（实验性质）"
+              />
+              <v-alert border="start" class="mt-2" type="warning" variant="tonal">
+                默认关闭。开启后，若翻页后第一行被判定为已扫描过的重复基质，会向上微调 3/4 行并重扫第一行。
+              </v-alert>
+            </div>
+          </v-expand-transition>
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+
+      <!-- Panel 3: 基质操作规则 -->
+      <v-expansion-panel :value="3">
+        <v-expansion-panel-title>基质操作规则</v-expansion-panel-title>
+        <v-expansion-panel-text>
           <h2>遇到宝藏基质或者养成材料时，该如何操作？</h2>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            “宝藏基质”和“养成材料”仅为分类简称，不是宝藏的基质都视为养成材料。
+            "宝藏基质"和"养成材料"仅为分类简称，不是宝藏的基质都视为养成材料。
           </v-alert>
           <v-row>
             <v-col cols="12" md="6">
@@ -353,7 +633,33 @@
               </v-radio-group>
             </v-col>
           </v-row>
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+
+      <!-- Panel 4: 通用与更新设置 -->
+      <v-expansion-panel :value="4">
+        <v-expansion-panel-title>通用与更新设置</v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <h2>界面设置</h2>
+          <v-row class="my-4">
+            <v-col cols="12" md="6">
+              <v-switch
+                v-model="statusPollingEnabled"
+                color="primary"
+                density="comfortable"
+                hide-details
+                label="启用轮询状态更新"
+                @update:model-value="onStatusPollingToggle"
+              />
+              <v-alert border="start" class="mt-2" type="info" variant="tonal">
+                启用后，前端会轮询更新扫描状态和基质数量。禁用可减少网络请求以避免日志膨胀。
+                <!-- [TODO] uvicorn 日志改等级? 之后默认启用 -->
+              </v-alert>
+            </v-col>
+          </v-row>
+
           <v-divider class="my-4" />
+
           <h2>更新设置</h2>
           <v-row class="my-4">
             <v-col cols="12" md="6">
@@ -403,6 +709,8 @@
                   :disabled="!updateProxyEnabled"
                   hide-details
                   label="代理端口"
+                  :max="65535"
+                  :min="1"
                   placeholder="7890"
                   type="number"
                   variant="outlined"
@@ -493,10 +801,15 @@ const allSkillStats = computed(() =>
 )
 
 interface EssenceStat {
+  /** 自定义显示名称，用于武器总览页面展示 */
+  name?: string
   attribute: string | null
   secondary: string | null
   skill: string | null
 }
+
+type TreasureMatchMode = 'only' | 'all' | 'any' | 'sum'
+
 
 const selectedWeaponIds = ref<string[]>([])
 const treasureEssenceStats = ref<EssenceStat[]>([])
@@ -504,10 +817,30 @@ const treasureAction = ref('lock')
 const trashAction = ref('unlock')
 const nonFiveStarBehavior = ref('process')
 const autoPageFlip = ref(true)
+const fixGridRowOffsetAfterPageFlip = ref(true)
+const fixPageFlipOverscroll = ref(false)
 const highLevelTreasureEnabled = ref(false)
 const highLevelTreasureAttributeThreshold = ref(3)
 const highLevelTreasureSecondaryThreshold = ref(3)
 const highLevelTreasureSkillThreshold = ref(3)
+const highLevelTreasureMatchMode = ref<TreasureMatchMode>('any')
+const highLevelTreasureSumThreshold = ref(6)
+const highLevelTreasureOnlyCheckAttribute = ref(true)
+const highLevelTreasureOnlyCheckSecondary = ref(true)
+const highLevelTreasureOnlyCheckSkill = ref(true)
+const nonFiveStarSeparateHighLevelSettings = ref(false)
+const nonFiveStarHighLevelAttributeThreshold = ref(3)
+const nonFiveStarHighLevelSecondaryThreshold = ref(3)
+const nonFiveStarHighLevelSkillThreshold = ref(3)
+const nonFiveStarHighLevelMatchMode = ref<TreasureMatchMode>('any')
+const nonFiveStarHighLevelSumThreshold = ref(6)
+const nonFiveStarHighLevelOnlyCheckAttribute = ref(true)
+const nonFiveStarHighLevelOnlyCheckSecondary = ref(true)
+const nonFiveStarHighLevelOnlyCheckSkill = ref(true)
+const sameTypeTreasureLimitEnabled = ref(false)
+const sameTypeTreasureLimit = ref(1)
+const sameTypeGroupMode = ref<'by_stat' | 'by_weapon'>('by_stat')
+const sameTypeKeepBest = ref(true)
 const updateFlow = ref('cn_yituliu')
 const updateGithubMirror = ref('github')
 const updateProxyEnabled = ref(false)
@@ -607,17 +940,44 @@ function isTypePartiallySelected(groupId: string): boolean {
 const config = computed(() => {
   const proxyUrl = updateProxyEnabled.value ? `http://127.0.0.1:${updateProxyPort.value}` : ''
   return {
-    version: 5,
+    version: 6,
     trash_weapon_ids: notSelectedWeaponIds.value,
     treasure_essence_stats: treasureEssenceStats.value,
+    treasure_essence_match_mode: 'all' as const,
     treasure_action: treasureAction.value,
     trash_action: trashAction.value,
     non_five_star_behavior: nonFiveStarBehavior.value,
     auto_page_flip: autoPageFlip.value,
+    fix_grid_row_offset_after_page_flip: fixGridRowOffsetAfterPageFlip.value,
+    fix_page_flip_overscroll: fixPageFlipOverscroll.value,
     high_level_treasure_enabled: highLevelTreasureEnabled.value,
     high_level_treasure_attribute_threshold: highLevelTreasureAttributeThreshold.value,
     high_level_treasure_secondary_threshold: highLevelTreasureSecondaryThreshold.value,
     high_level_treasure_skill_threshold: highLevelTreasureSkillThreshold.value,
+    high_level_treasure_match_mode: highLevelTreasureMatchMode.value,
+    high_level_treasure_sum_threshold: Math.min(
+      15,
+      Math.max(3, Number(highLevelTreasureSumThreshold.value) || 6),
+    ),
+    high_level_treasure_only_check_attribute: highLevelTreasureOnlyCheckAttribute.value,
+    high_level_treasure_only_check_secondary: highLevelTreasureOnlyCheckSecondary.value,
+    high_level_treasure_only_check_skill: highLevelTreasureOnlyCheckSkill.value,
+    non_five_star_separate_high_level_settings: nonFiveStarSeparateHighLevelSettings.value,
+    non_five_star_high_level_attribute_threshold: nonFiveStarHighLevelAttributeThreshold.value,
+    non_five_star_high_level_secondary_threshold: nonFiveStarHighLevelSecondaryThreshold.value,
+    non_five_star_high_level_skill_threshold: nonFiveStarHighLevelSkillThreshold.value,
+    non_five_star_high_level_match_mode: nonFiveStarHighLevelMatchMode.value,
+    non_five_star_high_level_sum_threshold: Math.min(
+      15,
+      Math.max(3, Number(nonFiveStarHighLevelSumThreshold.value) || 6),
+    ),
+    non_five_star_high_level_only_check_attribute: nonFiveStarHighLevelOnlyCheckAttribute.value,
+    non_five_star_high_level_only_check_secondary: nonFiveStarHighLevelOnlyCheckSecondary.value,
+    non_five_star_high_level_only_check_skill: nonFiveStarHighLevelOnlyCheckSkill.value,
+    same_type_treasure_limit_enabled: sameTypeTreasureLimitEnabled.value,
+    same_type_treasure_limit: Math.max(1, Number(sameTypeTreasureLimit.value) || 1),
+    same_type_group_mode: sameTypeGroupMode.value,
+    same_type_keep_best: sameTypeKeepBest.value,
     update_mirror: updateGithubMirror.value,
     update_flow: updateFlow.value,
     update_github_mirror: updateGithubMirror.value,
@@ -639,10 +999,30 @@ async function getConfig() {
     trash_action,
     non_five_star_behavior,
     auto_page_flip,
+    fix_grid_row_offset_after_page_flip,
+    fix_page_flip_overscroll,
     high_level_treasure_enabled,
     high_level_treasure_attribute_threshold,
     high_level_treasure_secondary_threshold,
     high_level_treasure_skill_threshold,
+    high_level_treasure_match_mode,
+    high_level_treasure_sum_threshold,
+    high_level_treasure_only_check_attribute,
+    high_level_treasure_only_check_secondary,
+    high_level_treasure_only_check_skill,
+    non_five_star_separate_high_level_settings,
+    non_five_star_high_level_attribute_threshold,
+    non_five_star_high_level_secondary_threshold,
+    non_five_star_high_level_skill_threshold,
+    non_five_star_high_level_match_mode,
+    non_five_star_high_level_sum_threshold,
+    non_five_star_high_level_only_check_attribute,
+    non_five_star_high_level_only_check_secondary,
+    non_five_star_high_level_only_check_skill,
+    same_type_treasure_limit_enabled,
+    same_type_treasure_limit,
+    same_type_group_mode,
+    same_type_keep_best,
     update_flow,
     update_github_mirror,
     update_mirror,
@@ -657,10 +1037,30 @@ async function getConfig() {
   trashAction.value = trash_action
   nonFiveStarBehavior.value = non_five_star_behavior || 'process'
   autoPageFlip.value = auto_page_flip !== undefined ? auto_page_flip : true
+  fixGridRowOffsetAfterPageFlip.value = fix_grid_row_offset_after_page_flip !== false
+  fixPageFlipOverscroll.value = fix_page_flip_overscroll === true
   highLevelTreasureEnabled.value = high_level_treasure_enabled
   highLevelTreasureAttributeThreshold.value = high_level_treasure_attribute_threshold
   highLevelTreasureSecondaryThreshold.value = high_level_treasure_secondary_threshold
   highLevelTreasureSkillThreshold.value = high_level_treasure_skill_threshold
+  highLevelTreasureMatchMode.value = high_level_treasure_match_mode || 'any'
+  highLevelTreasureSumThreshold.value = high_level_treasure_sum_threshold || 6
+  highLevelTreasureOnlyCheckAttribute.value = high_level_treasure_only_check_attribute !== false
+  highLevelTreasureOnlyCheckSecondary.value = high_level_treasure_only_check_secondary !== false
+  highLevelTreasureOnlyCheckSkill.value = high_level_treasure_only_check_skill !== false
+  nonFiveStarSeparateHighLevelSettings.value = non_five_star_separate_high_level_settings || false
+  nonFiveStarHighLevelAttributeThreshold.value = non_five_star_high_level_attribute_threshold || 3
+  nonFiveStarHighLevelSecondaryThreshold.value = non_five_star_high_level_secondary_threshold || 3
+  nonFiveStarHighLevelSkillThreshold.value = non_five_star_high_level_skill_threshold || 3
+  nonFiveStarHighLevelMatchMode.value = non_five_star_high_level_match_mode || 'any'
+  nonFiveStarHighLevelSumThreshold.value = non_five_star_high_level_sum_threshold || 6
+  nonFiveStarHighLevelOnlyCheckAttribute.value = non_five_star_high_level_only_check_attribute !== false
+  nonFiveStarHighLevelOnlyCheckSecondary.value = non_five_star_high_level_only_check_secondary !== false
+  nonFiveStarHighLevelOnlyCheckSkill.value = non_five_star_high_level_only_check_skill !== false
+  sameTypeTreasureLimitEnabled.value = same_type_treasure_limit_enabled || false
+  sameTypeTreasureLimit.value = same_type_treasure_limit || 1
+  sameTypeGroupMode.value = same_type_group_mode || 'by_stat'
+  sameTypeKeepBest.value = same_type_keep_best !== false
   updateFlow.value = normalizeUpdateFlow(update_flow, update_mirror)
   updateGithubMirror.value = update_github_mirror || getLegacyGithubMirror(update_mirror)
   updateMirrorChyanResId.value = update_mirrorchyan_res_id || ''

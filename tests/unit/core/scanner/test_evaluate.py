@@ -15,6 +15,7 @@ from endfield_essence_recognizer.core.scanner.models import (
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
     NonFiveStarBehavior,
+    TreasureMatchMode,
     UserSetting,
 )
 
@@ -85,6 +86,86 @@ def test_evaluate_treasure_custom(
     assert result.quality == EssenceQuality.TREASURE
     assert "宝藏" in result.log_message
     assert "符合你设定的宝藏基质条件" in result.log_message
+
+
+def test_evaluate_custom_treasure_match_mode_any(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """任一已设置槽位匹配即可视为自定义宝藏。"""
+    default_settings.treasure_essence_match_mode = TreasureMatchMode.ANY
+    default_settings.treasure_essence_stats = [
+        EssenceStats(attribute="A", secondary=None, skill=None)
+    ]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+
+
+def test_evaluate_custom_treasure_match_mode_only_checks_configured_slots(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """仅模式只检查用户设置的槽位，未设置槽位会被忽略。"""
+    default_settings.treasure_essence_match_mode = TreasureMatchMode.ONLY
+    default_settings.treasure_essence_stats = [
+        EssenceStats(attribute="A", secondary="B", skill=None)
+    ]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+
+
+def test_evaluate_custom_treasure_match_mode_only_rejects_configured_mismatch(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """仅模式要求所有已设置槽位都匹配。"""
+    default_settings.treasure_essence_match_mode = TreasureMatchMode.ONLY
+    default_settings.treasure_essence_stats = [
+        EssenceStats(attribute="A", secondary="X", skill=None)
+    ]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TRASH
+
+
+def test_evaluate_custom_treasure_match_mode_all_requires_three_slots(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """和模式要求 1、2、3 三个槽位都设置且匹配。"""
+    default_settings.treasure_essence_match_mode = TreasureMatchMode.ALL
+    default_settings.treasure_essence_stats = [
+        EssenceStats(attribute="A", secondary="B", skill=None)
+    ]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TRASH
+
+
+def test_evaluate_custom_treasure_match_mode_all_matches_three_slots(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """和模式下 1、2、3 三个槽位全部匹配时视为宝藏。"""
+    default_settings.treasure_essence_match_mode = TreasureMatchMode.ALL
+    default_settings.treasure_essence_stats = [
+        EssenceStats(attribute="A", secondary="B", skill="C")
+    ]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
 
 
 def test_evaluate_treasure_weapon_match(
@@ -166,6 +247,118 @@ def test_evaluate_high_level(
     assert "AttrA+11" in result.log_message
 
 
+def test_evaluate_high_level_only_mode_with_category_toggles(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """仅模式下，只有勾选的类别会被检查。"""
+    default_settings.high_level_treasure_enabled = True
+    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ONLY
+    default_settings.high_level_treasure_attribute_threshold = 3
+    default_settings.high_level_treasure_secondary_threshold = 3
+    default_settings.high_level_treasure_skill_threshold = 3
+    # Only check attribute
+    default_settings.high_level_treasure_only_check_attribute = True
+    default_settings.high_level_treasure_only_check_secondary = False
+    default_settings.high_level_treasure_only_check_skill = False
+    # Attribute level meets threshold, others don't
+    default_essence_data.levels = [3, 0, 0]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+    assert result.quality == EssenceQuality.TREASURE
+    assert result.is_high_level is True
+
+
+def test_evaluate_high_level_only_mode_unchecked_category_ignored(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """仅模式下，未勾选的类别即使不达标也不影响判定。"""
+    default_settings.high_level_treasure_enabled = True
+    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ONLY
+    default_settings.high_level_treasure_attribute_threshold = 3
+    default_settings.high_level_treasure_secondary_threshold = 5
+    default_settings.high_level_treasure_skill_threshold = 3
+    # Check attribute and skill, skip secondary
+    default_settings.high_level_treasure_only_check_attribute = True
+    default_settings.high_level_treasure_only_check_secondary = False
+    default_settings.high_level_treasure_only_check_skill = True
+    # Attribute=3 (meets), Secondary=0 (doesn't meet but unchecked), Skill=2 (doesn't meet)
+    default_essence_data.levels = [3, 0, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+    # Skill doesn't meet threshold so should be TRASH
+    assert result.quality == EssenceQuality.TRASH
+
+
+def test_evaluate_high_level_only_mode_all_categories_match(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """仅模式下，所有勾选类别都达标时视为宝藏。"""
+    default_settings.high_level_treasure_enabled = True
+    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ONLY
+    default_settings.high_level_treasure_attribute_threshold = 3
+    default_settings.high_level_treasure_secondary_threshold = 3
+    default_settings.high_level_treasure_skill_threshold = 2
+    default_settings.high_level_treasure_only_check_attribute = True
+    default_settings.high_level_treasure_only_check_secondary = True
+    default_settings.high_level_treasure_only_check_skill = True
+    default_essence_data.levels = [3, 3, 2]
+
+    stat = MagicMock()
+    stat.name = "AttrA"
+    mock_static_game_data.get_stat.return_value = stat
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+    assert result.quality == EssenceQuality.TREASURE
+    assert result.is_high_level is True
+
+
+def test_evaluate_high_level_all_mode_requires_all_slots(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """高等级和模式要求 1、2、3 三个槽位都满足阈值。"""
+    default_settings.high_level_treasure_enabled = True
+    default_settings.high_level_treasure_match_mode = TreasureMatchMode.ALL
+    default_settings.high_level_treasure_attribute_threshold = 3
+    default_settings.high_level_treasure_secondary_threshold = 3
+    default_settings.high_level_treasure_skill_threshold = 3
+    # Only attribute meets threshold
+    default_essence_data.levels = [3, 0, 0]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TRASH
+
+
+def test_evaluate_same_type_treasure_limit_marks_later_items_as_trash(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """同类型宝藏达到上限后，后续同属性组合会视为养成材料。"""
+    default_settings.same_type_treasure_limit_enabled = True
+    default_settings.same_type_treasure_limit = 1
+    default_settings.treasure_essence_stats = [
+        EssenceStats(attribute="A", secondary="B", skill="C")
+    ]
+
+    first = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+    second = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert first.quality == EssenceQuality.TREASURE
+    assert second.quality == EssenceQuality.TRASH
+    assert "达到设置上限" in second.log_message
+
+
 def test_evaluate_non_five_star_skip(
     mock_static_game_data, default_settings, default_essence_data
 ):
@@ -180,6 +373,24 @@ def test_evaluate_non_five_star_skip(
     )
     assert result.quality == EssenceQuality.SKIP
     assert "跳过" in result.log_message
+    assert result.stop_scan is False
+
+
+def test_evaluate_non_five_star_stop(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """
+    Test stopping scan when non-5-star essence is encountered.
+    """
+    default_essence_data.rarity = RarityLabel.FOUR
+    default_settings.non_five_star_behavior = NonFiveStarBehavior.STOP
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+    assert result.quality == EssenceQuality.SKIP
+    assert result.stop_scan is True
+    assert "结束本次扫描" in result.log_message
 
 
 def test_evaluate_non_five_star_process(

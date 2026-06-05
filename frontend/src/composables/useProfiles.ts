@@ -25,6 +25,7 @@ export interface ProfileData {
     '4star': boolean
     '5star': boolean
     '6star': boolean
+    'custom': boolean
   }
   weapon_priorities?: Record<string, number>
 }
@@ -278,6 +279,7 @@ export function useProfiles() {
     '4star': boolean
     '5star': boolean
     '6star': boolean
+    'custom': boolean
   }) {
     try {
       const res = await fetch('/api/profiles/weapon_overview_filters', {

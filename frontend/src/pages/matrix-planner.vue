@@ -66,7 +66,10 @@
                                 'weapon-matched': selectedWeaponForLocation === weaponId
                               }"
                             >
-                              <item-icon :item-id="weaponId" show-item-name />
+                              <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
+                              <template v-else>
+                                <item-icon :item-id="weaponId" show-item-name />
+                              </template>
                               <v-chip
                                 v-if="isWeaponObtained(weaponId)"
                                 class="obtained-badge"
@@ -183,7 +186,8 @@
                                     'weapon-obtained': isWeaponObtained(weaponId)
                                   }"
                                 >
-                                  <item-icon :item-id="weaponId" show-item-name />
+                                  <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
+                                  <item-icon v-else :item-id="weaponId" show-item-name />
                                   <v-chip
                                     v-if="isWeaponObtained(weaponId)"
                                     class="obtained-badge"
@@ -397,6 +401,15 @@
                   >
                     6★
                   </v-chip>
+                  <v-chip
+                    color="primary"
+                    filter
+                    size="small"
+                    value="custom"
+                    variant="outlined"
+                  >
+                    自定义
+                  </v-chip>
                 </v-chip-group>
               </div>
 
@@ -409,6 +422,43 @@
                 prepend-inner-icon="mdi-magnify"
                 variant="outlined"
               />
+              <!-- 自定义基质区段 -->
+              <template v-if="selectedRarities.includes('custom') && customMatrixEntries.length > 0">
+                <div class="d-flex align-center mb-2 mt-4">
+                  <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+                  <h4>自定义基质</h4>
+                </div>
+                <div class="weapon-grid">
+                  <div
+                    v-for="entry in customMatrixEntries"
+                    :key="entry.syntheticId"
+                    class="weapon-item"
+                    :class="{
+                      'weapon-selected': noPrecraftMode ? (selectedWeaponForLocation === entry.syntheticId) : isWeaponSelected(entry.syntheticId),
+                      'weapon-obtained': isWeaponObtained(entry.syntheticId),
+                      'weapon-matched': isWeaponMatchedInPlans(entry.syntheticId),
+                    }"
+                    @click="handleCustomStatClick(entry)"
+                  >
+                    <custom-stat-icon :name="entry.displayName" />
+                    <div
+                      v-if="noPrecraftMode ? (selectedWeaponForLocation === entry.syntheticId) : isWeaponSelected(entry.syntheticId)"
+                      class="weapon-selected-overlay"
+                    >
+                      <v-icon color="white" size="small">mdi-check-circle</v-icon>
+                    </div>
+                    <v-chip
+                      v-if="isWeaponObtained(entry.syntheticId)"
+                      class="obtained-badge"
+                      color="success"
+                      size="x-small"
+                      variant="flat"
+                    >
+                      已获得
+                    </v-chip>
+                  </div>
+                </div>
+              </template>
               <template v-for="wType in weaponTypes" :key="wType.id">
                 <div class="d-flex align-center mb-2 mt-4">
                   <img
@@ -461,6 +511,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import BackToTop from '@/components/BackToTop.vue'
+import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type BattleChoice, getDisplayName, useMatrixPlanner } from '@/composables/useMatrixPlanner'
 import { useProfiles } from '@/composables/useProfiles'
@@ -478,6 +529,7 @@ const {
   allSkillStats,
   energyAlluviums,
   addStatFromWeapon,
+  addStatFromCustomPreset,
   addCustomStat,
   removeStat,
   moveStatUp,
@@ -486,7 +538,58 @@ const {
   getStatDisplayName,
   bestChoices,
   clearAllStats,
+  updateCustomStatNames,
 } = useMatrixPlanner()
+
+// --- 自定义基质相关 ---
+
+/** 自定义宝藏基质属性配置列表 */
+const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null }>>([])
+
+/** 从后端获取配置中的自定义宝藏基质属性列表 */
+async function fetchCustomStats() {
+  try {
+    const res = await fetch('/api/config')
+    const config = await res.json()
+    customStats.value = config.treasure_essence_stats || []
+    updateCustomStatNames(customStats.value.map(s => s.name))
+  } catch (error) {
+    console.error('获取自定义宝藏基质配置失败:', error)
+  }
+}
+
+/** 自定义基质条目列表，用于从武器预设添加展示 */
+const customMatrixEntries = computed(() => {
+  return customStats.value.map((stat, index) => ({
+    syntheticId: `custom_stat_${index}`,
+    displayName: stat.name || `自定义基质 ${index + 1}`,
+    index,
+  }))
+})
+
+/** 处理自定义基质条目点击，添加/移除需求词条 */
+function handleCustomStatClick(entry: { syntheticId: string; index: number }) {
+  if (noPrecraftMode.value) {
+    // 不使用预刻券模式：选中/取消选中以筛选地点
+    if (selectedWeaponForLocation.value === entry.syntheticId) {
+      selectedWeaponForLocation.value = null
+    } else {
+      selectedWeaponForLocation.value = entry.syntheticId
+    }
+    return
+  }
+  const stat = customStats.value[entry.index]
+  if (!stat) return
+  const attribute = getStatDisplayName(stat.attribute)
+  const secondary = getStatDisplayName(stat.secondary)
+  const skill = getStatDisplayName(stat.skill)
+  if (!attribute || !secondary || !skill) return
+  addStatFromCustomPreset(entry.syntheticId, attribute, secondary, skill)
+}
+
+onMounted(() => {
+  fetchCustomStats()
+})
 
 /** 不使用预刻券模式：显示所有刷取地点 */
 const noPrecraftMode = ref(false)
@@ -536,6 +639,16 @@ const allLocationChoices = computed<LocationChoice[]>(() => {
 
       if (secondaryMatch && skillMatch) {
         matchedWeaponIds.push(weaponId)
+      }
+    }
+
+    // 检查自定义基质是否匹配该地点
+    for (const [index, stat] of customStats.value.entries()) {
+      if (!stat.secondary || !stat.skill) continue
+      const secondary = getStatDisplayName(stat.secondary)
+      const skill = getStatDisplayName(stat.skill)
+      if (alluvium.secondaryStats.includes(secondary) && alluvium.skillStats.includes(skill)) {
+        matchedWeaponIds.push(`custom_stat_${index}`)
       }
     }
 
@@ -676,8 +789,26 @@ function getRequirementTooltip(index: number): string {
   return parts.join('、') || '未设置'
 }
 
+function isCustomStatId(id: string): boolean {
+  return id.startsWith('custom_stat_')
+}
+
+function getCustomStatDisplayName(id: string): string {
+  const match = id.match(/^custom_stat_(\d+)$/)
+  if (!match) return id
+  const index = Number.parseInt(match[1]!, 10)
+  return customStats.value[index]?.name || `自定义基质 ${index + 1}`
+}
+
 function sortedWeaponIds(weaponIds: string[]): string[] {
   return weaponIds.toSorted((a, b) => {
+    const aObtained = isWeaponObtained(a)
+    const bObtained = isWeaponObtained(b)
+
+    // 未获得的排在前面
+    if (!aObtained && bObtained) return -1
+    if (aObtained && !bObtained) return 1
+
     const wa = weaponsMap.value.get(a)
     const wb = weaponsMap.value.get(b)
     if (wa && wb) return wb.rarity - wa.rarity
@@ -943,6 +1074,7 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   background: rgba(0, 0, 0, 0.45);
   border-radius: 6px;
   pointer-events: none;
+  z-index: 2;
 }
 
 // 方案更新时的高亮脉冲
