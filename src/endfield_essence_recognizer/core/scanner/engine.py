@@ -1150,12 +1150,14 @@ class DraggableScannerEngine(ScannerEngine):
             offset,
             adjust,
         )
+        # 使用小步长分多步拖动，确保游戏窗口能正确识别为拖动而非点击
+        # step 必须小于 adjust，否则 progressive_drag 只会执行 1 步
         self._window_actions.progressive_drag(
             drag_start.x,
             drag_start.y,
             drag_start.x,
             drag_start.y - adjust,
-            step=25,
+            step=max(3, abs(adjust) // 5),
             max_drag=abs(adjust),
         )
         self._window_actions.wait(0.25)
