@@ -1193,7 +1193,12 @@ class DraggableScannerEngine(ScannerEngine):
         # 期望间隙中心：相邻两行之间，上行底部与下行顶部的中点
         expected_gap_centers: list[float] = []
         for gap_index in range(len(icon_y_list) - 1):
-            gap_center = (icon_y_list[gap_index] + card_half + icon_y_list[gap_index + 1] - card_half) / 2.0
+            gap_center = (
+                icon_y_list[gap_index]
+                + card_half
+                + icon_y_list[gap_index + 1]
+                - card_half
+            ) / 2.0
             expected_gap_centers.append(gap_center)
 
         if not expected_gap_centers:
@@ -1235,7 +1240,9 @@ class DraggableScannerEngine(ScannerEngine):
                 dark_rows.append(row_index)
 
         if not dark_rows:
-            logger.debug("间隙检测：未找到暗行（阈值={}）", self._GAP_BRIGHTNESS_THRESHOLD)
+            logger.debug(
+                "间隙检测：未找到暗行（阈值={}）", self._GAP_BRIGHTNESS_THRESHOLD
+            )
             return None
 
         # 将连续暗行分组为暗带（间隙），间距超过阈值则断开
