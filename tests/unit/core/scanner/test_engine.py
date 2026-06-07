@@ -541,3 +541,74 @@ def test_gap_detection_handles_negative_offset(
     result = engine._detect_grid_row_offset([100, 500], icon_y_list, row_height)
     assert result is not None
     assert abs(result - offset) <= 1
+
+
+def test_gap_detection_large_offset_with_spacing(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """偏移量超过旧容差（30px）时，通过相对间距匹配仍应正确检测。"""
+    icon_y_list = [200, 355, 510, 665, 820]
+    row_height = 155
+    card_half = row_height // 2
+
+    expected_gaps = []
+    for i in range(len(icon_y_list) - 1):
+        expected_gaps.append(
+            (icon_y_list[i] + card_half + icon_y_list[i + 1] - card_half) // 2
+        )
+
+    # 大偏移 +50px，超过旧的 30px 容差
+    offset = 50
+    actual_gaps = [g + offset for g in expected_gaps]
+
+    img = _make_screenshot_with_gaps(1920, 1049, actual_gaps)
+    image_source = GapDetectImageSource(img)
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=image_source,
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    result = engine._detect_grid_row_offset([100, 500], icon_y_list, row_height)
+    assert result is not None
+    assert abs(result - offset) <= 1
+
+
+def test_gap_detection_filters_noise_by_spacing(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """噪声暗带（间距不等于 row_height）应被过滤，不影响偏移计算。"""
+    icon_y_list = [200, 355, 510, 665, 820]
+    row_height = 155
+    card_half = row_height // 2
+
+    expected_gaps = []
+    for i in range(len(icon_y_list) - 1):
+        expected_gaps.append(
+            (icon_y_list[i] + card_half + icon_y_list[i + 1] - card_half) // 2
+        )
+
+    # 正确间隙偏移 +10px，但在前面加一条噪声暗带
+    offset = 10
+    actual_gaps = [g + offset for g in expected_gaps]
+    noise_gap = actual_gaps[0] - 80  # 间距 80px，不等于 row_height
+    all_gaps = [noise_gap] + actual_gaps
+
+    img = _make_screenshot_with_gaps(1920, 1049, all_gaps)
+    image_source = GapDetectImageSource(img)
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=image_source,
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    result = engine._detect_grid_row_offset([100, 500], icon_y_list, row_height)
+    assert result is not None
+    # 噪声暗带被过滤，偏移仍由有效暗带决定
+    assert abs(result - offset) <= 1

@@ -1162,8 +1162,8 @@ class DraggableScannerEngine(ScannerEngine):
     _GAP_BRIGHTNESS_THRESHOLD: float = 40.0
     # 连续暗行归为同一条暗带的最大间距（像素）
     _GAP_BAND_GROUP_DISTANCE: int = 5
-    # 计算偏移时，匹配暗带与期望间隙的最大容差（像素）
-    _GAP_MATCH_TOLERANCE: int = 30
+    # 暗带间距与期望行高匹配时的最大偏差（像素），用于过滤噪声暗带
+    _GAP_SPACING_TOLERANCE: int = 25
 
     def _detect_grid_row_offset(
         self,
@@ -1258,9 +1258,46 @@ class DraggableScannerEngine(ScannerEngine):
             len(expected_gap_centers),
         )
 
-        # 匹配：对每条实际暗带，找最近的期望间隙，计算偏移量
+        # 用相对间距过滤噪声暗带：相邻暗带间距应约等于 row_height
+        # 这样即使整体偏移很大，只要间距正确就能识别出真正的行间隙
+        spacing_tol = self._GAP_SPACING_TOLERANCE
+        valid_centers: list[float] = []
+        for i in range(len(gap_bands)):
+            band_top, band_bottom = gap_bands[i]
+            band_center = (band_top + band_bottom) / 2.0 + y_min
+            # 检查与前后暗带的间距是否约等于 row_height
+            has_valid_neighbor = False
+            if i > 0:
+                prev_top, prev_bottom = gap_bands[i - 1]
+                prev_center = (prev_top + prev_bottom) / 2.0 + y_min
+                if abs((band_center - prev_center) - row_height) <= spacing_tol:
+                    has_valid_neighbor = True
+            if i < len(gap_bands) - 1:
+                next_top, next_bottom = gap_bands[i + 1]
+                next_center = (next_top + next_bottom) / 2.0 + y_min
+                if abs((next_center - band_center) - row_height) <= spacing_tol:
+                    has_valid_neighbor = True
+            if has_valid_neighbor:
+                valid_centers.append(band_center)
+
+        logger.debug(
+            "Gap detection: found {} bands at y={}, expected {} gaps, {} valid by spacing",
+            len(gap_bands),
+            [round((t + b) / 2.0 + y_min) for t, b in gap_bands],
+            len(expected_gap_centers),
+            len(valid_centers),
+        )
+
+        if not valid_centers:
+            logger.debug(
+                "Gap detection: no bands with spacing matching row_height (±{}px)",
+                spacing_tol,
+            )
+            return None
+
+        # 对每条有效暗带，找最近的期望间隙，计算偏移量
         offsets: list[float] = []
-        for actual_center in actual_gap_centers:
+        for actual_center in valid_centers:
             best_distance = float("inf")
             best_offset = 0.0
             for expected_center in expected_gap_centers:
@@ -1268,15 +1305,9 @@ class DraggableScannerEngine(ScannerEngine):
                 if distance < best_distance:
                     best_distance = distance
                     best_offset = actual_center - expected_center
-            # 距离过远的暗带视为噪声（可能是 UI 边框等），跳过
-            if best_distance <= self._GAP_MATCH_TOLERANCE:
-                offsets.append(best_offset)
+            offsets.append(best_offset)
 
         if not offsets:
-            logger.debug(
-                "Gap detection: no matching gaps within tolerance ({})",
-                self._GAP_MATCH_TOLERANCE,
-            )
             return None
 
         # 取中位数作为最终偏移量（抵抗个别异常值）
