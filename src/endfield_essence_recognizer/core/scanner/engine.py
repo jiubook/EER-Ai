@@ -1114,37 +1114,39 @@ class DraggableScannerEngine(ScannerEngine):
         icon_x_list: list[int],
         icon_y_list: list[int],
     ) -> None:
-        """Detect row-center drift after dragging and apply a small snap correction."""
+        """翻页拖动后检测网格行偏移并执行微调修正。"""
         if len(icon_y_list) < 2 or not icon_x_list:
-            logger.debug("Skip row alignment: not enough grid coordinates")
+            logger.debug("跳过行对齐：网格坐标不足")
             return
 
         row_height = icon_y_list[1] - icon_y_list[0]
         if row_height <= 0:
-            logger.debug("Skip row alignment: invalid row_height={}", row_height)
+            logger.debug("跳过行对齐：无效行高={}", row_height)
             return
 
         offset = self._detect_grid_row_offset(icon_x_list, icon_y_list, row_height)
         if offset is None:
             return
 
-        # Click centers tolerate small drift; avoid jitter from visual noise.
+        # 偏移量太小则忽略，避免视觉抖动
         min_adjust = max(10, round(row_height * 0.08))
         if abs(offset) < min_adjust:
-            logger.debug("Row alignment offset={}px, no correction needed", offset)
+            logger.debug("行对齐偏移={}px，无需修正", offset)
             return
 
         max_adjust = round(row_height * 0.45)
         adjust = max(-max_adjust, min(max_adjust, offset))
         if adjust != offset:
             logger.debug(
-                "Row alignment correction clamped: offset={}px, adjust={}px",
+                "行对齐修正已限制：原始偏移={}px，实际修正={}px",
                 offset,
                 adjust,
             )
 
+        # offset > 0 表示暗带实际位置比期望低，内容下移，需向上拖动修正
+        # 因此拖动方向为 Y - adjust（向上为负方向）
         logger.info(
-            "Row alignment correction after page drag: offset={}px, adjust={}px",
+            "翻页后行对齐修正：偏移={}px，修正={}px（向上拖动）",
             offset,
             adjust,
         )
@@ -1152,7 +1154,7 @@ class DraggableScannerEngine(ScannerEngine):
             drag_start.x,
             drag_start.y,
             drag_start.x,
-            drag_start.y + adjust,
+            drag_start.y - adjust,
             step=25,
             max_drag=abs(adjust),
         )
@@ -1193,7 +1195,7 @@ class DraggableScannerEngine(ScannerEngine):
             expected_gap_centers.append(gap_center)
 
         if not expected_gap_centers:
-            logger.debug("Skip gap detection: fewer than 2 rows")
+            logger.debug("跳过间隙检测：不足 2 行")
             return None
 
         # 截取网格区域（避开左右边缘 UI 干扰，取卡片列跨度内侧）
@@ -1215,7 +1217,7 @@ class DraggableScannerEngine(ScannerEngine):
                 Region(Point(x_min, y_min), Point(x_max, y_max))
             )
         except Exception as exc:
-            logger.debug("Gap detection screenshot failed: {}", exc)
+            logger.debug("间隙检测截图失败：{}", exc)
             return None
 
         if screenshot.size == 0:
@@ -1231,7 +1233,7 @@ class DraggableScannerEngine(ScannerEngine):
                 dark_rows.append(row_index)
 
         if not dark_rows:
-            logger.debug("Gap detection: no dark rows found (threshold={})", self._GAP_BRIGHTNESS_THRESHOLD)
+            logger.debug("间隙检测：未找到暗行（阈值={}）", self._GAP_BRIGHTNESS_THRESHOLD)
             return None
 
         # 将连续暗行分组为暗带（间隙），间距超过阈值则断开
@@ -1252,7 +1254,7 @@ class DraggableScannerEngine(ScannerEngine):
         ]
 
         logger.debug(
-            "Gap detection: found {} bands at y={}, expected {} gaps",
+            "间隙检测：找到 {} 条暗带，y={}，期望 {} 个间隙",
             len(gap_bands),
             [round(c) for c in actual_gap_centers],
             len(expected_gap_centers),
@@ -1281,7 +1283,7 @@ class DraggableScannerEngine(ScannerEngine):
                 valid_centers.append(band_center)
 
         logger.debug(
-            "Gap detection: found {} bands at y={}, expected {} gaps, {} valid by spacing",
+            "间隙检测：{} 条暗带，y={}，期望 {} 个间隙，{} 条间距有效",
             len(gap_bands),
             [round((t + b) / 2.0 + y_min) for t, b in gap_bands],
             len(expected_gap_centers),
@@ -1290,7 +1292,7 @@ class DraggableScannerEngine(ScannerEngine):
 
         if not valid_centers:
             logger.debug(
-                "Gap detection: no bands with spacing matching row_height (±{}px)",
+                "间隙检测：无暗带间距匹配行高（±{}px）",
                 spacing_tol,
             )
             return None
@@ -1316,7 +1318,7 @@ class DraggableScannerEngine(ScannerEngine):
         result = round(median_offset)
 
         logger.debug(
-            "Gap detection: offsets={}, median={:.1f}, result={}",
+            "间隙检测：偏移列表={}，中位数={:.1f}，结果={}",
             [round(o) for o in offsets],
             median_offset,
             result,
