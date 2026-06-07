@@ -1158,95 +1158,139 @@ class DraggableScannerEngine(ScannerEngine):
         )
         self._window_actions.wait(0.25)
 
+    # 暗带检测阈值：间隙行的平均亮度远低于卡片区域（间隙 < 25，卡片 > 50）
+    _GAP_BRIGHTNESS_THRESHOLD: float = 40.0
+    # 连续暗行归为同一条暗带的最大间距（像素）
+    _GAP_BAND_GROUP_DISTANCE: int = 5
+    # 计算偏移时，匹配暗带与期望间隙的最大容差（像素）
+    _GAP_MATCH_TOLERANCE: int = 30
+
     def _detect_grid_row_offset(
         self,
         icon_x_list: list[int],
         icon_y_list: list[int],
         row_height: int,
     ) -> int | None:
-        """Estimate actual card-center offset from configured click rows."""
-        search_radius = max(1, round(row_height * 0.45))
-        patch_radius = max(8, round(row_height * 0.12))
-        x_radius = patch_radius
-        margin = patch_radius + search_radius + 2
+        """通过检测卡片行之间的暗带（间隙）来估算网格行偏移量。
 
-        x0 = max(0, min(icon_x_list) - x_radius)
-        x1 = max(icon_x_list) + x_radius + 1
-        y0 = max(0, min(icon_y_list) - margin)
-        y1 = max(icon_y_list) + margin + 1
+        原理：游戏界面中，相邻卡片行之间存在约 9px 厚的纯黑暗带（亮度 < 25），
+        间距恒定等于 row_height。通过定位暗带的实际 Y 坐标并与期望位置比较，
+        即可精确计算出翻页后的行偏移。
+
+        Args:
+            icon_x_list: 基质图标列坐标列表（用于确定截图水平范围）。
+            icon_y_list: 基质图标行坐标列表（用于计算期望间隙位置）。
+            row_height: 相邻行中心的间距（像素）。
+
+        Returns:
+            检测到的偏移量（像素），未检测到时返回 None。
+        """
+        card_half = row_height // 2
+        # 期望间隙中心：相邻两行之间，上行底部与下行顶部的中点
+        expected_gap_centers: list[float] = []
+        for gap_index in range(len(icon_y_list) - 1):
+            gap_center = (icon_y_list[gap_index] + card_half + icon_y_list[gap_index + 1] - card_half) / 2.0
+            expected_gap_centers.append(gap_center)
+
+        if not expected_gap_centers:
+            logger.debug("Skip gap detection: fewer than 2 rows")
+            return None
+
+        # 截取网格区域（避开左右边缘 UI 干扰，取卡片列跨度内侧）
+        x_min = max(0, min(icon_x_list) - 20)
+        x_max = max(icon_x_list) + 20 + 1
         client_width, client_height = self._image_source.get_client_size()
-        x1 = min(client_width, x1)
-        y1 = min(client_height, y1)
-        if x1 <= x0 or y1 <= y0:
+        x_max = min(client_width, x_max)
+
+        # 垂直范围：从首行上方到末行下方，留出 margin
+        margin = row_height
+        y_min = max(0, min(icon_y_list) - margin)
+        y_max = min(client_height, max(icon_y_list) + margin + 1)
+
+        if x_max <= x_min or y_max <= y_min:
             return None
 
         try:
             screenshot = self._image_source.screenshot(
-                Region(Point(x0, y0), Point(x1, y1))
+                Region(Point(x_min, y_min), Point(x_max, y_max))
             )
-        except Exception as e:
-            logger.debug("Row alignment screenshot failed: {}", e)
+        except Exception as exc:
+            logger.debug("Gap detection screenshot failed: {}", exc)
             return None
 
         if screenshot.size == 0:
             return None
 
-        gray = screenshot[:, :, :3].astype(np.float32).mean(axis=2)
-        local_xs = [x - x0 for x in icon_x_list]
-        local_ys = [y - y0 for y in icon_y_list]
+        # 计算每行的平均亮度（取 RGB 三通道均值）
+        gray = screenshot[:, :, :3].astype(np.float32).mean(axis=(1, 2))
 
-        def patch_score(cx: int, cy: int) -> float:
-            left = max(0, cx - x_radius)
-            right = min(gray.shape[1], cx + x_radius + 1)
-            top = max(0, cy - patch_radius)
-            bottom = min(gray.shape[0], cy + patch_radius + 1)
-            patch = gray[top:bottom, left:right]
-            if patch.size == 0:
-                return 0.0
+        # 找出亮度低于阈值的暗行
+        dark_rows: list[int] = []
+        for row_index in range(len(gray)):
+            if gray[row_index] < self._GAP_BRIGHTNESS_THRESHOLD:
+                dark_rows.append(row_index)
 
-            texture = float(patch.std())
-            edge = 0.0
-            if patch.shape[0] > 1:
-                edge += float(np.abs(np.diff(patch, axis=0)).mean())
-            if patch.shape[1] > 1:
-                edge += float(np.abs(np.diff(patch, axis=1)).mean())
-            return texture + edge
+        if not dark_rows:
+            logger.debug("Gap detection: no dark rows found (threshold={})", self._GAP_BRIGHTNESS_THRESHOLD)
+            return None
 
-        def offset_score(offset: int) -> float:
-            scores: list[float] = []
-            for cy in local_ys:
-                y = cy + offset
-                if y < patch_radius or y >= gray.shape[0] - patch_radius:
-                    continue
-                for cx in local_xs:
-                    scores.append(patch_score(cx, y))
-            return float(np.mean(scores)) if scores else 0.0
+        # 将连续暗行分组为暗带（间隙），间距超过阈值则断开
+        gap_bands: list[tuple[int, int]] = []
+        band_start = dark_rows[0]
+        band_prev = dark_rows[0]
+        for row_index in dark_rows[1:]:
+            if row_index - band_prev > self._GAP_BAND_GROUP_DISTANCE:
+                gap_bands.append((band_start, band_prev))
+                band_start = row_index
+            band_prev = row_index
+        gap_bands.append((band_start, band_prev))
 
-        candidates = list(range(-search_radius, search_radius + 1, 4))
-        if 0 not in candidates:
-            candidates.append(0)
+        # 取每条暗带的中心 Y（转换为截图全局坐标）
+        actual_gap_centers = [
+            (band_top + band_bottom) / 2.0 + y_min
+            for band_top, band_bottom in gap_bands
+        ]
 
-        scored = [(offset, offset_score(offset)) for offset in candidates]
-        best_offset, best_score = max(scored, key=lambda item: item[1])
-        zero_score = next(score for offset, score in scored if offset == 0)
+        logger.debug(
+            "Gap detection: found {} bands at y={}, expected {} gaps",
+            len(gap_bands),
+            [round(c) for c in actual_gap_centers],
+            len(expected_gap_centers),
+        )
 
-        # Only correct when shifted click rows are clearly more content-like.
-        if best_score <= zero_score * 1.08:
+        # 匹配：对每条实际暗带，找最近的期望间隙，计算偏移量
+        offsets: list[float] = []
+        for actual_center in actual_gap_centers:
+            best_distance = float("inf")
+            best_offset = 0.0
+            for expected_center in expected_gap_centers:
+                distance = abs(actual_center - expected_center)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_offset = actual_center - expected_center
+            # 距离过远的暗带视为噪声（可能是 UI 边框等），跳过
+            if best_distance <= self._GAP_MATCH_TOLERANCE:
+                offsets.append(best_offset)
+
+        if not offsets:
             logger.debug(
-                "Row alignment not confident: best_offset={} best={:.2f} zero={:.2f}",
-                best_offset,
-                best_score,
-                zero_score,
+                "Gap detection: no matching gaps within tolerance ({})",
+                self._GAP_MATCH_TOLERANCE,
             )
             return None
 
+        # 取中位数作为最终偏移量（抵抗个别异常值）
+        offsets.sort()
+        median_offset = offsets[len(offsets) // 2]
+        result = round(median_offset)
+
         logger.debug(
-            "Row alignment detected: best_offset={} best={:.2f} zero={:.2f}",
-            best_offset,
-            best_score,
-            zero_score,
+            "Gap detection: offsets={}, median={:.1f}, result={}",
+            [round(o) for o in offsets],
+            median_offset,
+            result,
         )
-        return best_offset
+        return result
 
     def _get_essence_hash(self, data: EssenceData) -> str:
         """
