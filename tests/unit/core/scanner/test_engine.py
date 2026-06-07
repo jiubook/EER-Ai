@@ -416,3 +416,199 @@ def test_downgrade_blocked_essence_is_not_fallback_counted(
     engine._assign_essence_to_weapon({"w1"}, [2, 3, 1])
 
     assert engine.get_weapon_essence_counts() == {}
+
+
+def _make_screenshot_with_gaps(
+    width: int,
+    height: int,
+    gap_y_centers: list[int],
+    gap_thickness: int = 9,
+    card_brightness: int = 150,
+    gap_brightness: int = 20,
+) -> np.ndarray:
+    """生成带有指定暗带位置的模拟截图，用于间隙检测测试。"""
+    img = np.full((height, width, 3), card_brightness, dtype=np.uint8)
+    half = gap_thickness // 2
+    for gap_center in gap_y_centers:
+        top = max(0, gap_center - half)
+        bottom = min(height, gap_center + half + 1)
+        img[top:bottom, :, :] = gap_brightness
+    return img
+
+
+class GapDetectImageSource:
+    """用于测试间隙检测的模拟图像源，返回预设暗带位置的截图。"""
+
+    def __init__(self, screenshot_img: np.ndarray):
+        self._img = screenshot_img
+
+    def get_client_size(self) -> tuple[int, int]:
+        return self._img.shape[1], self._img.shape[0]
+
+    def screenshot(self, relative_region: Region | None = None) -> np.ndarray:
+        if relative_region is None:
+            return self._img.copy()
+        return self._img[
+            relative_region.y0 : relative_region.y1,
+            relative_region.x0 : relative_region.x1,
+            :,
+        ].copy()
+
+
+def test_gap_detection_returns_correct_offset(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """当截图中的暗带相对于期望位置有固定偏移时，检测应返回该偏移量。"""
+    icon_y_list = [200, 355, 510, 665, 820]
+    row_height = 155
+    card_half = row_height // 2
+
+    # 期望间隙中心：(200+72 + 355-72)/2 = 277, 432, 587, 742
+    expected_gaps = []
+    for i in range(len(icon_y_list) - 1):
+        expected_gaps.append(
+            (icon_y_list[i] + card_half + icon_y_list[i + 1] - card_half) // 2
+        )
+
+    # 实际暗带偏移 +10px
+    offset = 10
+    actual_gaps = [g + offset for g in expected_gaps]
+
+    img = _make_screenshot_with_gaps(1920, 1049, actual_gaps)
+    image_source = GapDetectImageSource(img)
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=image_source,
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    result = engine._detect_grid_row_offset([100, 500], icon_y_list, row_height)
+    assert result is not None
+    # 允许 ±1px 的量化误差
+    assert abs(result - offset) <= 1
+
+
+def test_gap_detection_returns_none_for_no_gaps(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """截图中没有暗带时，应返回 None。"""
+    img = np.full((1049, 1920, 3), 150, dtype=np.uint8)
+    image_source = GapDetectImageSource(img)
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=image_source,
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    result = engine._detect_grid_row_offset([100, 500], [200, 355, 510], 155)
+    assert result is None
+
+
+def test_gap_detection_handles_negative_offset(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """暗带位于期望位置上方（负偏移）时，应正确检测。"""
+    icon_y_list = [200, 355, 510]
+    row_height = 155
+    card_half = row_height // 2
+
+    expected_gaps = []
+    for i in range(len(icon_y_list) - 1):
+        expected_gaps.append(
+            (icon_y_list[i] + card_half + icon_y_list[i + 1] - card_half) // 2
+        )
+
+    offset = -15
+    actual_gaps = [g + offset for g in expected_gaps]
+
+    img = _make_screenshot_with_gaps(1920, 1049, actual_gaps)
+    image_source = GapDetectImageSource(img)
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=image_source,
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    result = engine._detect_grid_row_offset([100, 500], icon_y_list, row_height)
+    assert result is not None
+    assert abs(result - offset) <= 1
+
+
+def test_gap_detection_large_offset_with_spacing(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """偏移量超过旧容差（30px）时，通过相对间距匹配仍应正确检测。"""
+    icon_y_list = [200, 355, 510, 665, 820]
+    row_height = 155
+    card_half = row_height // 2
+
+    expected_gaps = []
+    for i in range(len(icon_y_list) - 1):
+        expected_gaps.append(
+            (icon_y_list[i] + card_half + icon_y_list[i + 1] - card_half) // 2
+        )
+
+    # 大偏移 +50px，超过旧的 30px 容差
+    offset = 50
+    actual_gaps = [g + offset for g in expected_gaps]
+
+    img = _make_screenshot_with_gaps(1920, 1049, actual_gaps)
+    image_source = GapDetectImageSource(img)
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=image_source,
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    result = engine._detect_grid_row_offset([100, 500], icon_y_list, row_height)
+    assert result is not None
+    assert abs(result - offset) <= 1
+
+
+def test_gap_detection_filters_noise_by_spacing(
+    mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """噪声暗带（间距不等于 row_height）应被过滤，不影响偏移计算。"""
+    icon_y_list = [200, 355, 510, 665, 820]
+    row_height = 155
+    card_half = row_height // 2
+
+    expected_gaps = []
+    for i in range(len(icon_y_list) - 1):
+        expected_gaps.append(
+            (icon_y_list[i] + card_half + icon_y_list[i + 1] - card_half) // 2
+        )
+
+    # 正确间隙偏移 +10px，但在前面加一条噪声暗带
+    offset = 10
+    actual_gaps = [g + offset for g in expected_gaps]
+    noise_gap = actual_gaps[0] - 80  # 间距 80px，不等于 row_height
+    all_gaps = [noise_gap] + actual_gaps
+
+    img = _make_screenshot_with_gaps(1920, 1049, all_gaps)
+    image_source = GapDetectImageSource(img)
+
+    engine = DraggableScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=image_source,
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+
+    result = engine._detect_grid_row_offset([100, 500], icon_y_list, row_height)
+    assert result is not None
+    # 噪声暗带被过滤，偏移仍由有效暗带决定
+    assert abs(result - offset) <= 1
