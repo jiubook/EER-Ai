@@ -7,6 +7,7 @@ from endfield_essence_recognizer.core.scanner.models import (
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
+    KeepBestMode,
     NonFiveStarBehavior,
     SameTypeGroupMode,
     TreasureMatchMode,
@@ -14,6 +15,13 @@ from endfield_essence_recognizer.schemas.user_setting import (
 )
 
 STAT_SLOTS = ("attribute", "secondary", "skill")
+
+# 概率和值模式下的升级难度权重
+# 累计期望基质数：从 1 级升到该等级所需的期望基质数量（等级越高越难升）
+# 基础属性/附加属性（词条 1&2）：概率 {1:0.6, 2:0.24, 3:0.109, 4:0.05, 5:0.027}
+_WEIGHTS_AFFIX_12 = (0, 1.667, 5.833, 15.0, 35.0, 72.037)  # 索引 = 等级
+# 技能属性（词条 3）：概率 {1:0.109, 2:0.042}
+_WEIGHTS_AFFIX_3 = (0, 9.174, 32.986)  # 索引 = 等级
 
 
 def _matches_by_mode(
@@ -214,8 +222,52 @@ def _evaluate_non_five_star_high_level(
     )
 
 
-def _level_cmp(current: tuple[int, int, int], existing: tuple[int, int, int]) -> int:
-    """逐维度从左到右比较等级，返回 1（更优）/ 0（相等）/ -1（更差）。"""
+def _weighted_sum(levels: tuple[int, int, int]) -> float:
+    """计算等级元组的加权和（按升级难度加权）。
+
+    权重为从 1 级升到该等级所需的期望基质数，等级越高越难升，权重越大。
+    前两个词条（基础/附加）使用 _WEIGHTS_AFFIX_12，第三个词条（技能）使用 _WEIGHTS_AFFIX_3。
+    """
+    return (
+        _WEIGHTS_AFFIX_12[levels[0]]
+        + _WEIGHTS_AFFIX_12[levels[1]]
+        + _WEIGHTS_AFFIX_3[levels[2]]
+    )
+
+
+def _level_cmp(
+    current: tuple[int, int, int],
+    existing: tuple[int, int, int],
+    mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
+) -> int:
+    """比较等级元组，返回 1（更优）/ 0（相等）/ -1（更差）。
+
+    Args:
+        current: 当前基质的三个词条等级。
+        existing: 已保存的最佳基质的三个词条等级。
+        mode: 比较模式：
+            - SEQUENTIAL: 从左到右逐维度比较 A → B → C（原有行为）。
+            - SUM: 比较三个词条等级之和 A + B + C。
+            - WEIGHTED_SUM: 按升级难度加权比较，等级越高越难升，权重越大。
+    """
+    if mode == KeepBestMode.SUM:
+        # 和值比对：直接比较三词条等级之和
+        cs, es = sum(current), sum(existing)
+        if cs > es:
+            return 1
+        if cs < es:
+            return -1
+        return 0
+    if mode == KeepBestMode.WEIGHTED_SUM:
+        # 概率和值：用升级期望基质数加权后比较
+        cw = _weighted_sum(current)
+        ew = _weighted_sum(existing)
+        if cw > ew:
+            return 1
+        if cw < ew:
+            return -1
+        return 0
+    # 依次比对（默认）：逐维度从左到右比较 A → B → C
     for c, e in zip(current, existing, strict=True):
         if c > e:
             return 1
@@ -244,18 +296,22 @@ def _claim_as_owned(
     setting: UserSetting,
     key: tuple[str | None, ...] | str,
     current_levels: tuple[int, int, int],
+    mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
 ) -> bool:
-    """留大弃小：判断当前基质是否属于该组“已保存”的那一枚（或其升级版）。
+    """留大弃小：判断当前基质是否属于该组"已保存"的那一枚（或其升级版）。
 
     - 相等：说明就是 profile 里保存的那一枚，在仍有跳过名额时直接认领（不占用数量上限）。
     - 更优：说明保存的那枚升级了，认领并把阈值提升到新等级，同时消耗一个已存名额。
     - 更差：返回 False，交由数量上限逻辑判断。
+
+    Args:
+        mode: 等级比较方式，由用户设置中的 same_type_keep_best_mode 决定。
     """
     best = setting._same_type_best_levels.get(key)
     if best is None:
         return False
 
-    cmp = _level_cmp(current_levels, best)
+    cmp = _level_cmp(current_levels, best, mode)
     if cmp > 0:
         setting._same_type_best_levels[key] = current_levels
         skip = setting._same_type_equal_skips.get(key, 0)
@@ -275,14 +331,19 @@ def _claim_by_limit(
     key: tuple[str | None, ...] | str,
     current_levels: tuple[int, int, int],
     limit: int,
+    mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
 ) -> bool:
-    """按数量上限认领当前基质：未达上限则保留并计数，同时维护最佳等级。"""
+    """按数量上限认领当前基质：未达上限则保留并计数，同时维护最佳等级。
+
+    Args:
+        mode: 等级比较方式，用于判断新基质是否比已记录的最佳等级更优。
+    """
     count = setting._same_type_treasure_counts.get(key, 0)
     if count >= limit:
         return False
     setting._same_type_treasure_counts[key] = count + 1
     best = setting._same_type_best_levels.get(key)
-    if best is None or _level_cmp(current_levels, best) > 0:
+    if best is None or _level_cmp(current_levels, best, mode) > 0:
         setting._same_type_best_levels[key] = current_levels
     return True
 
@@ -294,11 +355,16 @@ def _apply_stat_group_limit(
     current_levels: tuple[int, int, int],
     limit: int,
     keep_best: bool,
+    mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
 ) -> EvaluationResult:
-    """按基质分组（属性组合相同即为同类型）的限制逻辑。"""
-    if keep_best and _claim_as_owned(setting, stat_key, current_levels):
+    """按基质分组（属性组合相同即为同类型）的限制逻辑。
+
+    Args:
+        mode: 等级比较方式，仅在 keep_best=True 时生效。
+    """
+    if keep_best and _claim_as_owned(setting, stat_key, current_levels, mode):
         return evaluation
-    if _claim_by_limit(setting, stat_key, current_levels, limit):
+    if _claim_by_limit(setting, stat_key, current_levels, limit, mode):
         return evaluation
     return _make_trash_by_limit(
         evaluation, setting._same_type_treasure_counts.get(stat_key, 0), limit
@@ -312,19 +378,24 @@ def _apply_weapon_group_limit(
     current_levels: tuple[int, int, int],
     limit: int,
     keep_best: bool,
+    mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
 ) -> EvaluationResult:
-    """按武器分组（每把武器独立计数）的限制逻辑。"""
+    """按武器分组（每把武器独立计数）的限制逻辑。
+
+    Args:
+        mode: 等级比较方式，仅在 keep_best=True 时生效。
+    """
     weapon_ids = sorted(matched_weapon_ids)
 
-    # 第一轮：优先认领属于某把武器的“已保存”基质（相等跳过 / 更优升级）。
+    # 第一轮：优先认领属于某把武器的"已保存"基质（相等跳过 / 更优升级）。
     if keep_best:
         for weapon_id in weapon_ids:
-            if _claim_as_owned(setting, weapon_id, current_levels):
+            if _claim_as_owned(setting, weapon_id, current_levels, mode):
                 return evaluation
 
     # 第二轮：按数量上限分配给第一把未达上限的武器。
     for weapon_id in weapon_ids:
-        if _claim_by_limit(setting, weapon_id, current_levels, limit):
+        if _claim_by_limit(setting, weapon_id, current_levels, limit, mode):
             return evaluation
 
     # 所有匹配武器都已达上限
@@ -345,6 +416,7 @@ def _apply_same_type_treasure_limit(
 
     limit = setting.same_type_treasure_limit
     keep_best = setting.same_type_keep_best
+    mode = setting.same_type_keep_best_mode  # 留大弃小的等级比较方式（依次比对/和值比对/概率和值）
     current_levels = (
         data.levels[0] or 1,
         data.levels[1] or 1,
@@ -356,13 +428,13 @@ def _apply_same_type_treasure_limit(
         and matched_weapon_ids
     ):
         return _apply_weapon_group_limit(
-            setting, evaluation, matched_weapon_ids, current_levels, limit, keep_best
+            setting, evaluation, matched_weapon_ids, current_levels, limit, keep_best, mode
         )
 
     # 默认按基质分组（包括自定义基质匹配和无匹配武器的情况）
     stat_key = tuple(data.stats)
     return _apply_stat_group_limit(
-        setting, evaluation, stat_key, current_levels, limit, keep_best
+        setting, evaluation, stat_key, current_levels, limit, keep_best, mode
     )
 
 
