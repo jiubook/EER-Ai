@@ -157,7 +157,9 @@ def recognize_essence(
         f"已识别当前基质，属性: <magenta>{stats_name}</>, 稀有度: {rarity_text}, <magenta>{abandon_label.value}</>, <magenta>{locked_label.value}</>"
     )
 
-    return EssenceData(stats, stat_types, levels, rarity_label, abandon_label, locked_label)
+    return EssenceData(
+        stats, stat_types, levels, rarity_label, abandon_label, locked_label
+    )
 
 
 def recognize_once(

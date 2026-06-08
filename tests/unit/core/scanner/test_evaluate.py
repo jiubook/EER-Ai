@@ -254,6 +254,7 @@ def test_evaluate_high_level(
     stat.stat_id = "A"
     stat.name = "AttrA"
     stat.type = "ATTRIBUTE"
+    mock_static_game_data.get_stat.side_effect = None
     mock_static_game_data.get_stat.return_value = stat
 
     # Level 11 >= Threshold 10

@@ -71,7 +71,9 @@ def _matches_treasure_stats(
 
     matches = [
         expected == type_to_actual.get(expected_type)
-        for expected, expected_type in zip(configured_values, expected_types, strict=True)
+        for expected, expected_type in zip(
+            configured_values, expected_types, strict=True
+        )
         if expected is not None
     ]
     return _matches_by_mode(matches, len(matches), mode)
@@ -151,12 +153,23 @@ def _evaluate_high_level_treasure(
         eval_matches = [
             m
             for m, st in zip(original_slot_matches, stat_types, strict=True)
-            if st is not None and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
+            if st is not None
+            and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
         ]
     else:
         eval_matches = original_slot_matches
 
-    if mode == TreasureMatchMode.ANY:
+    if mode == TreasureMatchMode.ONLY:
+        matched_indexes = [
+            i
+            for i, (m, st) in enumerate(
+                zip(original_slot_matches, stat_types, strict=True)
+            )
+            if m
+            and st is not None
+            and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
+        ]
+    elif mode == TreasureMatchMode.ANY:
         matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
     else:
         matched_indexes = (
@@ -242,12 +255,23 @@ def _evaluate_non_five_star_high_level(
         eval_matches = [
             m
             for m, st in zip(original_slot_matches, stat_types, strict=True)
-            if st is not None and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
+            if st is not None
+            and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
         ]
     else:
         eval_matches = original_slot_matches
 
-    if mode == TreasureMatchMode.ANY:
+    if mode == TreasureMatchMode.ONLY:
+        matched_indexes = [
+            i
+            for i, (m, st) in enumerate(
+                zip(original_slot_matches, stat_types, strict=True)
+            )
+            if m
+            and st is not None
+            and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
+        ]
+    elif mode == TreasureMatchMode.ANY:
         matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
     else:
         matched_indexes = (
@@ -496,7 +520,11 @@ def evaluate_essence(
     # 如果某类型缺失或重复，对应的字段为 None
     type_to_stat: dict[StatType, str | None] = {}
     for stat_id, stat_type in zip(stats, stat_types, strict=True):
-        if stat_type is not None and stat_id is not None and stat_type not in type_to_stat:
+        if (
+            stat_type is not None
+            and stat_id is not None
+            and stat_type not in type_to_stat
+        ):
             type_to_stat[stat_type] = stat_id
     weapon_attr = type_to_stat.get(StatType.ATTRIBUTE)
     weapon_sec = type_to_stat.get(StatType.SECONDARY)
