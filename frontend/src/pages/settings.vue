@@ -599,6 +599,7 @@
               >
                 <v-radio label="依次比对（A → B → C）" value="sequential" />
                 <v-radio label="和值比对（A + B + C）" value="sum" />
+                <v-radio label="冷却脂消耗（按升级累计需要消耗的冷却脂排序）" value="grease" />
                 <v-radio label="概率和值（按升级难度加权）" value="weighted_sum" />
               </v-radio-group>
             </v-col>
