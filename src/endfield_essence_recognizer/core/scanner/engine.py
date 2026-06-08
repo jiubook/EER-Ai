@@ -28,7 +28,7 @@ from endfield_essence_recognizer.core.scanner.models import (
     EssenceQuality,
 )
 from endfield_essence_recognizer.core.window.adapter import InMemoryImageSource
-from endfield_essence_recognizer.game_data.models.v2 import WeaponId
+from endfield_essence_recognizer.game_data.models.v2 import StatType, WeaponId
 from endfield_essence_recognizer.schemas.user_setting import UserSetting
 from endfield_essence_recognizer.services.user_setting_manager import UserSettingManager
 from endfield_essence_recognizer.utils.log import logger
@@ -116,6 +116,19 @@ def recognize_essence(
     )
     logger.debug(f"锁定按钮识别结果: {locked_label.value} (分数: {max_val:.3f})")
 
+    # 根据识别出的 stat_id 查询每个位置的语义类型（ATTRIBUTE / SECONDARY / SKILL）
+    stat_types: list[StatType | None] = []
+    for stat in stats:
+        if stat is None:
+            stat_types.append(None)
+        else:
+            stat_info = ctx.static_game_data.get_stat(stat)
+            if stat_info is not None:
+                stat_types.append(stat_info.type)
+            else:
+                stat_types.append(None)
+                logger.warning(f"无法在静态数据中找到基质 ID: {stat} 的类型")
+
     stats_name_parts = []
     for i, stat in enumerate(stats):
         if stat is None:
@@ -144,7 +157,7 @@ def recognize_essence(
         f"已识别当前基质，属性: <magenta>{stats_name}</>, 稀有度: {rarity_text}, <magenta>{abandon_label.value}</>, <magenta>{locked_label.value}</>"
     )
 
-    return EssenceData(stats, levels, rarity_label, abandon_label, locked_label)
+    return EssenceData(stats, stat_types, levels, rarity_label, abandon_label, locked_label)
 
 
 def recognize_once(

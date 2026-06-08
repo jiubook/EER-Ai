@@ -4,6 +4,7 @@ from endfield_essence_recognizer.core.scanner.models import (
     EssenceQuality,
     EvaluationResult,
 )
+from endfield_essence_recognizer.game_data.models.v2 import StatType
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
@@ -14,6 +15,26 @@ from endfield_essence_recognizer.schemas.user_setting import (
 )
 
 STAT_SLOTS = ("attribute", "secondary", "skill")
+
+# StatType → 对应 EssenceStats / 阈值配置中的字段名
+_TYPE_TO_SLOT: dict[StatType, str] = {
+    StatType.ATTRIBUTE: "attribute",
+    StatType.SECONDARY: "secondary",
+    StatType.SKILL: "skill",
+}
+
+
+def _get_threshold_for_type(
+    stat_type: StatType | None,
+    thresholds_by_type: dict[str, int],
+) -> int | None:
+    """根据 stat 的语义类型查找对应的判定阈值。"""
+    if stat_type is None:
+        return None
+    slot = _TYPE_TO_SLOT.get(stat_type)
+    if slot is None:
+        return None
+    return thresholds_by_type.get(slot)
 
 
 def _matches_by_mode(
@@ -29,16 +50,28 @@ def _matches_by_mode(
 
 
 def _matches_treasure_stats(
-    treasure_stat: EssenceStats, stats: list[str | None], mode: TreasureMatchMode
+    treasure_stat: EssenceStats,
+    stats: list[str | None],
+    stat_types: list[StatType | None],
+    mode: TreasureMatchMode,
 ) -> bool:
+    # 按类型构建查找表：type → 实际 stat_id
+    type_to_actual: dict[StatType, str | None] = {}
+    for stat_id, stat_type in zip(stats, stat_types, strict=True):
+        if stat_type is not None and stat_type not in type_to_actual:
+            type_to_actual[stat_type] = stat_id
+
+    # 用户配置的期望值按类型查找
     configured_values = [
         treasure_stat.attribute,
         treasure_stat.secondary,
         treasure_stat.skill,
     ]
+    expected_types = [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL]
+
     matches = [
-        expected == actual
-        for expected, actual in zip(configured_values, stats, strict=True)
+        expected == type_to_actual.get(expected_type)
+        for expected, expected_type in zip(configured_values, expected_types, strict=True)
         if expected is not None
     ]
     return _matches_by_mode(matches, len(matches), mode)
@@ -76,6 +109,7 @@ def _evaluate_high_level_treasure(
         return False, ""
 
     stats = data.stats
+    stat_types = data.stat_types
     levels = data.levels
     mode = setting.high_level_treasure_match_mode
 
@@ -92,24 +126,32 @@ def _evaluate_high_level_treasure(
             static_game_data, stats, levels, present_indexes
         )
 
-    thresholds = [
-        setting.high_level_treasure_attribute_threshold,
-        setting.high_level_treasure_secondary_threshold,
-        setting.high_level_treasure_skill_threshold,
-    ]
-    original_slot_matches = [
-        stat_id is not None and level is not None and level >= threshold
-        for stat_id, level, threshold in zip(stats, levels, thresholds, strict=True)
-    ]
+    # 按类型构建阈值和 only_check 查找表
+    thresholds_by_type: dict[str, int] = {
+        "attribute": setting.high_level_treasure_attribute_threshold,
+        "secondary": setting.high_level_treasure_secondary_threshold,
+        "skill": setting.high_level_treasure_skill_threshold,
+    }
+    only_flags_by_type: dict[str, bool] = {
+        "attribute": setting.high_level_treasure_only_check_attribute,
+        "secondary": setting.high_level_treasure_only_check_secondary,
+        "skill": setting.high_level_treasure_only_check_skill,
+    }
+
+    # 按每个位置的语义类型查找对应阈值进行判定
+    original_slot_matches: list[bool] = []
+    for stat_id, stat_type, level in zip(stats, stat_types, levels, strict=True):
+        threshold = _get_threshold_for_type(stat_type, thresholds_by_type)
+        if threshold is None or stat_id is None or level is None:
+            original_slot_matches.append(False)
+        else:
+            original_slot_matches.append(level >= threshold)
 
     if mode == TreasureMatchMode.ONLY:
-        only_flags = [
-            setting.high_level_treasure_only_check_attribute,
-            setting.high_level_treasure_only_check_secondary,
-            setting.high_level_treasure_only_check_skill,
-        ]
         eval_matches = [
-            m for m, f in zip(original_slot_matches, only_flags, strict=True) if f
+            m
+            for m, st in zip(original_slot_matches, stat_types, strict=True)
+            if st is not None and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
         ]
     else:
         eval_matches = original_slot_matches
@@ -141,37 +183,37 @@ def _evaluate_non_five_star_high_level(
     """
     # 判断是否使用独立设置
     if setting.non_five_star_separate_high_level_settings:
-        # 使用非无暇基质专用的高等级判定设置
-        thresholds = [
-            setting.non_five_star_high_level_attribute_threshold,
-            setting.non_five_star_high_level_secondary_threshold,
-            setting.non_five_star_high_level_skill_threshold,
-        ]
+        thresholds_by_type: dict[str, int] = {
+            "attribute": setting.non_five_star_high_level_attribute_threshold,
+            "secondary": setting.non_five_star_high_level_secondary_threshold,
+            "skill": setting.non_five_star_high_level_skill_threshold,
+        }
         mode = setting.non_five_star_high_level_match_mode
         sum_threshold = setting.non_five_star_high_level_sum_threshold
-        only_flags = [
-            setting.non_five_star_high_level_only_check_attribute,
-            setting.non_five_star_high_level_only_check_secondary,
-            setting.non_five_star_high_level_only_check_skill,
-        ]
+        only_flags_by_type: dict[str, bool] = {
+            "attribute": setting.non_five_star_high_level_only_check_attribute,
+            "secondary": setting.non_five_star_high_level_only_check_secondary,
+            "skill": setting.non_five_star_high_level_only_check_skill,
+        }
     else:
         # 使用宝藏基质判定规则中的高等级设置
         if not setting.high_level_treasure_enabled:
             return False, ""
-        thresholds = [
-            setting.high_level_treasure_attribute_threshold,
-            setting.high_level_treasure_secondary_threshold,
-            setting.high_level_treasure_skill_threshold,
-        ]
+        thresholds_by_type = {
+            "attribute": setting.high_level_treasure_attribute_threshold,
+            "secondary": setting.high_level_treasure_secondary_threshold,
+            "skill": setting.high_level_treasure_skill_threshold,
+        }
         mode = setting.high_level_treasure_match_mode
         sum_threshold = setting.high_level_treasure_sum_threshold
-        only_flags = [
-            setting.high_level_treasure_only_check_attribute,
-            setting.high_level_treasure_only_check_secondary,
-            setting.high_level_treasure_only_check_skill,
-        ]
+        only_flags_by_type = {
+            "attribute": setting.high_level_treasure_only_check_attribute,
+            "secondary": setting.high_level_treasure_only_check_secondary,
+            "skill": setting.high_level_treasure_only_check_skill,
+        }
 
     stats = data.stats
+    stat_types = data.stat_types
     levels = data.levels
 
     if mode == TreasureMatchMode.SUM:
@@ -187,14 +229,20 @@ def _evaluate_non_five_star_high_level(
             static_game_data, stats, levels, present_indexes
         )
 
-    original_slot_matches = [
-        stat_id is not None and level is not None and level >= threshold
-        for stat_id, level, threshold in zip(stats, levels, thresholds, strict=True)
-    ]
+    # 按每个位置的语义类型查找对应阈值进行判定
+    original_slot_matches: list[bool] = []
+    for stat_id, stat_type, level in zip(stats, stat_types, levels, strict=True):
+        threshold = _get_threshold_for_type(stat_type, thresholds_by_type)
+        if threshold is None or stat_id is None or level is None:
+            original_slot_matches.append(False)
+        else:
+            original_slot_matches.append(level >= threshold)
 
     if mode == TreasureMatchMode.ONLY:
         eval_matches = [
-            m for m, f in zip(original_slot_matches, only_flags, strict=True) if f
+            m
+            for m, st in zip(original_slot_matches, stat_types, strict=True)
+            if st is not None and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
         ]
     else:
         eval_matches = original_slot_matches
@@ -423,6 +471,7 @@ def evaluate_essence(
                 )
 
     stats = data.stats
+    stat_types = data.stat_types
 
     is_high_level_treasure, high_level_info = _evaluate_high_level_treasure(
         data, setting, static_game_data
@@ -431,7 +480,7 @@ def evaluate_essence(
     # 尝试匹配用户自定义的宝藏基质条件
     for treasure_stat in setting.treasure_essence_stats:
         if _matches_treasure_stats(
-            treasure_stat, stats, setting.treasure_essence_match_mode
+            treasure_stat, stats, stat_types, setting.treasure_essence_match_mode
         ):
             return _apply_same_type_treasure_limit(
                 data,
@@ -443,9 +492,19 @@ def evaluate_essence(
                 ),
             )
 
+    # 按语义类型构建武器匹配三元组（每种类型取第一个出现的 stat）
+    # 如果某类型缺失或重复，对应的字段为 None
+    type_to_stat: dict[StatType, str | None] = {}
+    for stat_id, stat_type in zip(stats, stat_types, strict=True):
+        if stat_type is not None and stat_id is not None and stat_type not in type_to_stat:
+            type_to_stat[stat_type] = stat_id
+    weapon_attr = type_to_stat.get(StatType.ATTRIBUTE)
+    weapon_sec = type_to_stat.get(StatType.SECONDARY)
+    weapon_skill = type_to_stat.get(StatType.SKILL)
+
     # 尝试匹配已实装武器
     matched_weapon_ids = set(
-        static_game_data.find_weapons_by_stats(stats[0], stats[1], stats[2])
+        static_game_data.find_weapons_by_stats(weapon_attr, weapon_sec, weapon_skill)
     )
 
     if not matched_weapon_ids:

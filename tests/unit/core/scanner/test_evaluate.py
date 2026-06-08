@@ -12,6 +12,7 @@ from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
     EssenceQuality,
 )
+from endfield_essence_recognizer.game_data.models.v2 import EssenceStatV2, StatType
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
     NonFiveStarBehavior,
@@ -20,12 +21,29 @@ from endfield_essence_recognizer.schemas.user_setting import (
 )
 
 
+def _make_stat(stat_id: str, stat_type: StatType) -> EssenceStatV2:
+    """Create a mock EssenceStatV2 with the given type."""
+    return EssenceStatV2(stat_id=stat_id, name=stat_id, type=stat_type)
+
+
+# 预定义测试用的 stat 对象
+_STAT_A = _make_stat("A", StatType.ATTRIBUTE)
+_STAT_B = _make_stat("B", StatType.SECONDARY)
+_STAT_C = _make_stat("C", StatType.SKILL)
+
+_MOCK_STAT_TABLE: dict[str, EssenceStatV2] = {
+    "A": _STAT_A,
+    "B": _STAT_B,
+    "C": _STAT_C,
+}
+
+
 @pytest.fixture
 def mock_static_game_data():
     mock_data = MagicMock()
 
-    # Default behaviors
-    mock_data.get_stat.return_value = None
+    # 按 stat_id 返回对应的 EssenceStatV2（含类型信息）
+    mock_data.get_stat.side_effect = lambda sid: _MOCK_STAT_TABLE.get(sid)
     mock_data.find_weapons_by_stats.return_value = []
     mock_data.get_weapon.return_value = None
     mock_data.get_weapon_type.return_value = None
@@ -42,6 +60,7 @@ def default_settings():
 def default_essence_data():
     return EssenceData(
         stats=["A", "B", "C"],
+        stat_types=[StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
         levels=[0, 0, 0],
         rarity=RarityLabel.OTHER,
         abandon_label=AbandonStatusLabel.NOT_ABANDONED,
