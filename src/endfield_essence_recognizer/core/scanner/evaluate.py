@@ -16,12 +16,19 @@ from endfield_essence_recognizer.schemas.user_setting import (
 
 STAT_SLOTS = ("attribute", "secondary", "skill")
 
+# 冷却脂消耗模式下的累计冷却脂权重
+# 从 1 级升到该等级所需的冷却脂总量（1/1/1 视作 0）
+# 基础属性/附加属性（词条 1&2）：阈值 {1→2:30, 2→3:60, 3→4:120, 4→5:250, 5→6:450}
+_GREASE_AFFIX_12 = (0, 0, 30, 90, 210, 460, 910)  # 索引 = 等级（1~6）
+# 技能属性（词条 3）：阈值 {1→2:120, 2→3:300}
+_GREASE_AFFIX_3 = (0, 0, 120, 420)  # 索引 = 等级（1~3）
+
 # 概率和值模式下的升级难度权重
 # 累计期望基质数：从 1 级升到该等级所需的期望基质数量（等级越高越难升）
-# 基础属性/附加属性（词条 1&2）：概率 {1:0.6, 2:0.24, 3:0.109, 4:0.05, 5:0.027}
-_WEIGHTS_AFFIX_12 = (0, 1.667, 5.833, 15.0, 35.0, 72.037)  # 索引 = 等级
-# 技能属性（词条 3）：概率 {1:0.109, 2:0.042}
-_WEIGHTS_AFFIX_3 = (0, 9.174, 32.986)  # 索引 = 等级
+# 基础属性/附加属性（词条 1&2）：升级概率 {1→2:0.6, 2→3:0.24, 3→4:0.109, 4→5:0.05, 5→6:0.027}
+_WEIGHTS_AFFIX_12 = (0, 1.667, 5.833, 15.0, 35.0, 72.037, 109.074)  # 索引 = 等级（1~6）
+# 技能属性（词条 3）：升级概率 {1→2:0.109, 2→3:0.042}
+_WEIGHTS_AFFIX_3 = (0, 9.174, 32.986, 56.796)  # 索引 = 等级（1~3）
 
 
 def _matches_by_mode(
@@ -228,11 +235,22 @@ def _weighted_sum(levels: tuple[int, int, int]) -> float:
     权重为从 1 级升到该等级所需的期望基质数，等级越高越难升，权重越大。
     前两个词条（基础/附加）使用 _WEIGHTS_AFFIX_12，第三个词条（技能）使用 _WEIGHTS_AFFIX_3。
     """
-    return (
-        _WEIGHTS_AFFIX_12[levels[0]]
-        + _WEIGHTS_AFFIX_12[levels[1]]
-        + _WEIGHTS_AFFIX_3[levels[2]]
-    )
+    # 防止 OCR 识别出的异常等级值导致数组越界
+    lv0 = min(max(levels[0], 0), len(_WEIGHTS_AFFIX_12) - 1)
+    lv1 = min(max(levels[1], 0), len(_WEIGHTS_AFFIX_12) - 1)
+    lv2 = min(max(levels[2], 0), len(_WEIGHTS_AFFIX_3) - 1)
+    return _WEIGHTS_AFFIX_12[lv0] + _WEIGHTS_AFFIX_12[lv1] + _WEIGHTS_AFFIX_3[lv2]
+
+
+def _grease_sum(levels: tuple[int, int, int]) -> float:
+    """计算等级元组的冷却脂消耗总量（1/1/1 视作 0）。
+
+    前两个词条（基础/附加）使用 _GREASE_AFFIX_12，第三个词条（技能）使用 _GREASE_AFFIX_3。
+    """
+    lv0 = min(max(levels[0], 0), len(_GREASE_AFFIX_12) - 1)
+    lv1 = min(max(levels[1], 0), len(_GREASE_AFFIX_12) - 1)
+    lv2 = min(max(levels[2], 0), len(_GREASE_AFFIX_3) - 1)
+    return _GREASE_AFFIX_12[lv0] + _GREASE_AFFIX_12[lv1] + _GREASE_AFFIX_3[lv2]
 
 
 def _level_cmp(
@@ -248,6 +266,7 @@ def _level_cmp(
         mode: 比较模式：
             - SEQUENTIAL: 从左到右逐维度比较 A → B → C（原有行为）。
             - SUM: 比较三个词条等级之和 A + B + C。
+            - GREASE: 按从 1 级升到该等级所需的冷却脂总量比较（1/1/1 视作 0）。
             - WEIGHTED_SUM: 按升级难度加权比较，等级越高越难升，权重越大。
     """
     if mode == KeepBestMode.SUM:
@@ -256,6 +275,14 @@ def _level_cmp(
         if cs > es:
             return 1
         if cs < es:
+            return -1
+        return 0
+    if mode == KeepBestMode.GREASE:
+        # 冷却脂消耗：按从 1 级升到该等级的冷却脂总量比较
+        cg, eg = _grease_sum(current), _grease_sum(existing)
+        if cg > eg:
+            return 1
+        if cg < eg:
             return -1
         return 0
     if mode == KeepBestMode.WEIGHTED_SUM:
@@ -416,7 +443,9 @@ def _apply_same_type_treasure_limit(
 
     limit = setting.same_type_treasure_limit
     keep_best = setting.same_type_keep_best
-    mode = setting.same_type_keep_best_mode  # 留大弃小的等级比较方式（依次比对/和值比对/概率和值）
+    mode = (
+        setting.same_type_keep_best_mode
+    )  # 留大弃小的等级比较方式（依次比对/和值比对/冷却脂消耗/概率和值）
     current_levels = (
         data.levels[0] or 1,
         data.levels[1] or 1,
@@ -428,7 +457,13 @@ def _apply_same_type_treasure_limit(
         and matched_weapon_ids
     ):
         return _apply_weapon_group_limit(
-            setting, evaluation, matched_weapon_ids, current_levels, limit, keep_best, mode
+            setting,
+            evaluation,
+            matched_weapon_ids,
+            current_levels,
+            limit,
+            keep_best,
+            mode,
         )
 
     # 默认按基质分组（包括自定义基质匹配和无匹配武器的情况）

@@ -79,6 +79,9 @@ class KeepBestMode(StrEnum):
     SUM = "sum"
     """和值比对：比较三个词条等级之和 A + B + C。"""
 
+    GREASE = "grease"
+    """冷却脂消耗：按从 1 级升到该等级所需的冷却脂总量比较（1/1/1 视作 0）。"""
+
     WEIGHTED_SUM = "weighted_sum"
     """概率和值：按升级难度加权比较（等级越高越难升，权重越大）。"""
 
