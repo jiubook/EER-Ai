@@ -31,9 +31,8 @@ from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
     EssenceQuality,
 )
-from endfield_essence_recognizer.game_data.models.v2 import StatType
 from endfield_essence_recognizer.core.window.adapter import InMemoryImageSource
-from endfield_essence_recognizer.game_data.models.v2 import WeaponId
+from endfield_essence_recognizer.game_data.models.v2 import StatType, WeaponId
 from endfield_essence_recognizer.schemas.user_setting import UserSetting
 from endfield_essence_recognizer.services.user_setting_manager import UserSettingManager
 from endfield_essence_recognizer.utils.log import logger

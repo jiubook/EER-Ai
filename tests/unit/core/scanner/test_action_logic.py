@@ -14,7 +14,6 @@ from endfield_essence_recognizer.core.scanner.models import (
     EssenceQuality,
     EvaluationResult,
 )
-from endfield_essence_recognizer.game_data.models.v2 import StatType
 from endfield_essence_recognizer.schemas.user_setting import Action, UserSetting
 
 

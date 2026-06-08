@@ -572,6 +572,7 @@ def evaluate_essence(
                 )
 
     stats = data.stats
+    stat_types = data.stat_types
 
     is_high_level_treasure, high_level_info = _evaluate_high_level_treasure(
         data, setting, static_game_data
@@ -580,7 +581,7 @@ def evaluate_essence(
     # 尝试匹配用户自定义的宝藏基质条件
     for treasure_stat in setting.treasure_essence_stats:
         if _matches_treasure_stats(
-            treasure_stat, stats, data.stat_types, setting.treasure_essence_match_mode
+            treasure_stat, stats, stat_types, setting.treasure_essence_match_mode
         ):
             return _apply_same_type_treasure_limit(
                 data,
