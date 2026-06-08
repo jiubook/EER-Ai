@@ -8,6 +8,7 @@ from endfield_essence_recognizer.core.recognition import (
 )
 from endfield_essence_recognizer.game_data.models.v2 import (
     StatId,
+    StatType,
     WeaponId,
 )
 
@@ -30,7 +31,10 @@ class EssenceData:
     """Raw recognition data for a single essence."""
 
     stats: list[StatId | None]
-    """List of identified attribute IDs on the essence."""
+    """List of identified attribute IDs on the essence (positional: index 0/1/2)."""
+
+    stat_types: list[StatType | None]
+    """Semantic type for each position: ATTRIBUTE / SECONDARY / SKILL / None (unrecognized)."""
 
     levels: list[int | None]
     """List of identified attribute levels/enhancement values."""

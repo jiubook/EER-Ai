@@ -21,6 +21,7 @@ from endfield_essence_recognizer.schemas.user_setting import Action, UserSetting
 def default_data():
     return EssenceData(
         stats=[],
+        stat_types=[],
         levels=[],
         rarity=RarityLabel.OTHER,
         abandon_label=AbandonStatusLabel.NOT_ABANDONED,
