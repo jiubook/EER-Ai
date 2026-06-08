@@ -1,3 +1,4 @@
+import functools
 import itertools
 import threading
 
@@ -22,7 +23,10 @@ from endfield_essence_recognizer.core.scanner.action_logic import (
 from endfield_essence_recognizer.core.scanner.context import (
     ScannerContext,
 )
-from endfield_essence_recognizer.core.scanner.evaluate import evaluate_essence
+from endfield_essence_recognizer.core.scanner.evaluate import (
+    _level_cmp,
+    evaluate_essence,
+)
 from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
     EssenceQuality,
@@ -375,8 +379,15 @@ class ScannerEngine:
                     group_levels.setdefault(stat_key, []).append(levels)
 
             # 每组以最高等级作为阈值，并以等于该阈值的数量作为相等跳过名额
+            mode = user_setting.same_type_keep_best_mode
+
+            def _best_of(lst: list[tuple]) -> tuple:
+                return max(
+                    lst, key=functools.cmp_to_key(lambda a, b: _level_cmp(a, b, mode))
+                )
+
             for key, levels_list in group_levels.items():
-                best = max(levels_list)
+                best = _best_of(levels_list)
                 user_setting._same_type_best_levels[key] = best
                 user_setting._same_type_equal_skips[key] = sum(
                     1 for lv in levels_list if lv == best

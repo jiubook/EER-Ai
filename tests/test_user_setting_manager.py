@@ -243,6 +243,7 @@ def test_user_setting_schema_stability():
         "same_type_treasure_limit",
         "same_type_group_mode",
         "same_type_keep_best",
+        "same_type_keep_best_mode",
         "auto_page_flip",
         "fix_grid_row_offset_after_page_flip",
         "fix_page_flip_overscroll",
@@ -445,6 +446,9 @@ def test_migration_sets_all_required_fields():
     assert migrated.non_five_star_high_level_only_check_attribute is True
     assert migrated.non_five_star_high_level_only_check_secondary is True
     assert migrated.non_five_star_high_level_only_check_skill is True
+
+    # v6→v7 补充的字段（留大弃小等级比较方式）
+    assert migrated.same_type_keep_best_mode == "sequential"
 
 
 def test_legacy_cn_update_mirror_normalizes_to_yituliu_flow():

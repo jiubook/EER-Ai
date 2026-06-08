@@ -588,6 +588,19 @@
               <v-alert border="start" class="mt-2" type="info" variant="tonal">
                 启用后，遇到同类型基质时会与已保留的基质比较等级。如果新基质的词条等级更高，则替换旧的；否则视为养成材料。扫描开始前会读取账号中已有的基质等级作为基准。
               </v-alert>
+              <v-radio-group
+                v-model="sameTypeKeepBestMode"
+                class="mt-2"
+                color="primary"
+                density="compact"
+                :disabled="!sameTypeTreasureLimitEnabled || !sameTypeKeepBest"
+                hide-details
+                label="等级比较方式"
+              >
+                <v-radio label="依次比对（A → B → C）" value="sequential" />
+                <v-radio label="和值比对（A + B + C）" value="sum" />
+                <v-radio label="概率和值（按升级难度加权）" value="weighted_sum" />
+              </v-radio-group>
             </v-col>
           </v-row>
 
@@ -876,6 +889,7 @@ const sameTypeTreasureLimitEnabled = ref(false)
 const sameTypeTreasureLimit = ref(1)
 const sameTypeGroupMode = ref<'by_stat' | 'by_weapon'>('by_stat')
 const sameTypeKeepBest = ref(true)
+const sameTypeKeepBestMode = ref<'sequential' | 'sum' | 'weighted_sum'>('sequential')
 const updateFlow = ref('github')
 const updateGithubMirror = ref('github')
 const updateProxyEnabled = ref(false)
@@ -975,7 +989,7 @@ function isTypePartiallySelected(groupId: string): boolean {
 const config = computed(() => {
   const proxyUrl = updateProxyEnabled.value ? `http://127.0.0.1:${updateProxyPort.value}` : ''
   return {
-    version: 6,
+    version: 7,
     trash_weapon_ids: notSelectedWeaponIds.value,
     treasure_essence_stats: treasureEssenceStats.value,
     treasure_essence_match_mode: 'all' as const,
@@ -1013,6 +1027,7 @@ const config = computed(() => {
     same_type_treasure_limit: Math.max(1, Number(sameTypeTreasureLimit.value) || 1),
     same_type_group_mode: sameTypeGroupMode.value,
     same_type_keep_best: sameTypeKeepBest.value,
+    same_type_keep_best_mode: sameTypeKeepBestMode.value,
     update_mirror: updateGithubMirror.value,
     update_flow: updateFlow.value,
     update_github_mirror: updateGithubMirror.value,
@@ -1058,6 +1073,7 @@ async function getConfig() {
     same_type_treasure_limit,
     same_type_group_mode,
     same_type_keep_best,
+    same_type_keep_best_mode,
     update_flow,
     update_github_mirror,
     update_mirror,
@@ -1098,6 +1114,7 @@ async function getConfig() {
   sameTypeTreasureLimit.value = same_type_treasure_limit || 1
   sameTypeGroupMode.value = same_type_group_mode || 'by_stat'
   sameTypeKeepBest.value = same_type_keep_best !== false
+  sameTypeKeepBestMode.value = same_type_keep_best_mode || 'sequential'
   updateFlow.value = normalizeUpdateFlow(update_flow, update_mirror)
   updateGithubMirror.value = update_github_mirror || getLegacyGithubMirror(update_mirror)
   updateMirrorChyanResId.value = update_mirrorchyan_res_id || ''
