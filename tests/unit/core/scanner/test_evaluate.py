@@ -12,6 +12,7 @@ from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
     EssenceQuality,
 )
+from endfield_essence_recognizer.game_data.models.v2 import StatType
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
     NonFiveStarBehavior,
@@ -42,6 +43,7 @@ def default_settings():
 def default_essence_data():
     return EssenceData(
         stats=["A", "B", "C"],
+        stat_types=[StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
         levels=[0, 0, 0],
         rarity=RarityLabel.OTHER,
         abandon_label=AbandonStatusLabel.NOT_ABANDONED,

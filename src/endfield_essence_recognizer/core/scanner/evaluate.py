@@ -6,6 +6,7 @@ from endfield_essence_recognizer.core.scanner.models import (
     EssenceQuality,
     EvaluationResult,
 )
+from endfield_essence_recognizer.game_data.models.v2 import StatType
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
@@ -17,6 +18,27 @@ from endfield_essence_recognizer.schemas.user_setting import (
 )
 
 STAT_SLOTS = ("attribute", "secondary", "skill")
+
+# StatType → 对应 EssenceStats / 阈值配置中的字段名
+_TYPE_TO_SLOT: dict[StatType, str] = {
+    StatType.ATTRIBUTE: "attribute",
+    StatType.SECONDARY: "secondary",
+    StatType.SKILL: "skill",
+}
+
+
+def _get_threshold_for_type(
+    stat_type: StatType | None,
+    thresholds_by_type: dict[str, int],
+) -> int | None:
+    """根据 stat 的语义类型查找对应的判定阈值。"""
+    if stat_type is None:
+        return None
+    slot = _TYPE_TO_SLOT.get(stat_type)
+    if slot is None:
+        return None
+    return thresholds_by_type.get(slot)
+
 
 # 冷却脂消耗模式下的累计冷却脂权重
 # 从 1 级升到该等级所需的冷却脂总量（1/1/1 视作 0）
@@ -50,16 +72,30 @@ def _matches_by_mode(
 
 
 def _matches_treasure_stats(
-    treasure_stat: EssenceStats, stats: list[str | None], mode: TreasureMatchMode
+    treasure_stat: EssenceStats,
+    stats: list[str | None],
+    stat_types: list[StatType | None],
+    mode: TreasureMatchMode,
 ) -> bool:
+    # 按类型构建查找表：type → 实际 stat_id
+    type_to_actual: dict[StatType, str | None] = {}
+    for stat_id, stat_type in zip(stats, stat_types, strict=True):
+        if stat_type is not None and stat_type not in type_to_actual:
+            type_to_actual[stat_type] = stat_id
+
+    # 用户配置的期望值按类型查找
     configured_values = [
         treasure_stat.attribute,
         treasure_stat.secondary,
         treasure_stat.skill,
     ]
+    expected_types = [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL]
+
     matches = [
-        expected == actual
-        for expected, actual in zip(configured_values, stats, strict=True)
+        expected == type_to_actual.get(expected_type)
+        for expected, expected_type in zip(
+            configured_values, expected_types, strict=True
+        )
         if expected is not None
     ]
     return _matches_by_mode(matches, len(matches), mode)
@@ -544,7 +580,7 @@ def evaluate_essence(
     # 尝试匹配用户自定义的宝藏基质条件
     for treasure_stat in setting.treasure_essence_stats:
         if _matches_treasure_stats(
-            treasure_stat, stats, setting.treasure_essence_match_mode
+            treasure_stat, stats, data.stat_types, setting.treasure_essence_match_mode
         ):
             return _apply_same_type_treasure_limit(
                 data,
