@@ -308,34 +308,60 @@ def _evaluate_non_five_star_high_level(
     )
 
 
-def _weighted_sum(levels: tuple[int, int, int]) -> float:
+def _weighted_sum(
+    levels: tuple[int, int, int], stat_types: list[StatType | None]
+) -> float:
     """计算等级元组的加权和（按升级难度加权）。
 
     权重为从 1 级升到该等级所需的期望基质数，等级越高越难升，权重越大。
-    前两个词条（基础/附加）使用 _WEIGHTS_AFFIX_12，第三个词条（技能）使用 _WEIGHTS_AFFIX_3。
+    根据每个词条的实际类型（stat_types）动态选择权重表：
+    - ATTRIBUTE/SECONDARY（基础/附加）使用 _WEIGHTS_AFFIX_12
+    - SKILL（技能）使用 _WEIGHTS_AFFIX_3
     """
-    # 防止 OCR 识别出的异常等级值导致数组越界
-    lv0 = min(max(levels[0], 0), len(_WEIGHTS_AFFIX_12) - 1)
-    lv1 = min(max(levels[1], 0), len(_WEIGHTS_AFFIX_12) - 1)
-    lv2 = min(max(levels[2], 0), len(_WEIGHTS_AFFIX_3) - 1)
-    return _WEIGHTS_AFFIX_12[lv0] + _WEIGHTS_AFFIX_12[lv1] + _WEIGHTS_AFFIX_3[lv2]
+    total = 0.0
+    for lv, st in zip(levels, stat_types, strict=True):
+        clamped_lv = min(
+            max(lv, 0),
+            len(_WEIGHTS_AFFIX_12) - 1
+            if st != StatType.SKILL
+            else len(_WEIGHTS_AFFIX_3) - 1,
+        )
+        if st == StatType.SKILL:
+            total += _WEIGHTS_AFFIX_3[clamped_lv]
+        else:  # ATTRIBUTE 或 SECONDARY 或 None
+            total += _WEIGHTS_AFFIX_12[clamped_lv]
+    return total
 
 
-def _grease_sum(levels: tuple[int, int, int]) -> float:
+def _grease_sum(
+    levels: tuple[int, int, int], stat_types: list[StatType | None]
+) -> float:
     """计算等级元组的冷却脂消耗总量（1/1/1 视作 0）。
 
-    前两个词条（基础/附加）使用 _GREASE_AFFIX_12，第三个词条（技能）使用 _GREASE_AFFIX_3。
+    根据每个词条的实际类型（stat_types）动态选择权重表：
+    - ATTRIBUTE/SECONDARY（基础/附加）使用 _GREASE_AFFIX_12
+    - SKILL（技能）使用 _GREASE_AFFIX_3
     """
-    lv0 = min(max(levels[0], 0), len(_GREASE_AFFIX_12) - 1)
-    lv1 = min(max(levels[1], 0), len(_GREASE_AFFIX_12) - 1)
-    lv2 = min(max(levels[2], 0), len(_GREASE_AFFIX_3) - 1)
-    return _GREASE_AFFIX_12[lv0] + _GREASE_AFFIX_12[lv1] + _GREASE_AFFIX_3[lv2]
+    total = 0.0
+    for lv, st in zip(levels, stat_types, strict=True):
+        clamped_lv = min(
+            max(lv, 0),
+            len(_GREASE_AFFIX_12) - 1
+            if st != StatType.SKILL
+            else len(_GREASE_AFFIX_3) - 1,
+        )
+        if st == StatType.SKILL:
+            total += _GREASE_AFFIX_3[clamped_lv]
+        else:  # ATTRIBUTE 或 SECONDARY 或 None
+            total += _GREASE_AFFIX_12[clamped_lv]
+    return total
 
 
 def _level_cmp(
     current: tuple[int, int, int],
     existing: tuple[int, int, int],
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
+    stat_types: list[StatType | None] | None = None,
 ) -> int:
     """比较等级元组，返回 1（更优）/ 0（相等）/ -1（更差）。
 
@@ -347,6 +373,7 @@ def _level_cmp(
             - SUM: 比较三个词条等级之和 A + B + C。
             - GREASE: 按从 1 级升到该等级所需的冷却脂总量比较（1/1/1 视作 0）。
             - WEIGHTED_SUM: 按升级难度加权比较，等级越高越难升，权重越大。
+        stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
     """
     if mode == KeepBestMode.SUM:
         # 和值比对：直接比较三词条等级之和
@@ -358,7 +385,9 @@ def _level_cmp(
         return 0
     if mode == KeepBestMode.GREASE:
         # 冷却脂消耗：按从 1 级升到该等级的冷却脂总量比较
-        cg, eg = _grease_sum(current), _grease_sum(existing)
+        if stat_types is None:
+            stat_types = [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL]
+        cg, eg = _grease_sum(current, stat_types), _grease_sum(existing, stat_types)
         if cg > eg:
             return 1
         if cg < eg:
@@ -366,8 +395,10 @@ def _level_cmp(
         return 0
     if mode == KeepBestMode.WEIGHTED_SUM:
         # 概率和值：用升级期望基质数加权后比较
-        cw = _weighted_sum(current)
-        ew = _weighted_sum(existing)
+        if stat_types is None:
+            stat_types = [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL]
+        cw = _weighted_sum(current, stat_types)
+        ew = _weighted_sum(existing, stat_types)
         if cw > ew:
             return 1
         if cw < ew:
@@ -403,6 +434,7 @@ def _claim_as_owned(
     key: tuple[str | None, ...] | str,
     current_levels: tuple[int, int, int],
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
+    stat_types: list[StatType | None] | None = None,
 ) -> bool:
     """留大弃小：判断当前基质是否属于该组"已保存"的那一枚（或其升级版）。
 
@@ -412,12 +444,13 @@ def _claim_as_owned(
 
     Args:
         mode: 等级比较方式，由用户设置中的 same_type_keep_best_mode 决定。
+        stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
     """
     best = setting._same_type_best_levels.get(key)
     if best is None:
         return False
 
-    cmp = _level_cmp(current_levels, best, mode)
+    cmp = _level_cmp(current_levels, best, mode, stat_types)
     if cmp > 0:
         setting._same_type_best_levels[key] = current_levels
         skip = setting._same_type_equal_skips.get(key, 0)
@@ -438,18 +471,20 @@ def _claim_by_limit(
     current_levels: tuple[int, int, int],
     limit: int,
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
+    stat_types: list[StatType | None] | None = None,
 ) -> bool:
     """按数量上限认领当前基质：未达上限则保留并计数，同时维护最佳等级。
 
     Args:
         mode: 等级比较方式，用于判断新基质是否比已记录的最佳等级更优。
+        stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
     """
     count = setting._same_type_treasure_counts.get(key, 0)
     if count >= limit:
         return False
     setting._same_type_treasure_counts[key] = count + 1
     best = setting._same_type_best_levels.get(key)
-    if best is None or _level_cmp(current_levels, best, mode) > 0:
+    if best is None or _level_cmp(current_levels, best, mode, stat_types) > 0:
         setting._same_type_best_levels[key] = current_levels
     return True
 
@@ -462,15 +497,19 @@ def _apply_stat_group_limit(
     limit: int,
     keep_best: bool,
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
+    stat_types: list[StatType | None] | None = None,
 ) -> EvaluationResult:
     """按基质分组（属性组合相同即为同类型）的限制逻辑。
 
     Args:
         mode: 等级比较方式，仅在 keep_best=True 时生效。
+        stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
     """
-    if keep_best and _claim_as_owned(setting, stat_key, current_levels, mode):
+    if keep_best and _claim_as_owned(
+        setting, stat_key, current_levels, mode, stat_types
+    ):
         return evaluation
-    if _claim_by_limit(setting, stat_key, current_levels, limit, mode):
+    if _claim_by_limit(setting, stat_key, current_levels, limit, mode, stat_types):
         return evaluation
     return _make_trash_by_limit(
         evaluation, setting._same_type_treasure_counts.get(stat_key, 0), limit
@@ -485,23 +524,25 @@ def _apply_weapon_group_limit(
     limit: int,
     keep_best: bool,
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
+    stat_types: list[StatType | None] | None = None,
 ) -> EvaluationResult:
     """按武器分组（每把武器独立计数）的限制逻辑。
 
     Args:
         mode: 等级比较方式，仅在 keep_best=True 时生效。
+        stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
     """
     weapon_ids = sorted(matched_weapon_ids)
 
     # 第一轮：优先认领属于某把武器的"已保存"基质（相等跳过 / 更优升级）。
     if keep_best:
         for weapon_id in weapon_ids:
-            if _claim_as_owned(setting, weapon_id, current_levels, mode):
+            if _claim_as_owned(setting, weapon_id, current_levels, mode, stat_types):
                 return evaluation
 
     # 第二轮：按数量上限分配给第一把未达上限的武器。
     for weapon_id in weapon_ids:
-        if _claim_by_limit(setting, weapon_id, current_levels, limit, mode):
+        if _claim_by_limit(setting, weapon_id, current_levels, limit, mode, stat_types):
             return evaluation
 
     # 所有匹配武器都已达上限
@@ -530,6 +571,8 @@ def _apply_same_type_treasure_limit(
         data.levels[1] or 1,
         data.levels[2] or 1,
     )
+    # 传递词条类型，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表
+    stat_types = data.stat_types
 
     if (
         setting.same_type_group_mode == SameTypeGroupMode.BY_WEAPON
@@ -543,12 +586,20 @@ def _apply_same_type_treasure_limit(
             limit,
             keep_best,
             mode,
+            stat_types,
         )
 
     # 默认按基质分组（包括自定义基质匹配和无匹配武器的情况）
     stat_key = tuple(data.stats)
     return _apply_stat_group_limit(
-        setting, evaluation, stat_key, current_levels, limit, keep_best, mode
+        setting,
+        evaluation,
+        stat_key,
+        current_levels,
+        limit,
+        keep_best,
+        mode,
+        stat_types,
     )
 
 

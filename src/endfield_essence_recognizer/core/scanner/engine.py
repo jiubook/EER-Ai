@@ -396,13 +396,28 @@ class ScannerEngine:
             # 每组以最高等级作为阈值，并以等于该阈值的数量作为相等跳过名额
             mode = user_setting.same_type_keep_best_mode
 
-            def _best_of(lst: list[tuple]) -> tuple:
+            def _best_of(
+                lst: list[tuple], stat_key: tuple[str | None, ...] | str
+            ) -> tuple:
+                # 根据 stat_key 查询词条类型
+                stat_types = None
+                if isinstance(stat_key, tuple) and len(stat_key) == 3:
+                    stat_types = []
+                    for stat_id in stat_key:
+                        if stat_id is None:
+                            stat_types.append(None)
+                        else:
+                            stat_info = self.ctx.static_game_data.get_stat(stat_id)
+                            stat_types.append(stat_info.type if stat_info else None)
                 return max(
-                    lst, key=functools.cmp_to_key(lambda a, b: _level_cmp(a, b, mode))
+                    lst,
+                    key=functools.cmp_to_key(
+                        lambda a, b: _level_cmp(a, b, mode, stat_types)
+                    ),
                 )
 
             for key, levels_list in group_levels.items():
-                best = _best_of(levels_list)
+                best = _best_of(levels_list, key)
                 user_setting._same_type_best_levels[key] = best
                 user_setting._same_type_equal_skips[key] = sum(
                     1 for lv in levels_list if lv == best
