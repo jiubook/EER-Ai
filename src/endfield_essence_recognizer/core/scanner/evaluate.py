@@ -1,3 +1,5 @@
+from itertools import accumulate
+
 from endfield_essence_recognizer.core.recognition import RarityLabel
 from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
@@ -19,16 +21,20 @@ STAT_SLOTS = ("attribute", "secondary", "skill")
 # 冷却脂消耗模式下的累计冷却脂权重
 # 从 1 级升到该等级所需的冷却脂总量（1/1/1 视作 0）
 # 基础属性/附加属性（词条 1&2）：阈值 {1→2:30, 2→3:60, 3→4:120, 4→5:250, 5→6:450}
-_GREASE_AFFIX_12 = (0, 0, 30, 90, 210, 460, 910)  # 索引 = 等级（1~6）
+_GREASE_AFFIX_12 = tuple(
+    accumulate((0, 0, 30, 60, 120, 250, 450))
+)  # 索引 = 等级（1~6）
 # 技能属性（词条 3）：阈值 {1→2:120, 2→3:300}
-_GREASE_AFFIX_3 = (0, 0, 120, 420)  # 索引 = 等级（1~3）
+_GREASE_AFFIX_3 = tuple(accumulate((0, 0, 120, 300)))  # 索引 = 等级（1~3）
 
 # 概率和值模式下的升级难度权重
 # 累计期望基质数：从 1 级升到该等级所需的期望基质数量（等级越高越难升）
 # 基础属性/附加属性（词条 1&2）：升级概率 {1→2:0.6, 2→3:0.24, 3→4:0.109, 4→5:0.05, 5→6:0.027}
-_WEIGHTS_AFFIX_12 = (0, 1.667, 5.833, 15.0, 35.0, 72.037, 109.074)  # 索引 = 等级（1~6）
+_WEIGHTS_AFFIX_12 = tuple(
+    accumulate((0, 0, 1 / 0.6, 1 / 0.24, 1 / 0.109, 1 / 0.05, 1 / 0.027))
+)  # 索引 = 等级（1~6）
 # 技能属性（词条 3）：升级概率 {1→2:0.109, 2→3:0.042}
-_WEIGHTS_AFFIX_3 = (0, 9.174, 32.986, 56.796)  # 索引 = 等级（1~3）
+_WEIGHTS_AFFIX_3 = tuple(accumulate((0, 0, 1 / 0.109, 1 / 0.042)))  # 索引 = 等级（1~3）
 
 
 def _matches_by_mode(

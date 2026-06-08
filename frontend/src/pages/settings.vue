@@ -590,12 +590,12 @@
               </v-alert>
               <v-radio-group
                 v-model="sameTypeKeepBestMode"
+                class="mt-2"
                 color="primary"
                 density="compact"
                 :disabled="!sameTypeTreasureLimitEnabled || !sameTypeKeepBest"
                 hide-details
                 label="等级比较方式"
-                class="mt-2"
               >
                 <v-radio label="依次比对（A → B → C）" value="sequential" />
                 <v-radio label="和值比对（A + B + C）" value="sum" />
