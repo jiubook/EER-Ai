@@ -244,6 +244,7 @@ def test_user_setting_schema_stability():
         "same_type_group_mode",
         "same_type_keep_best",
         "same_type_keep_best_mode",
+        "same_type_non_downgrade_filter",
         "auto_page_flip",
         "fix_grid_row_offset_after_page_flip",
         "fix_page_flip_overscroll",

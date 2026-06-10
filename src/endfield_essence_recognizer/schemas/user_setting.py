@@ -178,6 +178,11 @@ class UserSetting(BaseModel):
     same_type_keep_best: bool = True
     """启用留大弃小策略：同类型中保留等级更高的基质，等级更低的视为养成材料。"""
 
+    same_type_non_downgrade_filter: bool = True
+    """按武器划分时，过滤掉无法升级任何匹配武器已有基质的矩阵（非降级原则）。
+    启用后，基质各维度等级必须 >= 武器当前等级才会被保留，否则视为养成材料。
+    """
+
     same_type_keep_best_mode: KeepBestMode = KeepBestMode.SEQUENTIAL
     """留大弃小策略中等级比较的方式：依次比对 / 和值比对 / 概率和值。"""
 
@@ -301,8 +306,9 @@ class UserSetting(BaseModel):
 
     @staticmethod
     def _migrate_v6_to_v7(data: dict) -> None:
-        """v6 → v7: 添加留大弃小等级比较方式。"""
+        """v6 → v7: 添加留大弃小等级比较方式及非降级原则过滤开关。"""
         data.setdefault("same_type_keep_best_mode", "sequential")
+        data.setdefault("same_type_non_downgrade_filter", True)
 
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）

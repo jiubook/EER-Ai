@@ -525,14 +525,43 @@ def _apply_weapon_group_limit(
     keep_best: bool,
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
     stat_types: list[StatType | None] | None = None,
+    weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
 ) -> EvaluationResult:
     """按武器分组（每把武器独立计数）的限制逻辑。
 
     Args:
         mode: 等级比较方式，仅在 keep_best=True 时生效。
         stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
+        weapon_essence_levels: 各武器当前基质等级，用于非降级原则过滤。
     """
     weapon_ids = sorted(matched_weapon_ids)
+
+    # 过滤掉基质等级不满足非降级原则的武器
+    if weapon_essence_levels and setting.same_type_non_downgrade_filter:
+        upgradeable_ids = []
+        for wid in weapon_ids:
+            existing = weapon_essence_levels.get(wid)
+            if existing is None:
+                upgradeable_ids.append(wid)
+            elif (
+                current_levels[0] >= existing[0]
+                and current_levels[1] >= existing[1]
+                and current_levels[2] >= existing[2]
+            ):
+                upgradeable_ids.append(wid)
+        weapon_ids = upgradeable_ids
+
+    if not weapon_ids:
+        return EvaluationResult(
+            quality=EssenceQuality.TRASH,
+            log_message=(
+                "这个基质是<red><bold><underline>养成材料</></></>，"
+                "因为它无法升级任何匹配武器的已有基质（不满足非降级原则）。"
+            ),
+            matched_weapons=evaluation.matched_weapons,
+            matched_weapons_all_blocked=True,
+            is_high_level=evaluation.is_high_level,
+        )
 
     # 第一轮：优先认领属于某把武器的"已保存"基质（相等跳过 / 更优升级）。
     if keep_best:
@@ -554,6 +583,7 @@ def _apply_same_type_treasure_limit(
     setting: UserSetting,
     evaluation: EvaluationResult,
     matched_weapon_ids: set[str] | None = None,
+    weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
 ) -> EvaluationResult:
     if (
         evaluation.quality != EssenceQuality.TREASURE
@@ -587,6 +617,7 @@ def _apply_same_type_treasure_limit(
             keep_best,
             mode,
             stat_types,
+            weapon_essence_levels,
         )
 
     # 默认按基质分组（包括自定义基质匹配和无匹配武器的情况）
@@ -607,6 +638,7 @@ def evaluate_essence(
     data: EssenceData,
     setting: UserSetting,
     static_game_data: StaticGameData,
+    weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
 ) -> EvaluationResult:
     """
     Pure function to judge the quality of an essence based on settings and game data.
@@ -651,6 +683,7 @@ def evaluate_essence(
                         log_message=f"这个基质是<green><bold><underline>宝藏</></></>（非无瑕基质），因为它有高等级属性词条{high_level_info}。",
                         is_high_level=True,
                     ),
+                    weapon_essence_levels=weapon_essence_levels,
                 )
             else:
                 return EvaluationResult(
@@ -679,6 +712,7 @@ def evaluate_essence(
                     log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合你设定的宝藏基质条件{high_level_info}。",
                     is_high_level=is_high_level_treasure,
                 ),
+                weapon_essence_levels=weapon_essence_levels,
             )
 
     # 按语义类型构建武器匹配三元组（每种类型取第一个出现的 stat）
@@ -711,6 +745,7 @@ def evaluate_essence(
                     log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它有高等级属性词条{high_level_info}。<dim>（但不匹配任何已实装武器）</>",
                     is_high_level=True,
                 ),
+                weapon_essence_levels=weapon_essence_levels,
             )
         else:
             return EvaluationResult(
@@ -754,6 +789,7 @@ def evaluate_essence(
                 is_high_level=is_high_level_treasure,
             ),
             matched_weapon_ids=non_trash_weapon_ids,
+            weapon_essence_levels=weapon_essence_levels,
         )
     else:
         # 所有匹配到的武器都在 trash_weapon_ids 中
@@ -776,6 +812,7 @@ def evaluate_essence(
                     is_high_level=True,
                 ),
                 matched_weapon_ids=matched_weapon_ids,
+                weapon_essence_levels=weapon_essence_levels,
             )
         else:
             return EvaluationResult(

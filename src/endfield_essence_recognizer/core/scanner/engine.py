@@ -622,7 +622,12 @@ class ScannerEngine:
                 # early continue on uncertain recognition
                 continue
 
-            evaluation = evaluate_essence(data, user_setting, self.ctx.static_game_data)
+            evaluation = evaluate_essence(
+                data,
+                user_setting,
+                self.ctx.static_game_data,
+                weapon_essence_levels=self._weapon_essence_levels,
+            )
 
             # 统计基质总数（跳过 SKIP 的基质）
             if evaluation.quality != EssenceQuality.SKIP:
@@ -977,7 +982,10 @@ class DraggableScannerEngine(ScannerEngine):
                 self._scanned_essence_hashes.add(self._get_essence_hash(data))
 
                 evaluation = evaluate_essence(
-                    data, user_setting, self.ctx.static_game_data
+                    data,
+                    user_setting,
+                    self.ctx.static_game_data,
+                    weapon_essence_levels=self._weapon_essence_levels,
                 )
 
                 # 统计基质总数（跳过 SKIP 的基质）
@@ -1444,7 +1452,12 @@ class DraggableScannerEngine(ScannerEngine):
             if not is_dup:
                 all_duplicates = False
 
-            evaluation = evaluate_essence(data, user_setting, self.ctx.static_game_data)
+            evaluation = evaluate_essence(
+                data,
+                user_setting,
+                self.ctx.static_game_data,
+                weapon_essence_levels=self._weapon_essence_levels,
+            )
 
             if evaluation.quality != EssenceQuality.SKIP:
                 self._total_essence_count += 1
