@@ -274,10 +274,11 @@
                     <v-select
                       v-if="stat.isCustom"
                       v-model="stat.attribute"
+                      class="compact-select"
                       density="compact"
                       hide-details
                       :items="allAttributeStats.map((s) => ({ title: s, value: s }))"
-                      label="基础属性"
+                      label="基础"
                       variant="outlined"
                     />
                     <v-chip v-else class="text-truncate" color="primary" size="small" style="max-width: 100%;" :title="getStatDisplayName(stat.attribute)" variant="flat">
@@ -288,10 +289,11 @@
                     <v-select
                       v-if="stat.isCustom"
                       v-model="stat.secondary"
+                      class="compact-select"
                       density="compact"
                       hide-details
                       :items="allSecondaryStats.map((s) => ({ title: s, value: s }))"
-                      label="附加属性"
+                      label="附加"
                       variant="outlined"
                     />
                     <v-chip v-else class="text-truncate" color="teal" size="small" style="max-width: 100%;" :title="getStatDisplayName(stat.secondary)" variant="flat">
@@ -302,10 +304,11 @@
                     <v-select
                       v-if="stat.isCustom"
                       v-model="stat.skill"
+                      class="compact-select"
                       density="compact"
                       hide-details
                       :items="allSkillStats.map((s) => ({ title: s, value: s }))"
-                      label="技能属性"
+                      label="技能"
                       variant="outlined"
                     />
                     <v-chip v-else class="text-truncate" color="blue" size="small" style="max-width: 100%;" :title="getStatDisplayName(stat.skill)" variant="flat">
@@ -313,16 +316,20 @@
                     </v-chip>
                   </v-col>
                   <v-col cols="12" md="2">
-                    <div class="d-flex ga-1">
-                      <v-btn :disabled="index === 0" icon="mdi-chevron-up" size="small" variant="text" @click="moveStatUp(index)" />
-                      <v-btn
-                        :disabled="index === requiredEssenceStats.length - 1"
-                        icon="mdi-chevron-down"
-                        size="small"
-                        variant="text"
-                        @click="moveStatDown(index)"
-                      />
-                      <v-btn color="error" icon="mdi-delete" size="small" variant="text" @click="removeStat(index)" />
+                    <div class="d-flex align-center justify-end ga-1">
+                      <div class="d-flex flex-column ga-0">
+                        <v-btn density="compact" :disabled="index === 0" icon="mdi-chevron-up" size="x-small" style="height: 18px; min-width: 24px;" variant="text" @click="moveStatUp(index)" />
+                        <v-btn
+                          density="compact"
+                          :disabled="index === requiredEssenceStats.length - 1"
+                          icon="mdi-chevron-down"
+                          size="x-small"
+                          style="height: 18px; min-width: 24px;"
+                          variant="text"
+                          @click="moveStatDown(index)"
+                        />
+                      </div>
+                      <v-btn color="error" density="compact" icon="mdi-delete" size="x-small" style="height: 24px; min-width: 24px;" variant="text" @click="removeStat(index)" />
                     </div>
                   </v-col>
                 </v-row>
@@ -440,7 +447,14 @@
                     }"
                     @click="handleCustomStatClick(entry)"
                   >
-                    <custom-stat-icon :name="entry.displayName" />
+                    <v-tooltip location="top" open-delay="0">
+                      <template #activator="{ props }">
+                        <div v-bind="props" class="weapon-item-content">
+                          <custom-stat-icon :name="entry.displayName" />
+                        </div>
+                      </template>
+                      <span>{{ getCustomStatTooltip(entry.index) }}</span>
+                    </v-tooltip>
                     <div
                       v-if="noPrecraftMode ? (selectedWeaponForLocation === entry.syntheticId) : isWeaponSelected(entry.syntheticId)"
                       class="weapon-selected-overlay"
@@ -480,7 +494,14 @@
                     }"
                     @click="handleWeaponClick(weaponId)"
                   >
-                    <item-icon :item-id="weaponId" show-item-name />
+                    <v-tooltip location="top" open-delay="0">
+                      <template #activator="{ props }">
+                        <div v-bind="props" class="weapon-item-content">
+                          <item-icon :item-id="weaponId" show-item-name />
+                        </div>
+                      </template>
+                      <span>{{ getWeaponStatNames(weaponId) }}</span>
+                    </v-tooltip>
                     <div v-if="noPrecraftMode ? (selectedWeaponForLocation === weaponId) : isWeaponSelected(weaponId)" class="weapon-selected-overlay">
                       <v-icon color="white" size="small">mdi-check-circle</v-icon>
                     </div>
@@ -519,7 +540,7 @@ import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 
 const route = useRoute()
-const { weaponTypes, weaponsMap } = useStaticData()
+const { weaponTypes, weaponsMap, essencesMap } = useStaticData()
 const { treasureMatrix } = useProfiles()
 const { selectedRarities } = useRarityFilters()
 const {
@@ -540,6 +561,49 @@ const {
   clearAllStats,
   updateCustomStatNames,
 } = useMatrixPlanner()
+
+/**
+ * 获取武器的三条基质属性名称，用于悬浮面板显示
+ */
+function getWeaponStatNames(weaponId: string): string {
+  const weapon = weaponsMap.value.get(weaponId)
+  if (!weapon) return ''
+
+  const stats: string[] = []
+  if (weapon.attributeStatId) {
+    const essence = essencesMap.value.get(weapon.attributeStatId)
+    if (essence) stats.push(essence.name)
+  }
+  if (weapon.secondaryStatId) {
+    const essence = essencesMap.value.get(weapon.secondaryStatId)
+    if (essence) stats.push(essence.name)
+  }
+  if (weapon.skillStatId) {
+    const essence = essencesMap.value.get(weapon.skillStatId)
+    if (essence) stats.push(essence.name)
+  }
+  return stats.join('、')
+}
+
+/**
+ * 获取自定义基质的属性名称，用于悬浮面板显示
+ */
+function getCustomStatTooltip(index: number): string {
+  const stat = customStats.value[index]
+  if (!stat) return ''
+
+  const stats: string[] = []
+  if (stat.attribute) {
+    stats.push(getStatDisplayName(stat.attribute))
+  }
+  if (stat.secondary) {
+    stats.push(getStatDisplayName(stat.secondary))
+  }
+  if (stat.skill) {
+    stats.push(getStatDisplayName(stat.skill))
+  }
+  return stats.join('、')
+}
 
 // --- 自定义基质相关 ---
 
@@ -955,6 +1019,27 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
       background-color: rgba(var(--v-theme-primary), 0.04);
     }
   }
+
+  .compact-select {
+    :deep(.v-field) {
+      min-height: 32px !important;
+      font-size: 0.75rem;
+    }
+    :deep(.v-field__input) {
+      min-height: 32px !important;
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+    }
+    :deep(.v-label) {
+      font-size: 0.7rem;
+    }
+    :deep(.v-field__append-inner) {
+      display: none !important;
+    }
+    :deep(.v-select__selection) {
+      flex-direction: column !important;
+    }
+  }
 }
 
 .group-icon {
@@ -978,6 +1063,11 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   border-radius: 6px;
   &:hover {
     transform: scale(1.1);
+  }
+
+  .weapon-item-content {
+    width: 100%;
+    height: 100%;
   }
 
   // 匹配武器的橙黄脉冲效果
