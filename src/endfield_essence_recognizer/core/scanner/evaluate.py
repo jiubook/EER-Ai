@@ -1,5 +1,7 @@
 from itertools import accumulate
 
+from loguru import logger
+
 from endfield_essence_recognizer.core.recognition import RarityLabel
 from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
@@ -18,6 +20,31 @@ from endfield_essence_recognizer.schemas.user_setting import (
 )
 
 STAT_SLOTS = ("attribute", "secondary", "skill")
+
+# 本轮扫描中通过 _claim_by_limit 认领的 (key, level)，用于级联判断。
+_claimed_this_scan: set[tuple[str, tuple[int, int, int]]] = set()
+# 本轮扫描中实际更新了 best levels 的 key，用于同步到引擎。
+_updated_this_scan: set[str] = set()
+# 本轮扫描中级联更新了 best levels 的 key（不增加计数，仅同步等级到引擎）。
+_cascade_updated_this_scan: set[str] = set()
+
+
+def reset_scan_claims() -> None:
+    """在新一轮扫描开始时调用，清空本轮认领记录。"""
+    _claimed_this_scan.clear()
+    _updated_this_scan.clear()
+    _cascade_updated_this_scan.clear()
+
+
+def get_updated_weapon_ids() -> set[str]:
+    """获取本轮扫描中实际更新了 best levels 的武器 ID。"""
+    return _updated_this_scan.copy()
+
+
+def get_cascade_updated_weapon_ids() -> set[str]:
+    """获取本轮扫描中级联更新了 best levels 的武器 ID（仅等级，无计数）。"""
+    return _cascade_updated_this_scan.copy()
+
 
 # StatType → 对应 EssenceStats / 阈值配置中的字段名
 _TYPE_TO_SLOT: dict[StatType, str] = {
@@ -453,15 +480,33 @@ def _claim_as_owned(
     cmp = _level_cmp(current_levels, best, mode, stat_types)
     if cmp > 0:
         setting._same_type_best_levels[key] = current_levels
+        if isinstance(key, str) and key.startswith("wpn_"):
+            _updated_this_scan.add(key)
         skip = setting._same_type_equal_skips.get(key, 0)
         if skip > 0:
             setting._same_type_equal_skips[key] = skip - 1
+        logger.debug(
+            f"[留大弃小] {key} 基质等级 {current_levels} 优于已保存 {best}，"
+            f"认领并提升阈值（剩余跳过名额: {skip - 1 if skip > 0 else 0}）"
+        )
         return True
     if cmp == 0:
         skip = setting._same_type_equal_skips.get(key, 0)
         if skip > 0:
             setting._same_type_equal_skips[key] = skip - 1
+            logger.debug(
+                f"[留大弃小] {key} 基质等级 {current_levels} 等于已保存 {best}，"
+                f"认领（剩余跳过名额: {skip - 1}）"
+            )
             return True
+        logger.debug(
+            f"[留大弃小] {key} 基质等级 {current_levels} 等于已保存 {best}，"
+            f"但跳过名额已用尽，不认领"
+        )
+    else:
+        logger.debug(
+            f"[留大弃小] {key} 基质等级 {current_levels} 劣于已保存 {best}，不认领"
+        )
     return False
 
 
@@ -486,6 +531,11 @@ def _claim_by_limit(
     best = setting._same_type_best_levels.get(key)
     if best is None or _level_cmp(current_levels, best, mode, stat_types) > 0:
         setting._same_type_best_levels[key] = current_levels
+        if isinstance(key, str) and key.startswith("wpn_"):
+            _updated_this_scan.add(key)
+    logger.debug(
+        f"[数量上限] {key} 认领基质等级 {current_levels}，当前计数 {count + 1}/{limit}"
+    )
     return True
 
 
@@ -511,9 +561,37 @@ def _apply_stat_group_limit(
         return evaluation
     if _claim_by_limit(setting, stat_key, current_levels, limit, mode, stat_types):
         return evaluation
-    return _make_trash_by_limit(
-        evaluation, setting._same_type_treasure_counts.get(stat_key, 0), limit
-    )
+    count = setting._same_type_treasure_counts.get(stat_key, 0)
+    logger.debug(f"[数量上限] {stat_key} 已达上限 {count}/{limit}，标记为养成材料")
+    return _make_trash_by_limit(evaluation, count, limit)
+
+
+def _cascade_freed_levels(
+    setting: UserSetting,
+    freed_levels: tuple[int, int, int],
+    remaining_ids: list[str],
+    limit: int,
+    mode: KeepBestMode,
+    stat_types: list[StatType | None] | None,
+) -> None:
+    """级联：将一把武器升级后释放的旧等级分配给剩余武器。
+
+    仅更新 _same_type_best_levels（不增加计数），用于后续非降级过滤。
+    级联武器记录到 _cascade_updated_this_scan，引擎会同步等级但不同步计数。
+    """
+    for wid in remaining_ids:
+        old_best = setting._same_type_best_levels.get(wid)
+        # 检查释放的等级是否优于当前最佳
+        if (
+            old_best is not None
+            and _level_cmp(freed_levels, old_best, mode, stat_types) <= 0
+        ):
+            continue  # 不优于，跳过
+        # 认领释放的等级（不增加计数）
+        setting._same_type_best_levels[wid] = freed_levels
+        _cascade_updated_this_scan.add(wid)
+        logger.debug(f"[级联] 武器 {wid} 认领释放的等级 {freed_levels}")
+        break  # 只分配给一把武器
 
 
 def _apply_weapon_group_limit(
@@ -526,6 +604,7 @@ def _apply_weapon_group_limit(
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
     stat_types: list[StatType | None] | None = None,
     weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
+    weapon_priority_order: list[str] | None = None,
 ) -> EvaluationResult:
     """按武器分组（每把武器独立计数）的限制逻辑。
 
@@ -533,8 +612,12 @@ def _apply_weapon_group_limit(
         mode: 等级比较方式，仅在 keep_best=True 时生效。
         stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
         weapon_essence_levels: 各武器当前基质等级，用于非降级原则过滤。
+        weapon_priority_order: 武器优先级排序（高优先级在前），用于决定分配顺序。
     """
-    weapon_ids = sorted(matched_weapon_ids)
+    if weapon_priority_order:
+        weapon_ids = [w for w in weapon_priority_order if w in matched_weapon_ids]
+    else:
+        weapon_ids = sorted(matched_weapon_ids)
 
     # 过滤掉基质等级不满足非降级原则的武器
     if weapon_essence_levels and setting.same_type_non_downgrade_filter:
@@ -543,12 +626,30 @@ def _apply_weapon_group_limit(
             existing = weapon_essence_levels.get(wid)
             if existing is None:
                 upgradeable_ids.append(wid)
+                logger.debug(f"[非降级] 武器 {wid} 无已保存基质，通过")
             elif (
                 current_levels[0] >= existing[0]
                 and current_levels[1] >= existing[1]
                 and current_levels[2] >= existing[2]
             ):
                 upgradeable_ids.append(wid)
+                logger.debug(
+                    f"[非降级] 武器 {wid} 已保存等级 {existing}，"
+                    f"基质等级 {current_levels}，满足非降级原则，通过"
+                )
+            else:
+                # 找出具体哪些维度不满足
+                dims = ["词条1", "词条2", "词条3"]
+                failed = [
+                    f"{dims[i]}({current_levels[i]}<{existing[i]})"
+                    for i in range(3)
+                    if current_levels[i] < existing[i]
+                ]
+                logger.debug(
+                    f"[非降级] 武器 {wid} 已保存等级 {existing}，"
+                    f"基质等级 {current_levels}，"
+                    f"不满足非降级原则（{', '.join(failed)}），过滤"
+                )
         weapon_ids = upgradeable_ids
 
     if not weapon_ids:
@@ -563,18 +664,39 @@ def _apply_weapon_group_limit(
             is_high_level=evaluation.is_high_level,
         )
 
-    # 第一轮：优先认领属于某把武器的"已保存"基质（相等跳过 / 更优升级）。
-    if keep_best:
-        for weapon_id in weapon_ids:
-            if _claim_as_owned(setting, weapon_id, current_levels, mode, stat_types):
-                return evaluation
-
-    # 第二轮：按数量上限分配给第一把未达上限的武器。
-    for weapon_id in weapon_ids:
+    # 矩阵只分配给一把武器（优先级最高的可接受武器）。
+    # 留大弃小：如果该武器已有更优或相等的保存等级，直接认领（不占数量上限）。
+    # 数量上限：如果未达上限，认领并计数。
+    # 当武器通过留大弃小升级时，释放的旧等级会级联给剩余武器。
+    for i, weapon_id in enumerate(weapon_ids):
+        old_best = setting._same_type_best_levels.get(weapon_id)
+        if keep_best and _claim_as_owned(
+            setting, weapon_id, current_levels, mode, stat_types
+        ):
+            # 留大弃小认领成功，检查是否是升级（而非相等跳过）
+            if old_best is not None and old_best != current_levels:
+                # 是升级：释放旧等级给剩余武器
+                # 仅当旧等级是本轮扫描中通过 _claim_by_limit 认领的才级联
+                if (weapon_id, old_best) in _claimed_this_scan:
+                    remaining = weapon_ids[i + 1 :]
+                    if remaining:
+                        _cascade_freed_levels(
+                            setting,
+                            old_best,
+                            remaining,
+                            limit,
+                            mode,
+                            stat_types,
+                        )
+            return evaluation
         if _claim_by_limit(setting, weapon_id, current_levels, limit, mode, stat_types):
+            _claimed_this_scan.add((weapon_id, current_levels))
             return evaluation
 
     # 所有匹配武器都已达上限
+    logger.debug(
+        f"[数量上限] 所有可选武器 {weapon_ids} 均已达上限 {limit}，标记为养成材料"
+    )
     return _make_trash_by_limit(evaluation, limit, limit)
 
 
@@ -584,6 +706,7 @@ def _apply_same_type_treasure_limit(
     evaluation: EvaluationResult,
     matched_weapon_ids: set[str] | None = None,
     weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
+    weapon_priority_order: list[str] | None = None,
 ) -> EvaluationResult:
     if (
         evaluation.quality != EssenceQuality.TREASURE
@@ -618,6 +741,7 @@ def _apply_same_type_treasure_limit(
             mode,
             stat_types,
             weapon_essence_levels,
+            weapon_priority_order,
         )
 
     # 默认按基质分组（包括自定义基质匹配和无匹配武器的情况）
@@ -639,6 +763,7 @@ def evaluate_essence(
     setting: UserSetting,
     static_game_data: StaticGameData,
     weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
+    weapon_priority_order: list[str] | None = None,
 ) -> EvaluationResult:
     """
     Pure function to judge the quality of an essence based on settings and game data.
@@ -790,6 +915,7 @@ def evaluate_essence(
             ),
             matched_weapon_ids=non_trash_weapon_ids,
             weapon_essence_levels=weapon_essence_levels,
+            weapon_priority_order=weapon_priority_order,
         )
     else:
         # 所有匹配到的武器都在 trash_weapon_ids 中
@@ -813,6 +939,7 @@ def evaluate_essence(
                 ),
                 matched_weapon_ids=matched_weapon_ids,
                 weapon_essence_levels=weapon_essence_levels,
+                weapon_priority_order=weapon_priority_order,
             )
         else:
             return EvaluationResult(
