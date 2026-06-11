@@ -430,9 +430,9 @@ def test_migration_sets_all_required_fields():
     assert migrated.high_level_treasure_only_check_attribute is True
     assert migrated.high_level_treasure_only_check_secondary is True
     assert migrated.high_level_treasure_only_check_skill is True
-    assert migrated.same_type_treasure_limit_enabled is False
+    assert migrated.same_type_treasure_limit_enabled is True
     assert migrated.same_type_treasure_limit == 1
-    assert migrated.same_type_group_mode == "by_stat"
+    assert migrated.same_type_group_mode == "by_weapon"
     assert migrated.same_type_keep_best is True
     assert migrated.fix_grid_row_offset_after_page_flip is True
     assert migrated.fix_page_flip_overscroll is False
@@ -449,7 +449,7 @@ def test_migration_sets_all_required_fields():
     assert migrated.non_five_star_high_level_only_check_skill is True
 
     # v6→v7 补充的字段（留大弃小等级比较方式）
-    assert migrated.same_type_keep_best_mode == "sequential"
+    assert migrated.same_type_keep_best_mode == "sum"
 
 
 def test_legacy_cn_update_mirror_normalizes_to_yituliu_flow():
