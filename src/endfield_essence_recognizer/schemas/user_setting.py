@@ -167,12 +167,12 @@ class UserSetting(BaseModel):
     non_five_star_high_level_only_check_skill: bool = True
     """非无瑕基质仅模式下是否检查技能属性槽位"""
 
-    same_type_treasure_limit_enabled: bool = False
+    same_type_treasure_limit_enabled: bool = True
     """是否启用同类型宝藏基质数量上限。"""
     same_type_treasure_limit: int = Field(default=1, ge=1, le=999)
     """每类宝藏基质允许保留的数量上限；超过后视为养成材料。"""
 
-    same_type_group_mode: SameTypeGroupMode = SameTypeGroupMode.BY_STAT
+    same_type_group_mode: SameTypeGroupMode = SameTypeGroupMode.BY_WEAPON
     """同类型宝藏基质的分组方式：按基质划分 / 按武器划分。"""
 
     same_type_keep_best: bool = True
@@ -183,7 +183,7 @@ class UserSetting(BaseModel):
     启用后，基质各维度等级必须 >= 武器当前等级才会被保留，否则视为养成材料。
     """
 
-    same_type_keep_best_mode: KeepBestMode = KeepBestMode.SEQUENTIAL
+    same_type_keep_best_mode: KeepBestMode = KeepBestMode.SUM
     """留大弃小策略中等级比较的方式：依次比对 / 和值比对 / 概率和值。"""
 
     auto_page_flip: bool = True
@@ -284,9 +284,9 @@ class UserSetting(BaseModel):
         data.setdefault("high_level_treasure_only_check_attribute", True)
         data.setdefault("high_level_treasure_only_check_secondary", True)
         data.setdefault("high_level_treasure_only_check_skill", True)
-        data.setdefault("same_type_treasure_limit_enabled", False)
+        data.setdefault("same_type_treasure_limit_enabled", True)
         data.setdefault("same_type_treasure_limit", 1)
-        data.setdefault("same_type_group_mode", "by_stat")
+        data.setdefault("same_type_group_mode", "by_weapon")
         data.setdefault("same_type_keep_best", True)
         data.setdefault("fix_grid_row_offset_after_page_flip", True)
         data.setdefault("fix_page_flip_overscroll", False)
@@ -307,7 +307,7 @@ class UserSetting(BaseModel):
     @staticmethod
     def _migrate_v6_to_v7(data: dict) -> None:
         """v6 → v7: 添加留大弃小等级比较方式及非降级原则过滤开关。"""
-        data.setdefault("same_type_keep_best_mode", "sequential")
+        data.setdefault("same_type_keep_best_mode", "sum")
         data.setdefault("same_type_non_downgrade_filter", True)
 
     # 迁移函数映射表：版本号 -> 迁移函数
