@@ -114,6 +114,10 @@ def mock_scanner_context():
     static_game_data = MagicMock()
     # Mock return value for get_stat to avoid errors when formatting logs
     static_game_data.get_stat.return_value = MagicMock(name="TestStat")
+    # Mock list_weapons to return empty list (no real weapon data needed for engine tests)
+    static_game_data.list_weapons.return_value = []
+    # Mock get_weapon to return None (no weapon found)
+    static_game_data.get_weapon.return_value = None
 
     return ScannerContext(
         attr_recognizer=attr_recognizer,
