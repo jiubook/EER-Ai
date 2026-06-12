@@ -70,6 +70,22 @@ class SameTypeGroupMode(StrEnum):
     """按武器分组（每把武器独立计数，相同属性组合的不同武器互不影响）。"""
 
 
+class KeepBestMode(StrEnum):
+    """留大弃小策略中，等级比较的方式。"""
+
+    SEQUENTIAL = "sequential"
+    """依次比对：从左到右逐维度比较 A → B → C。"""
+
+    SUM = "sum"
+    """和值比对：比较三个词条等级之和 A + B + C。"""
+
+    GREASE = "grease"
+    """冷却脂消耗：按从 1 级升到该等级所需的冷却脂总量比较（1/1/1 视作 0）。"""
+
+    WEIGHTED_SUM = "weighted_sum"
+    """概率和值：按升级难度加权比较（等级越高越难升，权重越大）。"""
+
+
 class EssenceStats(BaseModel):
     """自定义宝藏基质属性组合，支持可选的显示名称。"""
 
@@ -86,7 +102,7 @@ class EssenceStats(BaseModel):
 
 
 class UserSetting(BaseModel):
-    _VERSION: ClassVar[int] = 6
+    _VERSION: ClassVar[int] = 7
     _same_type_treasure_counts: dict[tuple[str | None, ...], int] = PrivateAttr(
         default_factory=dict
     )
@@ -151,16 +167,24 @@ class UserSetting(BaseModel):
     non_five_star_high_level_only_check_skill: bool = True
     """非无瑕基质仅模式下是否检查技能属性槽位"""
 
-    same_type_treasure_limit_enabled: bool = False
+    same_type_treasure_limit_enabled: bool = True
     """是否启用同类型宝藏基质数量上限。"""
     same_type_treasure_limit: int = Field(default=1, ge=1, le=999)
     """每类宝藏基质允许保留的数量上限；超过后视为养成材料。"""
 
-    same_type_group_mode: SameTypeGroupMode = SameTypeGroupMode.BY_STAT
+    same_type_group_mode: SameTypeGroupMode = SameTypeGroupMode.BY_WEAPON
     """同类型宝藏基质的分组方式：按基质划分 / 按武器划分。"""
 
     same_type_keep_best: bool = True
     """启用留大弃小策略：同类型中保留等级更高的基质，等级更低的视为养成材料。"""
+
+    same_type_non_downgrade_filter: bool = True
+    """按武器划分时，过滤掉无法升级任何匹配武器已有基质的矩阵（非降级原则）。
+    启用后，基质各维度等级必须 >= 武器当前等级才会被保留，否则视为养成材料。
+    """
+
+    same_type_keep_best_mode: KeepBestMode = KeepBestMode.SUM
+    """留大弃小策略中等级比较的方式：依次比对 / 和值比对 / 概率和值。"""
 
     auto_page_flip: bool = True
     """扫描时是否自动翻页"""
@@ -260,9 +284,9 @@ class UserSetting(BaseModel):
         data.setdefault("high_level_treasure_only_check_attribute", True)
         data.setdefault("high_level_treasure_only_check_secondary", True)
         data.setdefault("high_level_treasure_only_check_skill", True)
-        data.setdefault("same_type_treasure_limit_enabled", False)
+        data.setdefault("same_type_treasure_limit_enabled", True)
         data.setdefault("same_type_treasure_limit", 1)
-        data.setdefault("same_type_group_mode", "by_stat")
+        data.setdefault("same_type_group_mode", "by_weapon")
         data.setdefault("same_type_keep_best", True)
         data.setdefault("fix_grid_row_offset_after_page_flip", True)
         data.setdefault("fix_page_flip_overscroll", False)
@@ -280,6 +304,12 @@ class UserSetting(BaseModel):
         data.setdefault("non_five_star_high_level_only_check_secondary", True)
         data.setdefault("non_five_star_high_level_only_check_skill", True)
 
+    @staticmethod
+    def _migrate_v6_to_v7(data: dict) -> None:
+        """v6 → v7: 添加留大弃小等级比较方式及非降级原则过滤开关。"""
+        data.setdefault("same_type_keep_best_mode", "sum")
+        data.setdefault("same_type_non_downgrade_filter", True)
+
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）
     _MIGRATIONS: ClassVar[dict[int, Any]] = {
@@ -287,6 +317,7 @@ class UserSetting(BaseModel):
         3: _migrate_v3_to_v4.__func__,
         4: _migrate_v4_to_v5.__func__,
         5: _migrate_v5_to_v6.__func__,
+        6: _migrate_v6_to_v7.__func__,
     }
 
     @classmethod

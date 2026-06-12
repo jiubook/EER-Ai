@@ -146,7 +146,7 @@ class ScannerService:
 
         # 只有 ScannerEngine 才有 get_weapon_essence_data 方法
         if not isinstance(engine, ScannerEngine):
-            logger.warning(f"引擎不是 ScannerEngine: {type(engine)}")
+            logger.debug(f"引擎不是 ScannerEngine，跳过数据保存: {type(engine)}")
             return
 
         # 从引擎获取数据（不需要锁，因为 engine 是局部引用，不会被其他线程访问）

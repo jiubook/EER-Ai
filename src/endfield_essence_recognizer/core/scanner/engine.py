@@ -1,3 +1,4 @@
+import functools
 import itertools
 import threading
 
@@ -22,7 +23,10 @@ from endfield_essence_recognizer.core.scanner.action_logic import (
 from endfield_essence_recognizer.core.scanner.context import (
     ScannerContext,
 )
-from endfield_essence_recognizer.core.scanner.evaluate import evaluate_essence
+from endfield_essence_recognizer.core.scanner.evaluate import (
+    _level_cmp,
+    evaluate_essence,
+)
 from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
     EssenceQuality,
@@ -390,8 +394,30 @@ class ScannerEngine:
                     group_levels.setdefault(stat_key, []).append(levels)
 
             # 每组以最高等级作为阈值，并以等于该阈值的数量作为相等跳过名额
+            mode = user_setting.same_type_keep_best_mode
+
+            def _best_of(
+                lst: list[tuple], stat_key: tuple[str | None, ...] | str
+            ) -> tuple:
+                # 根据 stat_key 查询词条类型
+                stat_types = None
+                if isinstance(stat_key, tuple) and len(stat_key) == 3:
+                    stat_types = []
+                    for stat_id in stat_key:
+                        if stat_id is None:
+                            stat_types.append(None)
+                        else:
+                            stat_info = self.ctx.static_game_data.get_stat(stat_id)
+                            stat_types.append(stat_info.type if stat_info else None)
+                return max(
+                    lst,
+                    key=functools.cmp_to_key(
+                        lambda a, b: _level_cmp(a, b, mode, stat_types)
+                    ),
+                )
+
             for key, levels_list in group_levels.items():
-                best = max(levels_list)
+                best = _best_of(levels_list, key)
                 user_setting._same_type_best_levels[key] = best
                 user_setting._same_type_equal_skips[key] = sum(
                     1 for lv in levels_list if lv == best
@@ -519,6 +545,10 @@ class ScannerEngine:
         """
         Actual execution logic for a 9*5 grid pass.
         """
+        from endfield_essence_recognizer.core.scanner.evaluate import reset_scan_claims
+
+        reset_scan_claims()
+
         if not self._window_actions.target_exists:
             logger.info("未找到终末地窗口，停止基质扫描。")
             return
@@ -596,19 +626,46 @@ class ScannerEngine:
                 # early continue on uncertain recognition
                 continue
 
-            evaluation = evaluate_essence(data, user_setting, self.ctx.static_game_data)
+            # 预先获取所有武器的优先级排序，传递给 evaluate 函数
+            all_weapon_ids = set(self._weapon_essence_counts.keys()) | set(
+                self._weapon_essence_levels.keys()
+            )
+            for w in self.ctx.static_game_data.list_weapons():
+                all_weapon_ids.add(w.weapon_id)
+            weapon_priority_order = self._sort_weapons_by_priority(all_weapon_ids)
+
+            evaluation = evaluate_essence(
+                data,
+                user_setting,
+                self.ctx.static_game_data,
+                weapon_essence_levels=self._weapon_essence_levels,
+                weapon_priority_order=weapon_priority_order,
+            )
 
             # 统计基质总数（跳过 SKIP 的基质）
             if evaluation.quality != EssenceQuality.SKIP:
                 self._total_essence_count += 1
 
-            # 按优先级将基质分配给单把武器（仅无暇基质才会同步到 profiles.json）
-            if (
-                data.rarity == RarityLabel.FIVE
-                and evaluation.matched_weapons
-                and not evaluation.matched_weapons_all_blocked
-            ):
-                self._assign_essence_to_weapon(evaluation.matched_weapons, data.levels)
+            # 同步 evaluate 的分配结果到引擎
+            # 直接认领的武器：同步计数和等级
+            # 级联武器：仅同步等级（不增加计数，因为是同一矩阵的重新分配）
+            from endfield_essence_recognizer.core.scanner.evaluate import (
+                get_cascade_updated_weapon_ids,
+                get_updated_weapon_ids,
+            )
+
+            for weapon_id in get_updated_weapon_ids():
+                levels = user_setting._same_type_best_levels.get(weapon_id)
+                if levels is not None:
+                    self._weapon_essence_levels[weapon_id] = levels
+                count = user_setting._same_type_treasure_counts.get(weapon_id, 0)
+                if count > 0:
+                    self._weapon_essence_counts[weapon_id] = count
+
+            for weapon_id in get_cascade_updated_weapon_ids():
+                levels = user_setting._same_type_best_levels.get(weapon_id)
+                if levels is not None:
+                    self._weapon_essence_levels[weapon_id] = levels
 
             # Log the result
             if (
@@ -695,6 +752,10 @@ class DraggableScannerEngine(ScannerEngine):
         """
         执行带拖拽翻页的网格扫描。
         """
+        from endfield_essence_recognizer.core.scanner.evaluate import reset_scan_claims
+
+        reset_scan_claims()
+
         if not self._window_actions.target_exists:
             logger.info("未找到终末地窗口，停止基质扫描。")
             return
@@ -950,23 +1011,44 @@ class DraggableScannerEngine(ScannerEngine):
                 # 记录基质指纹用于翻页去重检测
                 self._scanned_essence_hashes.add(self._get_essence_hash(data))
 
+                # 预先获取所有武器的优先级排序，传递给 evaluate 函数
+                all_weapon_ids = set(self._weapon_essence_counts.keys()) | set(
+                    self._weapon_essence_levels.keys()
+                )
+                for w in self.ctx.static_game_data.list_weapons():
+                    all_weapon_ids.add(w.weapon_id)
+                weapon_priority_order = self._sort_weapons_by_priority(all_weapon_ids)
+
                 evaluation = evaluate_essence(
-                    data, user_setting, self.ctx.static_game_data
+                    data,
+                    user_setting,
+                    self.ctx.static_game_data,
+                    weapon_essence_levels=self._weapon_essence_levels,
+                    weapon_priority_order=weapon_priority_order,
                 )
 
                 # 统计基质总数（跳过 SKIP 的基质）
                 if evaluation.quality != EssenceQuality.SKIP:
                     self._total_essence_count += 1
 
-                # 按优先级将基质分配给单把武器（仅无暇基质才会同步到 profiles.json）
-                if (
-                    data.rarity == RarityLabel.FIVE
-                    and evaluation.matched_weapons
-                    and not evaluation.matched_weapons_all_blocked
-                ):
-                    self._assign_essence_to_weapon(
-                        evaluation.matched_weapons, data.levels
-                    )
+                # 同步 evaluate 的分配结果到引擎（计数和等级）
+                from endfield_essence_recognizer.core.scanner.evaluate import (
+                    get_cascade_updated_weapon_ids,
+                    get_updated_weapon_ids,
+                )
+
+                for weapon_id in get_updated_weapon_ids():
+                    levels = user_setting._same_type_best_levels.get(weapon_id)
+                    if levels is not None:
+                        self._weapon_essence_levels[weapon_id] = levels
+                    count = user_setting._same_type_treasure_counts.get(weapon_id, 0)
+                    if count > 0:
+                        self._weapon_essence_counts[weapon_id] = count
+
+                for weapon_id in get_cascade_updated_weapon_ids():
+                    levels = user_setting._same_type_best_levels.get(weapon_id)
+                    if levels is not None:
+                        self._weapon_essence_levels[weapon_id] = levels
 
                 if (
                     evaluation.quality == EssenceQuality.TRASH
@@ -1418,17 +1500,43 @@ class DraggableScannerEngine(ScannerEngine):
             if not is_dup:
                 all_duplicates = False
 
-            evaluation = evaluate_essence(data, user_setting, self.ctx.static_game_data)
+            # 预先获取所有武器的优先级排序，传递给 evaluate 函数
+            all_weapon_ids = set(self._weapon_essence_counts.keys()) | set(
+                self._weapon_essence_levels.keys()
+            )
+            for w in self.ctx.static_game_data.list_weapons():
+                all_weapon_ids.add(w.weapon_id)
+            weapon_priority_order = self._sort_weapons_by_priority(all_weapon_ids)
+
+            evaluation = evaluate_essence(
+                data,
+                user_setting,
+                self.ctx.static_game_data,
+                weapon_essence_levels=self._weapon_essence_levels,
+                weapon_priority_order=weapon_priority_order,
+            )
 
             if evaluation.quality != EssenceQuality.SKIP:
                 self._total_essence_count += 1
 
-            if (
-                data.rarity == RarityLabel.FIVE
-                and evaluation.matched_weapons
-                and not evaluation.matched_weapons_all_blocked
-            ):
-                self._assign_essence_to_weapon(evaluation.matched_weapons, data.levels)
+            # 同步 evaluate 的分配结果到引擎
+            from endfield_essence_recognizer.core.scanner.evaluate import (
+                get_cascade_updated_weapon_ids,
+                get_updated_weapon_ids,
+            )
+
+            for weapon_id in get_updated_weapon_ids():
+                levels = user_setting._same_type_best_levels.get(weapon_id)
+                if levels is not None:
+                    self._weapon_essence_levels[weapon_id] = levels
+                count = user_setting._same_type_treasure_counts.get(weapon_id, 0)
+                if count > 0:
+                    self._weapon_essence_counts[weapon_id] = count
+
+            for weapon_id in get_cascade_updated_weapon_ids():
+                levels = user_setting._same_type_best_levels.get(weapon_id)
+                if levels is not None:
+                    self._weapon_essence_levels[weapon_id] = levels
 
             if (
                 evaluation.quality == EssenceQuality.TRASH
