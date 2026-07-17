@@ -66,10 +66,18 @@
                                 'weapon-matched': selectedWeaponForLocation === weaponId
                               }"
                             >
-                              <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
-                              <template v-else>
-                                <item-icon :item-id="weaponId" show-item-name />
-                              </template>
+                              <!-- 武器悬浮面板：显示武器的三条基质属性 -->
+                              <v-tooltip location="top" open-delay="0">
+                                <template #activator="{ props }">
+                                  <div v-bind="props" class="h-100">
+                                    <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
+                                    <template v-else>
+                                      <item-icon :item-id="weaponId" show-item-name />
+                                    </template>
+                                  </div>
+                                </template>
+                                <span>{{ getWeaponTooltipText(weaponId) }}</span>
+                              </v-tooltip>
                               <v-chip
                                 v-if="isWeaponObtained(weaponId)"
                                 class="obtained-badge"
@@ -186,8 +194,16 @@
                                     'weapon-obtained': isWeaponObtained(weaponId)
                                   }"
                                 >
-                                  <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
-                                  <item-icon v-else :item-id="weaponId" show-item-name />
+                                  <!-- 武器悬浮面板：显示武器的三条基质属性 -->
+                                  <v-tooltip location="top" open-delay="0">
+                                    <template #activator="{ props }">
+                                      <div v-bind="props" class="h-100">
+                                        <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
+                                        <item-icon v-else :item-id="weaponId" show-item-name />
+                                      </div>
+                                    </template>
+                                    <span>{{ getWeaponTooltipText(weaponId) }}</span>
+                                  </v-tooltip>
                                   <v-chip
                                     v-if="isWeaponObtained(weaponId)"
                                     class="obtained-badge"
@@ -855,6 +871,21 @@ function getRequirementTooltip(index: number): string {
 
 function isCustomStatId(id: string): boolean {
   return id.startsWith('custom_stat_')
+}
+
+/**
+ * 获取武器的悬浮面板文本，支持普通武器和自定义基质
+ * 普通武器从 weaponsMap 中获取三条基质属性名称
+ * 自定义基质从 customStats 配置中获取属性名称
+ */
+function getWeaponTooltipText(weaponId: string): string {
+  if (isCustomStatId(weaponId)) {
+    const match = weaponId.match(/^custom_stat_(\d+)$/)
+    if (!match) return ''
+    const index = Number.parseInt(match[1]!, 10)
+    return getCustomStatTooltip(index)
+  }
+  return getWeaponStatNames(weaponId)
 }
 
 function getCustomStatDisplayName(id: string): string {
