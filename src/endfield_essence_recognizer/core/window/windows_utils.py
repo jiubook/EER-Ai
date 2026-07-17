@@ -245,16 +245,19 @@ def progressive_drag_on_window(
             current_x = int(screen_start_x + total_dx * progress)
             current_y = int(screen_start_y + total_dy * progress)
 
+            # 移动鼠标并等待游戏处理
             pyautogui.moveTo(current_x, current_y)
-            actual_distance += step_distance
-
             time.sleep(0.05)
 
-            # 调用回调检测
+            # 先检测滚动条，再累加距离
+            # 这样当检测到到底时，当前这一步的距离不会被计入
             if on_step is not None:
                 if on_step(i, current_x, current_y):
                     stopped_early = True
                     break
+
+            # 检测通过后才累加距离
+            actual_distance += step_distance
 
         return int(actual_distance), stopped_early
 
