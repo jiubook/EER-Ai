@@ -90,18 +90,26 @@
             @click="showWeaponDetail(entry.syntheticId)"
             @contextmenu.prevent="toggleWeaponOwnership(entry.syntheticId)"
           >
-            <div
-              class="weapon-icon-wrapper"
-              :class="{
-                'weapon-not-owned': !isWeaponOwned(entry.syntheticId),
-                'weapon-maxed': isWeaponMaxed(entry.syntheticId),
-              }"
-            >
-              <custom-stat-icon :name="entry.displayName" />
+            <!-- 武器悬浮面板：显示自定义基质的三条属性 -->
+            <v-tooltip location="top" open-delay="0">
+              <template #activator="{ props }">
+                <div v-bind="props" class="h-100">
+                  <div
+                    class="weapon-icon-wrapper"
+                    :class="{
+                      'weapon-not-owned': !isWeaponOwned(entry.syntheticId),
+                      'weapon-maxed': isWeaponMaxed(entry.syntheticId),
+                    }"
+                  >
+                    <custom-stat-icon :name="entry.displayName" />
 
-              <!-- 满级的彩虹边框 -->
-              <div v-if="isWeaponMaxed(entry.syntheticId)" class="rainbow-border" />
-            </div>
+                    <!-- 满级的彩虹边框 -->
+                    <div v-if="isWeaponMaxed(entry.syntheticId)" class="rainbow-border" />
+                  </div>
+                </div>
+              </template>
+              <span>{{ getWeaponStatsText(entry.syntheticId) }}</span>
+            </v-tooltip>
           </div>
         </div>
       </template>
@@ -123,19 +131,27 @@
             @click="showWeaponDetail(weaponId)"
             @contextmenu.prevent="toggleWeaponOwnership(weaponId)"
           >
-            <div
-              class="weapon-icon-wrapper"
-              :class="{
-                'weapon-not-owned': !isWeaponOwned(weaponId),
-                'weapon-maxed': isWeaponMaxed(weaponId),
-                'switch-target-maxed': isSwitchable(weaponId) && isSwitchTargetMaxed(weaponId),
-              }"
-            >
-              <item-icon :item-id="weaponId" show-item-name />
+            <!-- 武器悬浮面板：显示武器的三条基质属性 -->
+            <v-tooltip location="top" open-delay="0">
+              <template #activator="{ props }">
+                <div v-bind="props" class="h-100">
+                  <div
+                    class="weapon-icon-wrapper"
+                    :class="{
+                      'weapon-not-owned': !isWeaponOwned(weaponId),
+                      'weapon-maxed': isWeaponMaxed(weaponId),
+                      'switch-target-maxed': isSwitchable(weaponId) && isSwitchTargetMaxed(weaponId),
+                    }"
+                  >
+                    <item-icon :item-id="weaponId" show-item-name />
 
-              <!-- 满级的彩虹边框 -->
-              <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
-            </div>
+                    <!-- 满级的彩虹边框 -->
+                    <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
+                  </div>
+                </div>
+              </template>
+              <span>{{ getWeaponStatsText(weaponId) }}</span>
+            </v-tooltip>
 
             <!-- 可切换标记放在灰色滤镜容器外，避免被 opacity/filter 叠加 -->
             <v-chip
@@ -317,7 +333,7 @@ import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
 
-const { weaponTypes, weaponsMap } = useStaticData()
+const { weaponTypes, weaponsMap, essencesMap } = useStaticData()
 const {
   activeProfile,
   treasureMatrix,
