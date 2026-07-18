@@ -199,31 +199,39 @@ def _evaluate_high_level_treasure(
             original_slot_matches.append(level >= threshold)
 
     if mode == TreasureMatchMode.ONLY:
-        eval_matches = [
-            m
-            for m, st in zip(original_slot_matches, stat_types, strict=True)
-            if st is not None
-            and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
+        # ONLY 模式：按类型分组，每种勾选的类型只要至少有一个词条达标即可
+        type_has_match: dict[str, bool] = {}
+        type_matched_indexes: dict[str, list[int]] = {}
+        for i, (m, st) in enumerate(
+            zip(original_slot_matches, stat_types, strict=True)
+        ):
+            if st is None:
+                continue
+            slot = _TYPE_TO_SLOT.get(st, "")
+            if not only_flags_by_type.get(slot, False):
+                continue
+            if slot not in type_has_match:
+                type_has_match[slot] = False
+                type_matched_indexes[slot] = []
+            if m:
+                type_has_match[slot] = True
+                type_matched_indexes[slot].append(i)
+
+        eval_matches = list(type_has_match.values())
+        matched_indexes = [
+            idx
+            for indexes in type_matched_indexes.values()
+            if indexes  # 只包含至少有一个达标词条的类型
+            for idx in indexes
         ]
     else:
         eval_matches = original_slot_matches
-
-    if mode == TreasureMatchMode.ONLY:
-        matched_indexes = [
-            i
-            for i, (m, st) in enumerate(
-                zip(original_slot_matches, stat_types, strict=True)
+        if mode == TreasureMatchMode.ANY:
+            matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
+        else:
+            matched_indexes = (
+                list(range(len(STAT_SLOTS))) if all(original_slot_matches) else []
             )
-            if m
-            and st is not None
-            and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
-        ]
-    elif mode == TreasureMatchMode.ANY:
-        matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
-    else:
-        matched_indexes = (
-            list(range(len(STAT_SLOTS))) if all(original_slot_matches) else []
-        )
 
     if not _matches_by_mode(eval_matches, len(eval_matches), mode):
         return False, ""
@@ -301,31 +309,39 @@ def _evaluate_non_five_star_high_level(
             original_slot_matches.append(level >= threshold)
 
     if mode == TreasureMatchMode.ONLY:
-        eval_matches = [
-            m
-            for m, st in zip(original_slot_matches, stat_types, strict=True)
-            if st is not None
-            and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
+        # ONLY 模式：按类型分组，每种勾选的类型只要至少有一个词条达标即可
+        type_has_match: dict[str, bool] = {}
+        type_matched_indexes: dict[str, list[int]] = {}
+        for i, (m, st) in enumerate(
+            zip(original_slot_matches, stat_types, strict=True)
+        ):
+            if st is None:
+                continue
+            slot = _TYPE_TO_SLOT.get(st, "")
+            if not only_flags_by_type.get(slot, False):
+                continue
+            if slot not in type_has_match:
+                type_has_match[slot] = False
+                type_matched_indexes[slot] = []
+            if m:
+                type_has_match[slot] = True
+                type_matched_indexes[slot].append(i)
+
+        eval_matches = list(type_has_match.values())
+        matched_indexes = [
+            idx
+            for indexes in type_matched_indexes.values()
+            if indexes  # 只包含至少有一个达标词条的类型
+            for idx in indexes
         ]
     else:
         eval_matches = original_slot_matches
-
-    if mode == TreasureMatchMode.ONLY:
-        matched_indexes = [
-            i
-            for i, (m, st) in enumerate(
-                zip(original_slot_matches, stat_types, strict=True)
+        if mode == TreasureMatchMode.ANY:
+            matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
+        else:
+            matched_indexes = (
+                list(range(len(STAT_SLOTS))) if all(original_slot_matches) else []
             )
-            if m
-            and st is not None
-            and only_flags_by_type.get(_TYPE_TO_SLOT.get(st, ""), False)
-        ]
-    elif mode == TreasureMatchMode.ANY:
-        matched_indexes = [i for i, m in enumerate(original_slot_matches) if m]
-    else:
-        matched_indexes = (
-            list(range(len(STAT_SLOTS))) if all(original_slot_matches) else []
-        )
 
     if not _matches_by_mode(eval_matches, len(eval_matches), mode):
         return False, ""
