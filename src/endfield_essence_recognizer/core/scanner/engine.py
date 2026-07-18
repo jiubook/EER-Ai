@@ -1219,8 +1219,9 @@ class DraggableScannerEngine(ScannerEngine):
         # 计算比例，使用 ceil 向上取整确保滚动到位
         # 例如：2.1、2.5、2.9 都会取整为 3，多滚动一行确保内容完全滚出
         # 松开鼠标后页面会自动回弹到正确位置
+        # 减 1 抵消 _progressive_drag 中 row_height * 1.2 额外拖拽造成的多算
         ratio = actual_drag / max_drag
-        scrolled_rows = math.ceil(ratio * total_rows)
+        scrolled_rows = max(0, math.ceil(ratio * total_rows) - 1)
         skip_rows = total_rows - scrolled_rows
 
         logger.info(
