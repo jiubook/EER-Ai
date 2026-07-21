@@ -426,6 +426,27 @@ class ProfileManager:
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
 
+    def fix_weapon_id(self, old_weapon_id: str, new_weapon_id: str) -> None:
+        """修正 profile 中错误的武器 ID（如名称 → 正确 ID）。
+
+        同时迁移 weapon_priorities 中的对应条目。
+        """
+        with self._lock:
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
+            changed = False
+            for entry in profile.treasure_matrix:
+                if entry.weapon_id == old_weapon_id:
+                    entry.weapon_id = new_weapon_id
+                    changed = True
+            if old_weapon_id in profile.weapon_priorities:
+                profile.weapon_priorities[new_weapon_id] = (
+                    profile.weapon_priorities.pop(old_weapon_id)
+                )
+                changed = True
+            if changed:
+                self._commit_collection_unlocked(collection)
+
     def update_weapon_overview_filters(self, filters: dict[str, bool]) -> ProfileData:
         """更新激活账号的武器总览过滤器配置。
 

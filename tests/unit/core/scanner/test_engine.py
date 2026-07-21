@@ -388,7 +388,9 @@ def test_exact_level_skip_isolated_by_level(
         user_setting_manager=mock_user_setting_manager,
         profile=mock_profile,
     )
-    weapon = SimpleNamespace(stat1_id="attr", stat2_id="secondary", stat3_id="skill")
+    weapon = SimpleNamespace(
+        name="TestWeapon", stat1_id="attr", stat2_id="secondary", stat3_id="skill"
+    )
     mock_scanner_context.static_game_data.get_weapon.return_value = weapon
     engine._sort_weapons_by_priority = lambda _ids: ["w1", "w2"]
 
@@ -412,7 +414,9 @@ def test_downgrade_blocked_essence_is_not_fallback_counted(
         user_setting_manager=mock_user_setting_manager,
         profile=mock_profile,
     )
-    weapon = SimpleNamespace(stat1_id="attr", stat2_id="secondary", stat3_id="skill")
+    weapon = SimpleNamespace(
+        name="TestWeapon", stat1_id="attr", stat2_id="secondary", stat3_id="skill"
+    )
     mock_scanner_context.static_game_data.get_weapon.return_value = weapon
     engine._sort_weapons_by_priority = lambda _ids: ["w1"]
     engine._weapon_essence_levels = {"w1": (3, 3, 2)}
