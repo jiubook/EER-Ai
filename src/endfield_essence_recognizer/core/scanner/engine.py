@@ -421,9 +421,7 @@ class ScannerEngine:
             if fixed_entries:
                 for old_id, new_id in fixed_entries:
                     profile_manager.fix_weapon_id(old_id, new_id)
-                    logger.info(
-                        f”已自动修正 profile 中的武器 ID：{old_id} → {new_id}”
-                    )
+                    logger.info(f"已自动修正 profile 中的武器 ID：{old_id} → {new_id}")
 
             # 每组以最高等级作为阈值，并以等于该阈值的数量作为相等跳过名额
             mode = user_setting.same_type_keep_best_mode

@@ -605,7 +605,9 @@ def _cascade_freed_levels(
         # 认领释放的等级（不增加计数）
         setting._same_type_best_levels[wid] = freed_levels
         _cascade_updated_this_scan.add(wid)
-        logger.debug(f"[级联] 武器 {_weapon_display(wid)} 认领释放的等级 {freed_levels}")
+        logger.debug(
+            f"[级联] 武器 {_weapon_display(wid)} 认领释放的等级 {freed_levels}"
+        )
         break  # 只分配给一把武器
 
 
@@ -714,9 +716,13 @@ def _apply_weapon_group_limit(
                             _display,
                         )
             return evaluation
-        if _claim_by_limit(setting, weapon_id, current_levels, limit, mode, stat_types, _display):
+        if _claim_by_limit(
+            setting, weapon_id, current_levels, limit, mode, stat_types, _display
+        ):
             _claimed_this_scan.add((weapon_id, current_levels))
-            _updated_this_scan.add(weapon_id)  # 认领成功时加入更新集合，确保计数和等级同步到引擎
+            _updated_this_scan.add(
+                weapon_id
+            )  # 认领成功时加入更新集合，确保计数和等级同步到引擎
             return evaluation
 
     # 所有匹配武器都已达上限
