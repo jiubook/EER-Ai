@@ -556,18 +556,24 @@ def _apply_stat_group_limit(
     keep_best: bool,
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
     stat_types: list[StatType | None] | None = None,
+    matched_weapon_ids: set[str] | None = None,
 ) -> EvaluationResult:
     """按基质分组（属性组合相同即为同类型）的限制逻辑。
 
     Args:
         mode: 等级比较方式，仅在 keep_best=True 时生效。
         stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
+        matched_weapon_ids: 匹配的武器 ID 集合，用于同步更新追踪。
     """
     if keep_best and _claim_as_owned(
         setting, stat_key, current_levels, mode, stat_types
     ):
         return evaluation
     if _claim_by_limit(setting, stat_key, current_levels, limit, mode, stat_types):
+        # 认领成功时，将匹配的武器加入更新集合，确保计数和等级同步到引擎
+        if matched_weapon_ids:
+            for weapon_id in matched_weapon_ids:
+                _updated_this_scan.add(weapon_id)
         return evaluation
     count = setting._same_type_treasure_counts.get(stat_key, 0)
     logger.debug(f"[数量上限] {stat_key} 已达上限 {count}/{limit}，标记为养成材料")
@@ -710,6 +716,7 @@ def _apply_weapon_group_limit(
             return evaluation
         if _claim_by_limit(setting, weapon_id, current_levels, limit, mode, stat_types, _display):
             _claimed_this_scan.add((weapon_id, current_levels))
+            _updated_this_scan.add(weapon_id)  # 认领成功时加入更新集合，确保计数和等级同步到引擎
             return evaluation
 
     # 所有匹配武器都已达上限
@@ -728,10 +735,14 @@ def _apply_same_type_treasure_limit(
     weapon_priority_order: list[str] | None = None,
     static_game_data: StaticGameData | None = None,
 ) -> EvaluationResult:
-    if (
-        evaluation.quality != EssenceQuality.TREASURE
-        or not setting.same_type_treasure_limit_enabled
-    ):
+    if evaluation.quality != EssenceQuality.TREASURE:
+        return evaluation
+
+    # 当限制功能关闭时，仍需将匹配的武器加入更新集合，确保扫描结果同步到引擎
+    if not setting.same_type_treasure_limit_enabled:
+        if matched_weapon_ids:
+            for weapon_id in matched_weapon_ids:
+                _updated_this_scan.add(weapon_id)
         return evaluation
 
     limit = setting.same_type_treasure_limit
@@ -776,6 +787,7 @@ def _apply_same_type_treasure_limit(
         keep_best,
         mode,
         stat_types,
+        matched_weapon_ids,
     )
 
 
