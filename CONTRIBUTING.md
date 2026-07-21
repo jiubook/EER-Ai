@@ -360,6 +360,7 @@ uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-reco
    该脚本会读取原始游戏数据，生成 JSON 文件。
 3. **更新武器图片**
 4. **更新能量淤积点数据** — 更新前端静态 JSON 文件 `frontend/src/assets/json/energyAlluviums.json`。
+5. **更新能量淤积点i18n数据** — 更新前端静态 JSON 文件 `frontend/src/assets/json/zh-CN-weapons.json`。
 
 ### 2. 更新版本号并提交
 
