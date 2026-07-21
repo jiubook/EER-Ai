@@ -345,6 +345,23 @@ class ScannerEngine:
 
         return sorted(weapon_ids, key=lambda wid: -get_priority(wid))
 
+    def _resolve_weapon_id(self, weapon_id_or_name: str) -> str:
+        """将武器名称归一化为武器 ID；已是合法 ID 则原样返回。"""
+        if self.ctx.static_game_data.get_weapon(weapon_id_or_name) is not None:
+            return weapon_id_or_name
+        # 按名称查找
+        for w in self.ctx.static_game_data.list_weapons():
+            if w.name == weapon_id_or_name:
+                return w.weapon_id
+        return weapon_id_or_name
+
+    def _weapon_display(self, weapon_id: str) -> str:
+        """返回 "武器名称(武器ID)" 格式，便于日志排查。"""
+        weapon = self.ctx.static_game_data.get_weapon(weapon_id)
+        if weapon:
+            return f"{weapon.name}({weapon_id})"
+        return weapon_id
+
     def _init_weapon_levels_from_profile(self) -> None:
         """从 profile 的宝藏基质配置中初始化已有武器等级。"""
         try:
@@ -354,7 +371,8 @@ class ScannerEngine:
 
             profile = get_profile_manager().get_active_profile()
             for entry in profile.treasure_matrix:
-                self._weapon_essence_levels[entry.weapon_id] = (
+                weapon_id = self._resolve_weapon_id(entry.weapon_id)
+                self._weapon_essence_levels[weapon_id] = (
                     entry.affix1_level,
                     entry.affix2_level,
                     entry.affix3_level,
@@ -374,18 +392,23 @@ class ScannerEngine:
                 get_profile_manager,
             )
 
-            profile = get_profile_manager().get_active_profile()
+            profile_manager = get_profile_manager()
+            profile = profile_manager.get_active_profile()
 
             # 按分组键（武器分组用 weapon_id，基质分组用 stat_key）收集已保存的等级
             group_levels: dict[tuple[str | None, ...] | str, list[tuple]] = {}
+            fixed_entries: list[tuple[str, str]] = []  # (旧 weapon_id, 新 weapon_id)
             for entry in profile.treasure_matrix:
                 levels = (
                     entry.affix1_level,
                     entry.affix2_level,
                     entry.affix3_level,
                 )
-                group_levels.setdefault(entry.weapon_id, []).append(levels)
-                weapon = self.ctx.static_game_data.get_weapon(entry.weapon_id)
+                weapon_id = self._resolve_weapon_id(entry.weapon_id)
+                if weapon_id != entry.weapon_id:
+                    fixed_entries.append((entry.weapon_id, weapon_id))
+                group_levels.setdefault(weapon_id, []).append(levels)
+                weapon = self.ctx.static_game_data.get_weapon(weapon_id)
                 if weapon:
                     stat_key = (
                         weapon.stat1_id,
@@ -393,6 +416,14 @@ class ScannerEngine:
                         weapon.stat3_id,
                     )
                     group_levels.setdefault(stat_key, []).append(levels)
+
+            # 自动修正 profile 中错误的 weapon_id
+            if fixed_entries:
+                for old_id, new_id in fixed_entries:
+                    profile_manager.fix_weapon_id(old_id, new_id)
+                    logger.info(
+                        f”已自动修正 profile 中的武器 ID：{old_id} → {new_id}”
+                    )
 
             # 每组以最高等级作为阈值，并以等于该阈值的数量作为相等跳过名额
             mode = user_setting.same_type_keep_best_mode
@@ -507,7 +538,7 @@ class ScannerEngine:
             if not can_upgrade(weapon_id):
                 blocked_by_downgrade = True
                 logger.debug(
-                    f"武器 {weapon_id} 当前等级 {existing_levels}，"
+                    f"武器 {self._weapon_display(weapon_id)} 当前等级 {existing_levels}，"
                     f"基质等级 {current_levels}，不满足非降级原则，跳过"
                 )
                 continue
