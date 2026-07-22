@@ -885,12 +885,14 @@ def evaluate_essence(
         if _matches_treasure_stats(
             treasure_stat, stats, stat_types, setting.treasure_essence_match_mode
         ):
+            # 显示自定义基质名称，使用橙色（六星颜色）
+            custom_name = treasure_stat.name or "未命名"
             return _apply_same_type_treasure_limit(
                 data,
                 setting,
                 EvaluationResult(
                     quality=EssenceQuality.TREASURE,
-                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合你设定的宝藏基质条件{high_level_info}。",
+                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合自定义基质 <fg #FF7100><bold>{custom_name}</></> 的条件{high_level_info}。",
                     is_high_level=is_high_level_treasure,
                 ),
                 weapon_essence_levels=weapon_essence_levels,

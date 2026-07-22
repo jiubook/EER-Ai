@@ -104,7 +104,7 @@ def test_evaluate_treasure_custom(
     )
     assert result.quality == EssenceQuality.TREASURE
     assert "宝藏" in result.log_message
-    assert "符合你设定的宝藏基质条件" in result.log_message
+    assert "自定义基质" in result.log_message
 
 
 def test_evaluate_custom_treasure_match_mode_any(

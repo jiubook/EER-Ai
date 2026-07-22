@@ -9,7 +9,7 @@
     </v-expansion-panel-title>
     <v-expansion-panel-text>
       <v-alert border="start" class="mb-4" type="info" variant="tonal">
-        左键点击武器图标查看基质属性，右键点击切换是否拥有该武器的基质。已满级（6/6/3）的武器会显示彩虹边框。
+        左键点击武器图标查看基质属性，右键点击切换是否拥有该武器的基质。已满级（6/6/3）的武器会显示彩虹边框。鼠标悬停在有相同属性的武器上会显示粒子连线。
       </v-alert>
 
       <!-- 星级过滤开关 -->
@@ -76,96 +76,115 @@
         检查自定义基质重合
       </v-btn>
 
-      <!-- 自定义基质区段 -->
-      <template v-if="showCustomSection && customMatrixEntries.length > 0">
-        <div class="d-flex align-center mb-1 mt-3">
-          <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
-          <h4>自定义基质</h4>
-        </div>
-        <div class="weapon-overview-grid">
+      <!-- 武器总览容器（包含连线层） -->
+      <div ref="containerRef" class="weapon-overview-container">
+        <!-- 连线层 -->
+        <div class="connection-lines-layer">
           <div
-            v-for="entry in customMatrixEntries"
-            :key="entry.syntheticId"
-            class="weapon-overview-item"
-            @click="showWeaponDetail(entry.syntheticId)"
-            @contextmenu.prevent="toggleWeaponOwnership(entry.syntheticId)"
-          >
-            <!-- 武器悬浮面板：显示自定义基质的三条属性 -->
-            <v-tooltip location="top" open-delay="0">
-              <template #activator="{ props }">
-                <div v-bind="props" class="h-100">
-                  <div
-                    class="weapon-icon-wrapper"
-                    :class="{
-                      'weapon-not-owned': !isWeaponOwned(entry.syntheticId),
-                      'weapon-maxed': isWeaponMaxed(entry.syntheticId),
-                    }"
-                  >
-                    <custom-stat-icon :name="entry.displayName" />
-
-                    <!-- 满级的彩虹边框 -->
-                    <div v-if="isWeaponMaxed(entry.syntheticId)" class="rainbow-border" />
-                  </div>
-                </div>
-              </template>
-              <span>{{ getWeaponStatsText(entry.syntheticId) }}</span>
-            </v-tooltip>
-          </div>
-        </div>
-      </template>
-
-      <template v-for="wType in filteredWeaponTypes" :key="wType.id">
-        <div class="d-flex align-center mb-1 mt-3">
-          <img
-            :alt="wType.name"
-            class="group-icon me-2"
-            :src="wType.iconUrl"
+            v-for="(line, index) in connectionLines"
+            :key="index"
+            class="connection-line"
+            :style="line.style"
           />
-          <h4>{{ wType.name }}</h4>
         </div>
-        <div class="weapon-overview-grid">
-          <div
-            v-for="weaponId in wType.weaponIds"
-            :key="weaponId"
-            class="weapon-overview-item"
-            @click="showWeaponDetail(weaponId)"
-            @contextmenu.prevent="toggleWeaponOwnership(weaponId)"
-          >
-            <!-- 武器悬浮面板：显示武器的三条基质属性 -->
-            <v-tooltip location="top" open-delay="0">
-              <template #activator="{ props }">
-                <div v-bind="props" class="h-100">
-                  <div
-                    class="weapon-icon-wrapper"
-                    :class="{
-                      'weapon-not-owned': !isWeaponOwned(weaponId),
-                      'weapon-maxed': isWeaponMaxed(weaponId),
-                      'switch-target-maxed': isSwitchable(weaponId) && isSwitchTargetMaxed(weaponId),
-                    }"
-                  >
-                    <item-icon :item-id="weaponId" show-item-name />
 
-                    <!-- 满级的彩虹边框 -->
-                    <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
-                  </div>
-                </div>
-              </template>
-              <span>{{ getWeaponStatsText(weaponId) }}</span>
-            </v-tooltip>
-
-            <!-- 可切换标记放在灰色滤镜容器外，避免被 opacity/filter 叠加 -->
-            <v-chip
-              v-if="isSwitchable(weaponId)"
-              class="switchable-badge"
-              color="warning"
-              size="x-small"
-              variant="flat"
-            >
-              可切换
-            </v-chip>
+        <!-- 自定义基质区段 -->
+        <template v-if="showCustomSection && customMatrixEntries.length > 0">
+          <div class="d-flex align-center mb-1 mt-3">
+            <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+            <h4>自定义基质</h4>
           </div>
-        </div>
-      </template>
+          <div class="weapon-overview-grid">
+            <div
+              v-for="entry in customMatrixEntries"
+              :key="entry.syntheticId"
+              class="weapon-overview-item"
+              :data-weapon-id="entry.syntheticId"
+              @click="showWeaponDetail(entry.syntheticId)"
+              @contextmenu.prevent="toggleWeaponOwnership(entry.syntheticId)"
+              @mouseenter="handleWeaponMouseEnter(entry.syntheticId)"
+              @mouseleave="handleWeaponMouseLeave"
+            >
+              <!-- 武器悬浮面板：显示自定义基质的三条属性 -->
+              <v-tooltip location="top" open-delay="0">
+                <template #activator="{ props }">
+                  <div v-bind="props" class="h-100">
+                    <div
+                      class="weapon-icon-wrapper"
+                      :class="{
+                        'weapon-not-owned': !isWeaponOwned(entry.syntheticId),
+                        'weapon-maxed': isWeaponMaxed(entry.syntheticId),
+                      }"
+                    >
+                      <custom-stat-icon :name="entry.displayName" />
+
+                      <!-- 满级的彩虹边框 -->
+                      <div v-if="isWeaponMaxed(entry.syntheticId)" class="rainbow-border" />
+                    </div>
+                  </div>
+                </template>
+                <span>{{ getWeaponStatsText(entry.syntheticId) }}</span>
+              </v-tooltip>
+            </div>
+          </div>
+        </template>
+
+        <template v-for="wType in filteredWeaponTypes" :key="wType.id">
+          <div class="d-flex align-center mb-1 mt-3">
+            <img
+              :alt="wType.name"
+              class="group-icon me-2"
+              :src="wType.iconUrl"
+            />
+            <h4>{{ wType.name }}</h4>
+          </div>
+          <div class="weapon-overview-grid">
+            <div
+              v-for="weaponId in wType.weaponIds"
+              :key="weaponId"
+              class="weapon-overview-item"
+              :data-weapon-id="weaponId"
+              @click="showWeaponDetail(weaponId)"
+              @contextmenu.prevent="toggleWeaponOwnership(weaponId)"
+              @mouseenter="handleWeaponMouseEnter(weaponId)"
+              @mouseleave="handleWeaponMouseLeave"
+            >
+              <!-- 武器悬浮面板：显示武器的三条基质属性 -->
+              <v-tooltip location="top" open-delay="0">
+                <template #activator="{ props }">
+                  <div v-bind="props" class="h-100">
+                    <div
+                      class="weapon-icon-wrapper"
+                      :class="{
+                        'weapon-not-owned': !isWeaponOwned(weaponId),
+                        'weapon-maxed': isWeaponMaxed(weaponId),
+                        'switch-target-maxed': isSwitchable(weaponId) && isSwitchTargetMaxed(weaponId) && !isWeaponMaxed(weaponId),
+                      }"
+                    >
+                      <item-icon :item-id="weaponId" show-item-name />
+
+                      <!-- 满级的彩虹边框 -->
+                      <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
+                    </div>
+                  </div>
+                </template>
+                <span>{{ getWeaponStatsText(weaponId) }}</span>
+              </v-tooltip>
+
+              <!-- 可切换标记放在灰色滤镜容器外，避免被 opacity/filter 叠加 -->
+              <v-chip
+                v-if="isSwitchable(weaponId) && !isWeaponMaxed(weaponId)"
+                class="switchable-badge"
+                color="warning"
+                size="x-small"
+                variant="flat"
+              >
+                可切换
+              </v-chip>
+            </div>
+          </div>
+        </template>
+      </div>
     </v-expansion-panel-text>
   </v-expansion-panel>
 
@@ -325,7 +344,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
@@ -333,7 +352,7 @@ import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
 
-const { weaponTypes, weaponsMap, essencesMap } = useStaticData()
+const { weaponTypes, weaponsMap } = useStaticData()
 const {
   activeProfile,
   treasureMatrix,
@@ -347,6 +366,121 @@ const { selectedRarities } = useRarityFilters()
 // 武器详情弹窗
 const detailDialog = ref(false)
 const detailWeaponId = ref<string | null>(null)
+
+// --- 武器连线系统 ---
+
+/** 容器引用 */
+const containerRef = ref<HTMLElement | null>(null)
+
+/** 当前悬停的武器 ID */
+const hoveredWeaponId = ref<string | null>(null)
+
+/** 连线数据 */
+interface ConnectionLine {
+  style: {
+    left: string
+    top: string
+    width: string
+    transform: string
+    opacity: number
+  }
+}
+
+const connectionLines = ref<ConnectionLine[]>([])
+
+/** 获取武器图标元素位置 */
+function getWeaponElementPosition(weaponId: string): { x: number; y: number } | null {
+  const container = containerRef.value
+  if (!container) return null
+
+  const element = container.querySelector(`[data-weapon-id="${weaponId}"]`)
+  if (!element) return null
+
+  const containerRect = container.getBoundingClientRect()
+  const elementRect = element.getBoundingClientRect()
+
+  return {
+    x: elementRect.left - containerRect.left + elementRect.width / 2,
+    y: elementRect.top - containerRect.top + elementRect.height / 2,
+  }
+}
+
+/** 计算两点之间的距离和角度 */
+function calculateLine(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): { length: number; angle: number } {
+  const dx = endX - startX
+  const dy = endY - startY
+  const length = Math.hypot(dx, dy)
+  const angle = Math.atan2(dy, dx) * (180 / Math.PI)
+  return { length, angle }
+}
+
+/** 更新连线 */
+function updateConnectionLines() {
+  if (!hoveredWeaponId.value) {
+    connectionLines.value = []
+    return
+  }
+
+  const startPos = getWeaponElementPosition(hoveredWeaponId.value)
+  if (!startPos) {
+    connectionLines.value = []
+    return
+  }
+
+  const sameWeapons = getSameStatWeapons(hoveredWeaponId.value)
+  const newLines: ConnectionLine[] = []
+
+  for (const targetId of sameWeapons) {
+    const endPos = getWeaponElementPosition(targetId)
+    if (!endPos) continue
+
+    const { length, angle } = calculateLine(
+      startPos.x,
+      startPos.y,
+      endPos.x,
+      endPos.y,
+    )
+
+    newLines.push({
+      style: {
+        left: `${startPos.x}px`,
+        top: `${startPos.y}px`,
+        width: `${length}px`,
+        transform: `rotate(${angle}deg)`,
+        opacity: 1,
+      },
+    })
+  }
+
+  connectionLines.value = newLines
+}
+
+/** 鼠标进入武器 */
+function handleWeaponMouseEnter(weaponId: string) {
+  hoveredWeaponId.value = weaponId
+  updateConnectionLines()
+}
+
+/** 鼠标离开武器 */
+function handleWeaponMouseLeave() {
+  hoveredWeaponId.value = null
+  connectionLines.value = []
+}
+
+// 监听窗口大小变化，更新连线位置
+onMounted(() => {
+  window.addEventListener('resize', updateConnectionLines)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateConnectionLines)
+  connectionLines.value = []
+})
 
 // --- 自定义基质相关 ---
 
@@ -442,6 +576,7 @@ async function postCustomStatsUpdate() {
 /**
  * 检查自定义基质与内置武器的词条重合
  * 匹配规则：三个槽位完全相等（含 null 对 null）
+ * 检查范围：所有 config 中配置的自定义基质，无论是否在 profiles 中拥有
  */
 function checkCustomOverlap() {
   const items: OverlapItem[] = []
@@ -452,9 +587,8 @@ function checkCustomOverlap() {
     if (stat.no_prompt_switch) continue
     // 跳过属性全为空的条目（已被切换清空）
     if (!stat.attribute && !stat.secondary && !stat.skill) continue
-    // 跳过未在宝藏基质配置中添加的
+
     const syntheticId = `custom_stat_${i}`
-    if (!matrixEntryByWeaponId.value.has(syntheticId)) continue
 
     // 遍历所有内置武器，查找三词条完全匹配
     for (const [weaponId, weapon] of weaponsMap.value.entries()) {
@@ -848,6 +982,46 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   vertical-align: middle;
 }
 
+.weapon-overview-container {
+  position: relative;
+}
+
+.connection-lines-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+  overflow: visible;
+}
+
+.connection-line {
+  position: absolute;
+  height: 2px;
+  background-color: rgb(24, 103, 192);
+  transform-origin: 0 50%;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+
+  &::before {
+    content: '';
+    position: absolute;
+    right: -4px;
+    top: -3px;
+    width: 8px;
+    height: 8px;
+    background-color: rgb(24, 103, 192);
+    border-radius: 50%;
+    box-shadow: 0 0 8px rgb(24, 103, 192);
+  }
+
+  &[style*="opacity: 1"] {
+    opacity: 1;
+  }
+}
+
 .weapon-overview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr));
@@ -881,14 +1055,14 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
     filter: grayscale(0.8);
   }
 
-  // 已满级：彩虹边框动画
-  &.weapon-maxed {
-    animation: rainbow-glow 3s linear infinite;
-  }
-
   // 可切换目标满级：灰色呼吸背景
   &.switch-target-maxed {
     animation: switch-target-breathe 2s ease-in-out infinite;
+  }
+
+  // 已满级：彩虹边框动画（优先级最高，必须在 switch-target-maxed 之后定义以覆盖）
+  &.weapon-maxed {
+    animation: rainbow-glow 3s linear infinite;
   }
 }
 
