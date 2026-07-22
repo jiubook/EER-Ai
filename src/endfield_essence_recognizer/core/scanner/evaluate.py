@@ -880,25 +880,6 @@ def evaluate_essence(
         data, setting, static_game_data
     )
 
-    # 尝试匹配用户自定义的宝藏基质条件
-    for treasure_stat in setting.treasure_essence_stats:
-        if _matches_treasure_stats(
-            treasure_stat, stats, stat_types, setting.treasure_essence_match_mode
-        ):
-            # 显示自定义基质名称，使用橙色（六星颜色）
-            custom_name = treasure_stat.name or "未命名"
-            return _apply_same_type_treasure_limit(
-                data,
-                setting,
-                EvaluationResult(
-                    quality=EssenceQuality.TREASURE,
-                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合自定义基质 <fg #FF7100><bold>{custom_name}</></> 的条件{high_level_info}。",
-                    is_high_level=is_high_level_treasure,
-                ),
-                weapon_essence_levels=weapon_essence_levels,
-                static_game_data=static_game_data,
-            )
-
     # 按语义类型构建武器匹配三元组（每种类型取第一个出现的 stat）
     # 如果某类型缺失或重复，对应的字段为 None
     type_to_stat: dict[StatType, str | None] = {}
@@ -917,6 +898,27 @@ def evaluate_essence(
     matched_weapon_ids = set(
         static_game_data.find_weapons_by_stats(weapon_attr, weapon_sec, weapon_skill)
     )
+
+    # 尝试匹配用户自定义的宝藏基质条件
+    for treasure_stat in setting.treasure_essence_stats:
+        if _matches_treasure_stats(
+            treasure_stat, stats, stat_types, setting.treasure_essence_match_mode
+        ):
+            # 显示自定义基质名称，使用橙色（六星颜色）
+            custom_name = treasure_stat.name or "未命名"
+            return _apply_same_type_treasure_limit(
+                data,
+                setting,
+                EvaluationResult(
+                    quality=EssenceQuality.TREASURE,
+                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合自定义基质 <fg #FF7100><bold>{custom_name}</></> 的条件{high_level_info}。",
+                    is_high_level=is_high_level_treasure,
+                ),
+                matched_weapon_ids=matched_weapon_ids,
+                weapon_essence_levels=weapon_essence_levels,
+                weapon_priority_order=weapon_priority_order,
+                static_game_data=static_game_data,
+            )
 
     if not matched_weapon_ids:
         # 未匹配到任何已实装武器
