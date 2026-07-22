@@ -559,6 +559,11 @@ const route = useRoute()
 const { weaponTypes, weaponsMap, essencesMap } = useStaticData()
 const { treasureMatrix } = useProfiles()
 const { selectedRarities } = useRarityFilters()
+// 页面渲染中会频繁判断"是否已有基质"，用 Set 避免对 treasureMatrix 反复线性扫描。
+const obtainedWeaponIds = computed(
+  () => new Set(treasureMatrix.value.map((entry) => entry.weapon_id)),
+)
+
 const {
   requiredEssenceStats,
   allAttributeStats,
@@ -576,7 +581,7 @@ const {
   bestChoices,
   clearAllStats,
   updateCustomStatNames,
-} = useMatrixPlanner()
+} = useMatrixPlanner(obtainedWeaponIds)
 
 /**
  * 获取武器的三条基质属性名称，用于悬浮面板显示
@@ -676,11 +681,6 @@ const noPrecraftMode = ref(false)
 
 /** 不使用预刻券模式下选中的武器ID，用于置顶包含该武器的地点 */
 const selectedWeaponForLocation = ref<string | null>(null)
-
-// 页面渲染中会频繁判断“是否已有基质”，用 Set 避免对 treasureMatrix 反复线性扫描。
-const obtainedWeaponIds = computed(
-  () => new Set(treasureMatrix.value.map((entry) => entry.weapon_id)),
-)
 
 // 需求武器集合被按钮状态、排序和方案统计共用，集中计算可保持口径一致。
 const selectedRequiredWeaponIds = computed(
