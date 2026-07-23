@@ -193,7 +193,7 @@ function findMatchingWeapons(
   return matched
 }
 
-export function useMatrixPlanner() {
+export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
   const { weaponsMap } = useStaticData()
   const { activeProfileName } = useProfiles()
 
@@ -452,7 +452,7 @@ export function useMatrixPlanner() {
     { deep: true, immediate: true },
   )
 
-  /** 按优先级排序后的所有有效方案：满足需求数 > 匹配已选武器数 > 匹配武器总数 */
+  /** 按优先级排序后的所有有效方案：满足需求数 > 匹配已选武器数 > 未获得武器数 > 匹配武器总数 */
   const _sortedChoices = computed(() => {
     const filtered = battleChoices.value.filter(
       ({ matchedSelectedIndices }) => matchedSelectedIndices.length > 0,
@@ -463,6 +463,8 @@ export function useMatrixPlanner() {
         .filter(stat => !stat.isCustom && stat.weaponId)
         .map(stat => stat.weaponId!)
     )
+
+    const obtainedIds = obtainedWeaponIds?.value ?? new Set<string>()
 
     return filtered.toSorted((a, b) => {
       // 优先：满足更多需求
@@ -475,6 +477,13 @@ export function useMatrixPlanner() {
       const bMatchedSelected = b.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
       if (aMatchedSelected !== bMatchedSelected) {
         return bMatchedSelected - aMatchedSelected
+      }
+
+      // 再次：匹配武器中未获得的数量更多
+      const aUnobtained = a.matchedWeaponIds.filter(id => !obtainedIds.has(id)).length
+      const bUnobtained = b.matchedWeaponIds.filter(id => !obtainedIds.has(id)).length
+      if (aUnobtained !== bUnobtained) {
+        return bUnobtained - aUnobtained
       }
 
       // 最后：匹配武器总数
