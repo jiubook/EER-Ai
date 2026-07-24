@@ -353,14 +353,14 @@ uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-reco
 如有需要，按以下顺序更新游戏数据文件：
 
 1. **更新模板匹配模板** — 如有新版本游戏界面变更，需要更新模板匹配所用的截图模板。
+
 2. **更新武器 / 基质数据** — 使用数据转换脚本更新游戏数据：
    ```bash
-   uv run .\scripts\transform_weapon_data.py ...\TableCfg .\resources\data\v2
+   uv run .\scripts\transform_weapon_data.py ...\TableCfg
    ```
    该脚本会读取原始游戏数据，生成 JSON 文件。
+
 3. **更新武器图片**
-4. **更新能量淤积点数据** — 更新前端静态 JSON 文件 `frontend/src/assets/json/energyAlluviums.json`。
-5. **更新能量淤积点i18n数据** — 更新前端静态 JSON 文件 `frontend/src/assets/json/zh-CN-weapons.json`。
 
 ### 2. 更新版本号并提交
 

@@ -1,3 +1,3 @@
-from ...common import TranslationKey
+from ..common import TranslationKey
 
 type TextTable = dict[str, TranslationKey]
