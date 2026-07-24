@@ -198,6 +198,24 @@ export function useProfiles() {
     }
   }
 
+  async function clearProfileData(name?: string) {
+    try {
+      const res = await fetch('/api/profiles/clear_data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(name === undefined ? {} : { name }),
+      })
+      if (!res.ok) {
+        await parseJsonResponse<never>(res, 'Failed to clear profile data')
+      }
+      // 重新同步整份 collection：避免 applyActiveProfile 把 active_profile 误改成
+      // 被清空的账号，并刷新 treasureMatrix/activeProfile 等派生计算属性。
+      await fetchProfiles()
+    } catch (error) {
+      _handleError('清空账号数据失败', error)
+    }
+  }
+
   async function updateTreasureMatrix(entries: TreasureMatrixEntry[]) {
     try {
       const res = await fetch('/api/profiles/treasure_matrix', {
@@ -318,6 +336,7 @@ export function useProfiles() {
     switchProfile,
     renameProfile,
     deleteProfile,
+    clearProfileData,
     updateTreasureMatrix,
     addTreasureMatrixEntry,
     removeTreasureMatrixEntry,

@@ -25,3 +25,12 @@ async def post_config(
     except ConfigVersionMismatchError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return user_setting_manager.get_user_setting_ref()
+
+
+@router.post("/reset")
+async def reset_config(
+    user_setting_manager: UserSettingManager = Depends(get_user_setting_manager_dep),
+) -> UserSetting:
+    """将所有设置重置为默认值。"""
+    user_setting_manager.reset_to_default()
+    return user_setting_manager.get_user_setting_ref()

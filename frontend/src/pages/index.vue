@@ -7,6 +7,14 @@
           {{ isScanning ? '停止扫描基质' : '开始扫描基质' }}
         </v-btn>
         <v-spacer />
+        <v-btn
+          color="info"
+          prepend-icon="mdi-comment-question-outline"
+          variant="tonal"
+          @click="showFeedbackDialog = true"
+        >
+          识别有误？点我反馈
+        </v-btn>
         <v-btn color="error" @click="clearLogs">清空日志</v-btn>
         <v-btn v-if="false" :color="autoScroll ? 'success' : 'warning'" @click="toggleAutoScroll">
           {{ autoScroll ? '自动滚动：开' : '自动滚动：关' }}
@@ -25,16 +33,168 @@
       <pre v-if="logs.length > 0" class="logs-content text-pre-wrap h-0" v-html="logs.join('')" />
       <pre v-else>暂无日志...</pre>
     </v-card>
+
+    <!-- 反馈 / 排查弹窗 -->
+    <v-dialog v-model="showFeedbackDialog" max-width="640" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2" color="info">mdi-comment-question-outline</v-icon>
+          识别有误？试试这些解决方案
+        </v-card-title>
+        <v-divider />
+        <v-card-text>
+          <!-- 方案一 -->
+          <h3 class="text-subtitle-1 font-weight-bold mb-1">方案一：清空数据后全量重扫</h3>
+          <p class="text-body-2 text-medium-emphasis mb-2">
+            可能是历史数据有误。仅清空当前账号「{{ activeProfileName }}」的宝藏基质数据（<strong>不会删除账号</strong>），随后完整扫描一次即可全量重建。
+          </p>
+          <v-btn
+            color="warning"
+            prepend-icon="mdi-broom"
+            variant="tonal"
+            @click="clearActiveConfirm = true"
+          >
+            清空宝藏基质数据
+          </v-btn>
+
+          <v-divider class="my-4" />
+
+          <!-- 方案二 -->
+          <h3 class="text-subtitle-1 font-weight-bold mb-1">方案二：重置所有设置到默认值</h3>
+          <p class="text-body-2 text-medium-emphasis mb-2">
+            可能是设置中有冲突。建议前往设置页逐条查看，或点击下方按钮把所有设置恢复为默认值。
+          </p>
+          <div class="d-flex flex-wrap ga-2">
+            <v-btn
+              color="error"
+              prepend-icon="mdi-restore"
+              variant="tonal"
+              @click="resetConfigConfirm = true"
+            >
+              重置所有设置到默认值
+            </v-btn>
+            <v-btn prepend-icon="mdi-cog" to="/settings" variant="text" @click="showFeedbackDialog = false">
+              前往设置页
+            </v-btn>
+          </div>
+
+          <v-divider class="my-4" />
+
+          <!-- 方案三 -->
+          <h3 class="text-subtitle-1 font-weight-bold mb-1">方案三：反馈给我们</h3>
+          <p class="text-body-2 text-medium-emphasis mb-2">
+            前往 GitHub 提 Issue，或加入反馈交流群提交 bug。
+          </p>
+          <div class="d-flex flex-wrap ga-2">
+            <v-btn
+              append-icon="mdi-open-in-new"
+              color="primary"
+              href="https://github.com/Logical-Byte/endfield-essence-recognizer/issues"
+              rel="noopener noreferrer"
+              target="_blank"
+              variant="tonal"
+            >
+              GitHub 提 Issue
+            </v-btn>
+            <v-btn
+              href="https://qm.qq.com/cgi-bin/qm/qr?k=-GykJWhnZEN5F2aZ1nrVd3xs9RGkMBI2"
+              prepend-icon="mdi-qqchat"
+              rel="noopener noreferrer"
+              target="_blank"
+              variant="tonal"
+            >
+              基质小助手反馈交流③群：1042417974
+            </v-btn>
+          </div>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="showFeedbackDialog = false">关闭</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 方案一确认：清空当前账号宝藏基质数据 -->
+    <v-dialog v-model="clearActiveConfirm" max-width="440">
+      <v-card>
+        <v-card-title class="text-warning">确认清空数据</v-card-title>
+        <v-card-text>
+          确定要清空当前账号「{{ activeProfileName }}」的宝藏基质数据吗？仅清空当前账号数据，不会删除账号，此操作不可撤销。
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="clearActiveConfirm = false">取消</v-btn>
+          <v-btn color="warning" @click="onClearActiveData">清空</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 方案二确认：重置所有设置 -->
+    <v-dialog v-model="resetConfigConfirm" max-width="440">
+      <v-card>
+        <v-card-title class="text-error">确认重置设置</v-card-title>
+        <v-card-text>
+          确定要把所有设置重置为默认值吗？此操作不可撤销。
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="resetConfigConfirm = false">取消</v-btn>
+          <v-btn color="error" @click="onResetConfig">重置</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar v-model="showActionMsg" timeout="3500">{{ actionMsg }}</v-snackbar>
   </v-container>
 </template>
 
 <script lang="ts" setup>
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { clearLogs, logs } from '@/composables/useLogs'
+import { useProfiles } from '@/composables/useProfiles'
 import { useScanningStatus } from '@/composables/useScanningStatus'
 
 const autoScroll = ref(true)
 const { isScanning } = useScanningStatus()
+const { activeProfileName, clearProfileData } = useProfiles()
+
+// --- 反馈 / 排查 ---
+const showFeedbackDialog = ref(false)
+const clearActiveConfirm = ref(false)
+const resetConfigConfirm = ref(false)
+const showActionMsg = ref(false)
+const actionMsg = ref('')
+
+function notify(message: string) {
+  actionMsg.value = message
+  showActionMsg.value = true
+}
+
+/** 方案一：清空当前激活账号的宝藏基质数据（不传 name，由后端取激活账号）。 */
+async function onClearActiveData() {
+  try {
+    await clearProfileData()
+    clearActiveConfirm.value = false
+    showFeedbackDialog.value = false
+    notify('已清空当前账号的宝藏基质数据，可重新扫描。')
+  } catch (error: unknown) {
+    notify(`清空失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/** 方案二：重置所有设置到默认值。 */
+async function onResetConfig() {
+  try {
+    const res = await fetch('/api/config/reset', { method: 'POST' })
+    if (!res.ok) throw new Error(await res.text())
+    resetConfigConfirm.value = false
+    showFeedbackDialog.value = false
+    notify('已重置所有设置到默认值。')
+  } catch (error: unknown) {
+    notify(`重置失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
 
 function toggleAutoScroll() {
   autoScroll.value = !autoScroll.value

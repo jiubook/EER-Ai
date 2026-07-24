@@ -320,3 +320,75 @@ def test_sync_treasure_matrix_entries_updates_only_higher_levels(
     assert (entry.affix1_level, entry.affix2_level, entry.affix3_level) == (6, 6, 3)
     assert entry.include_in_calculation is False
     assert save_count == 1
+
+
+def test_clear_profile_data_active(profile_manager: ProfileManager):
+    """清空激活账号：treasure_matrix 与 weapon_priorities 清空，其它保留。"""
+    profile_manager.load()
+    profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="W1", affix1_level=3)
+    )
+    profile_manager.update_weapon_priority("wpn_001", 5)
+    profile_manager.update_weapon_overview_filters(
+        {"3star": False, "4star": True, "5star": True, "6star": True, "custom": True}
+    )
+
+    cleared = profile_manager.clear_profile_data()
+
+    assert cleared.treasure_matrix == []
+    assert cleared.weapon_priorities == {}
+    # 展示偏好（过滤器）、名称与版本保留
+    assert cleared.weapon_overview_filters["3star"] is False
+    assert cleared.name == "default"
+    assert cleared.version == 1
+
+
+def test_clear_profile_data_named_keeps_active(profile_manager: ProfileManager):
+    """按名清空非激活账号时，不改变当前激活账号。"""
+    profile_manager.load()
+    # 给 default 加数据
+    profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(weapon_id="wpn_default", weapon_name="D", affix1_level=2)
+    )
+    # 切换到 alt 并加数据
+    profile_manager.switch_profile("alt")
+    profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(weapon_id="wpn_alt", weapon_name="A", affix1_level=4)
+    )
+
+    cleared = profile_manager.clear_profile_data("default")
+
+    assert cleared.name == "default"
+    assert cleared.treasure_matrix == []
+    # 激活账号仍为 alt，且其数据未受影响
+    assert profile_manager.get_active_profile_name() == "alt"
+    alt = profile_manager.get_collection().profiles["alt"]
+    assert [e.weapon_id for e in alt.treasure_matrix] == ["wpn_alt"]
+
+
+def test_clear_profile_data_nonexistent(profile_manager: ProfileManager):
+    """清空不存在的账号会抛出 ValueError。"""
+    profile_manager.load()
+    with pytest.raises(ValueError, match="不存在"):
+        profile_manager.clear_profile_data("no_such_profile")
+
+
+def test_clear_profile_data_save_failure_keeps_memory(
+    profile_manager: ProfileManager, monkeypatch: pytest.MonkeyPatch
+):
+    """保存失败时内存数据不能被清空。"""
+    profile_manager.load()
+    profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="W1", affix1_level=3)
+    )
+
+    def fake_save(*args, **kwargs):
+        raise ProfileSaveError("disk full")
+
+    monkeypatch.setattr(profile_manager_module, "_save_profiles_to_file", fake_save)
+
+    with pytest.raises(ProfileSaveError):
+        profile_manager.clear_profile_data()
+
+    entries = profile_manager.get_active_profile().treasure_matrix
+    assert [e.weapon_id for e in entries] == ["wpn_001"]

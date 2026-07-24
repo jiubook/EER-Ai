@@ -297,6 +297,23 @@
           没有其他武器与此武器共享相同属性组合。
         </div>
       </v-card-text>
+
+      <!-- 自定义基质：删除操作 -->
+      <template v-if="isCustomEntry(detailWeaponId)">
+        <v-divider />
+        <v-card-actions>
+          <v-btn
+            color="error"
+            prepend-icon="mdi-delete"
+            variant="text"
+            @click="promptDeleteCustomEntry"
+            @mousedown="pendingCustomDelete = true"
+          >
+            删除此自定义基质
+          </v-btn>
+          <v-spacer />
+        </v-card-actions>
+      </template>
     </v-card>
   </v-dialog>
 
@@ -338,6 +355,21 @@
         <v-spacer />
         <v-btn @click="overlapDialog = false">取消</v-btn>
         <v-btn color="primary" @click="confirmOverlapActions">确认</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
+  <!-- 删除自定义基质确认弹窗 -->
+  <v-dialog v-model="deleteCustomConfirm" max-width="460">
+    <v-card>
+      <v-card-title class="text-error">删除自定义基质</v-card-title>
+      <v-card-text>
+        确定要删除自定义基质「{{ deleteCustomName }}」吗？将从设置中移除该基质定义，并从当前账号的基质数据中移除对应条目，此操作不可撤销。
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn @click="cancelDeleteCustomEntry">取消</v-btn>
+        <v-btn color="error" @click="confirmDeleteCustomEntry">删除</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -533,16 +565,33 @@ const showCustomSection = computed(() => selectedRarities.value.includes('custom
 /** 自定义条目编辑中的名称 */
 const customEntryName = ref('')
 
+// --- 删除自定义基质 ---
+const deleteCustomConfirm = ref(false)
+const deleteCustomIndex = ref<number | null>(null)
+const deleteCustomName = ref('')
+// 标记「正在发起删除」：删除按钮按下（mousedown）时置位，用于让名称输入框的
+// @blur 保存跳过本次写入，避免与删除流程交错写后端。
+const pendingCustomDelete = ref(false)
+
 // 弹窗打开时，如果是自定义条目，加载其名称
 watch([detailDialog, detailWeaponId], () => {
+  // 弹窗关闭时复位删除标记，避免 mousedown 后放弃点击导致标记卡住
+  if (!detailDialog.value) pendingCustomDelete.value = false
   if (detailDialog.value && isCustomEntry(detailWeaponId.value)) {
     const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
     customEntryName.value = customStats.value[index]?.name || ''
   }
 })
 
+// 确认弹窗以任意方式关闭（取消/遮罩/ESC）时复位删除标记，避免误跳过后续名称保存
+watch(deleteCustomConfirm, (open) => {
+  if (!open) pendingCustomDelete.value = false
+})
+
 /** 保存自定义条目名称到配置和 profile */
 async function saveCustomEntryName() {
+  // 正在发起删除时跳过保存，规避 @blur 与删除点击的竞态
+  if (pendingCustomDelete.value) return
   if (!isCustomEntry(detailWeaponId.value)) return
   const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
   if (customStats.value[index]) {
@@ -555,6 +604,63 @@ async function saveCustomEntryName() {
       await updateTreasureMatrix([...treasureMatrix.value])
     }
   }
+}
+
+/** 打开删除自定义基质的二次确认弹窗 */
+function promptDeleteCustomEntry() {
+  if (!isCustomEntry(detailWeaponId.value)) return
+  const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
+  if (Number.isNaN(index)) return
+  deleteCustomIndex.value = index
+  deleteCustomName.value = customStats.value[index]?.name || `自定义基质 ${index + 1}`
+  deleteCustomConfirm.value = true
+}
+
+/** 取消删除 */
+function cancelDeleteCustomEntry() {
+  deleteCustomConfirm.value = false
+  pendingCustomDelete.value = false
+}
+
+/**
+ * 确认删除自定义基质：
+ * 1. 基于未修改的 treasureMatrix 计算新矩阵（删除目标条目 + 重索引后续自定义条目）
+ * 2. 从 config 的自定义列表移除该项
+ * 3. 先写 profile（后端据此重建 weapon_priorities），再回写 config，最后回读
+ */
+async function confirmDeleteCustomEntry() {
+  const index = deleteCustomIndex.value
+  if (index === null) {
+    cancelDeleteCustomEntry()
+    return
+  }
+  const targetId = `custom_stat_${index}`
+
+  // 1) 删除目标条目，并将所有索引 > index 的自定义条目前移一位
+  const newMatrix = treasureMatrix.value
+    .filter((e) => e.weapon_id !== targetId)
+    .map((e) => {
+      if (e.weapon_id.startsWith('custom_stat_')) {
+        const cur = Number.parseInt(e.weapon_id.replace('custom_stat_', ''), 10)
+        if (cur > index) return { ...e, weapon_id: `custom_stat_${cur - 1}` }
+      }
+      return e
+    })
+
+  // 2) 从 config 的自定义基质列表中移除该项
+  customStats.value.splice(index, 1)
+
+  // 3) 持久化：先 profile，再 config，最后回读配置
+  await updateTreasureMatrix(newMatrix)
+  await postCustomStatsUpdate()
+  await fetchCustomStats()
+
+  // 4) 关闭弹窗并清理引用（重索引后旧 syntheticId 已指向不同条目，必须清空）
+  deleteCustomConfirm.value = false
+  pendingCustomDelete.value = false
+  detailDialog.value = false
+  detailWeaponId.value = null
+  deleteCustomIndex.value = null
 }
 
 /** 将自定义宝藏基质配置保存到后端 */

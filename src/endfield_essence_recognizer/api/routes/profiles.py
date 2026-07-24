@@ -121,6 +121,27 @@ async def delete_profile(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+class ClearProfileDataRequest(BaseModel):
+    """清空账号数据请求体。"""
+
+    name: str | None = None
+
+
+@router.post("/clear_data")
+async def clear_profile_data(
+    request: ClearProfileDataRequest | None = None,
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> ProfileData:
+    """清空账号的宝藏基质数据（不删除账号）。
+
+    name 为空时清空当前激活账号的数据。
+    """
+    try:
+        return manager.clear_profile_data(request.name if request else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 # --- 宝藏基质 ---
 
 

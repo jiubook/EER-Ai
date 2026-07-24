@@ -160,6 +160,31 @@ def test_update_from_user_setting(manager, settings_file):
     ] == ["model_update"]
 
 
+def test_reset_to_default(manager, settings_file):
+    """测试 reset_to_default 将配置重置为默认值并保存到磁盘。"""
+    manager.update_from_dict(
+        {
+            "trash_weapon_ids": ["w1", "w2"],
+            "treasure_essence_stats": [
+                {"name": "自定义", "attribute": "atk", "secondary": None, "skill": None}
+            ],
+            "high_level_treasure_enabled": True,
+        }
+    )
+
+    returned = manager.reset_to_default()
+
+    # 返回值与内存均为默认配置
+    assert returned == UserSetting()
+    assert manager.get_user_setting() == UserSetting()
+    # 磁盘已落默认值
+    data = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert data["version"] == UserSetting._VERSION
+    assert data["trash_weapon_ids"] == []
+    assert data["treasure_essence_stats"] == []
+    assert data["high_level_treasure_enabled"] is False
+
+
 def test_update_from_dict_invalid_data(manager):
     """测试 update_from_dict 在提供无效数据时抛出异常。"""
     with pytest.raises(ValidationError):

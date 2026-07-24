@@ -35,6 +35,18 @@
               variant="text"
               @click.stop="startDelete(name)"
             />
+            <v-tooltip v-if="name === 'default'" location="bottom" text="清空数据">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  color="error"
+                  icon="mdi-delete"
+                  size="x-small"
+                  variant="text"
+                  @click.stop="startClearData(name)"
+                />
+              </template>
+            </v-tooltip>
           </div>
         </template>
       </v-list-item>
@@ -109,6 +121,21 @@
     </v-card>
   </v-dialog>
 
+  <!-- 清空数据确认对话框 -->
+  <v-dialog v-model="showClearDataConfirm" max-width="440">
+    <v-card>
+      <v-card-title class="text-error">确认清空数据</v-card-title>
+      <v-card-text>
+        确定要清空账号「{{ clearDataTargetName }}」的数据吗？账号会保留，但该账号下所有已扫描的宝藏基质与优先级设置都会被清空，此操作不可撤销。
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn @click="showClearDataConfirm = false">取消</v-btn>
+        <v-btn color="error" @click="onClearData">清空数据</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
   <v-snackbar v-model="showError" color="error" timeout="4000">
     {{ errorMessage }}
   </v-snackbar>
@@ -125,6 +152,7 @@ const {
   switchProfile,
   renameProfile,
   deleteProfile,
+  clearProfileData,
 } = useProfiles()
 
 // 账号名称最大长度
@@ -135,10 +163,12 @@ const PROFILE_NAME_INVALID_RE = /[/\\\0\n\r\t]/
 const showNewProfileDialog = ref(false)
 const showRenameDialog = ref(false)
 const showDeleteConfirm = ref(false)
+const showClearDataConfirm = ref(false)
 const newProfileName = ref('')
 const renameNewName = ref('')
 const renameOldName = ref('')
 const deleteTargetName = ref('')
+const clearDataTargetName = ref('')
 const showError = ref(false)
 const errorMessage = ref('')
 
@@ -244,6 +274,26 @@ async function onDelete() {
     showDeleteConfirm.value = false
   } catch (error: unknown) {
     notifyError(getErrorMessage(error, '删除失败'))
+  }
+}
+
+/**
+ * 开始清空账号数据（default 账号不能删除，只能清空数据）。
+ */
+function startClearData(name: string) {
+  clearDataTargetName.value = name
+  showClearDataConfirm.value = true
+}
+
+/**
+ * 执行清空数据操作。
+ */
+async function onClearData() {
+  try {
+    await clearProfileData(clearDataTargetName.value)
+    showClearDataConfirm.value = false
+  } catch (error: unknown) {
+    notifyError(getErrorMessage(error, '清空数据失败'))
   }
 }
 </script>

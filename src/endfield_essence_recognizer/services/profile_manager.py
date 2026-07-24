@@ -426,6 +426,35 @@ class ProfileManager:
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
 
+    def clear_profile_data(self, name: str | None = None) -> ProfileData:
+        """清空指定账号的宝藏基质数据（保留账号本身、名称、版本与总览过滤器）。
+
+        清空内容为 treasure_matrix 与 weapon_priorities，用于「数据有误、
+        全量重新扫描」的场景；不删除账号，也不重置武器总览过滤器等展示偏好。
+
+        Args:
+            name: 要清空的账号名称；None 表示清空当前激活账号。
+
+        Returns:
+            清空后的 ProfileData。
+
+        Raises:
+            ValueError: 如果指定的账号不存在。
+        """
+        with self._lock:
+            collection = self._collection.model_copy(deep=True)
+            if name is None:
+                profile = collection.get_active()
+            elif name in collection.profiles:
+                profile = collection.profiles[name]
+            else:
+                raise ValueError(f"账号 '{name}' 不存在")
+            profile.treasure_matrix = []
+            profile.weapon_priorities = {}
+            self._commit_collection_unlocked(collection)
+            logger.info("清空账号数据: {}", profile.name)
+            return profile.model_copy(deep=True)
+
     def fix_weapon_id(self, old_weapon_id: str, new_weapon_id: str) -> None:
         """修正 profile 中错误的武器 ID（如名称 → 正确 ID）。
 

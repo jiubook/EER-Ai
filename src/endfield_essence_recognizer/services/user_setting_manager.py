@@ -184,3 +184,15 @@ class UserSettingManager:
             raise ConfigVersionMismatchError(UserSetting._VERSION, other.version)
         self._user_setting.update_from_model(other)
         self.save_user_setting()
+
+    def reset_to_default(self) -> UserSetting:
+        """
+        Reset the in-memory UserSetting to defaults (UserSetting()) and save.
+
+        Returns:
+            A reference to the reset in-memory UserSetting.
+        """
+        self._user_setting = UserSetting()
+        self.save_user_setting()
+        logger.info("配置已重置为默认值。")
+        return self._user_setting
