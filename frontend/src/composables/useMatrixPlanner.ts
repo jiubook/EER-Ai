@@ -4,25 +4,22 @@
  * 改编自 ef-frontend-v1 的基质计算器逻辑，帮助用户找到刷取所需基质的最佳位置。
  */
 
+import energyAlluviumsJson from '@resources/data/v2/EnergyAlluviums.json'
+import essencestatJson from '@resources/data/v2/essencestat.json'
 import { computed, onUnmounted, ref, type Ref, watch } from 'vue'
-import energyAlluviumsJson from '@/assets/json/energyAlluviums.json'
-import zhCNWeapons from '@/assets/json/zh-CN-weapons.json'
 import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
 import { safeLoadJson, safeRemoveJson, safeSetJson } from '@/utils/safeStorage'
 
-/** 从 zh-CN-weapons.json 中提取的 weapon.stat 键→中文显示名映射 */
+/** 从 essencestat.json 中提取的 stat_id→中文显示名映射 */
 const STAT_KEY_TO_DISPLAY_NAME: Record<string, string> = Object.fromEntries(
-  Object.entries(zhCNWeapons.weapon.stat).map(([key, name]) => [`weapon.stat.${key}`, name]),
+  Object.values(essencestatJson).map(entry => [entry.stat_id, entry.name]),
 )
 
-/** 从 zh-CN-weapons.json 中提取的淤积点键→中文显示名映射 */
-const ALLUVIUM_KEY_TO_DISPLAY_NAME: Record<string, string> = zhCNWeapons.energyAlluviums
-
 /**
- * 将本地化键（如 "weapon.stat.gat_passive_attr_atk"）解析为中文显示名。
- * 先查 zh-CN-weapons.json 映射表，再尝试 essencesMap，最后返回原键。
+ * 将词条内部 ID（如 "gat_passive_attr_atk"）解析为中文显示名。
+ * 查 essencestat.json 映射表，未命中则返回原键。
  */
 function resolveStatKeyToDisplayName(key: string): string {
   return STAT_KEY_TO_DISPLAY_NAME[key] ?? key
@@ -70,23 +67,9 @@ const ALLUVIUM_PREFIX = '重度能量淤积点·'
 
 /**
  * 将完整淤积点名称裁剪为短显示名。
- * 支持两种格式：
- * - 本地化键 "energyAlluviums.world_energy_point_group01" → "枢纽区"
- * - 中文名 "重度能量淤积点·枢纽区" → "枢纽区"
+ * 如 "重度能量淤积点·枢纽区" → "枢纽区"。
  */
 export function getDisplayName(battleName: string): string {
-  // 新格式：本地化键，从 zh-CN-weapons.json 查找中文名后裁掉前缀
-  if (battleName.startsWith('energyAlluviums.')) {
-    const key = battleName.slice('energyAlluviums.'.length)
-    const fullName = ALLUVIUM_KEY_TO_DISPLAY_NAME[key]
-    if (fullName) {
-      return fullName.startsWith(ALLUVIUM_PREFIX)
-        ? fullName.slice(ALLUVIUM_PREFIX.length)
-        : fullName
-    }
-    return key
-  }
-  // 旧格式：中文名，裁掉前缀
   return battleName.startsWith(ALLUVIUM_PREFIX)
     ? battleName.slice(ALLUVIUM_PREFIX.length)
     : battleName
