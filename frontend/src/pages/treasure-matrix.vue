@@ -95,7 +95,7 @@
               <div class="matrix-card-body">
                 <section class="weapon-identity">
                   <div class="weapon-icon-wrap" :class="getWeaponTierClass(entry.weapon_id)">
-                    <custom-stat-icon v-if="isCustomEntry(entry.weapon_id)" hide-name :name="entry.weapon_name || entry.weapon_id" small />
+                    <custom-stat-icon v-if="isCustomEntry(entry.weapon_id)" hide-name :name="entry.weapon_name || entry.weapon_id" :skill-stat-id="getCustomStatSkillId(entry.weapon_id)" small />
                     <item-icon v-else class="weapon-icon-small" :item-id="entry.weapon_id" />
                     <span class="weapon-tier">{{ getWeaponRarityText(entry.weapon_id) }}</span>
                   </div>
@@ -387,7 +387,7 @@
           >
             <v-card-item>
               <template #prepend>
-                <custom-stat-icon v-if="isCustomEntry(rec.weapon_id)" hide-name :name="getCustomStatName(rec.weapon_id)" small />
+                <custom-stat-icon v-if="isCustomEntry(rec.weapon_id)" hide-name :name="getCustomStatName(rec.weapon_id)" :skill-stat-id="getCustomStatSkillId(rec.weapon_id)" small />
                 <item-icon v-else class="weapon-icon-small" :item-id="rec.weapon_id" />
               </template>
               <v-card-title>{{ isCustomEntry(rec.weapon_id) ? getCustomStatName(rec.weapon_id) : rec.weapon_name }}</v-card-title>
@@ -577,7 +577,7 @@
           <!-- 自定义基质区段 -->
           <template v-if="customMatrixEntries.length > 0">
             <h4 class="mt-4 mb-2 d-flex align-center">
-              <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+              <img alt="基质底板" class="essence-icon-small me-2" :src="essenceBgSrc" />
               自定义基质
             </h4>
             <div class="weapon-grid">
@@ -587,7 +587,7 @@
                 class="weapon-item"
                 @click="onAddCustomStat(entry.index)"
               >
-                <custom-stat-icon :name="entry.displayName" />
+                <custom-stat-icon :name="entry.displayName" :skill-stat-id="entry.skillStatId" />
               </div>
             </div>
           </template>
@@ -650,7 +650,10 @@ const {
 } = useProfiles()
 const { selectedRarities } = useRarityFilters()
 
-const { weaponsMap, weaponTypes } = useStaticData()
+const { weaponsMap, weaponTypes, matrixIcons } = useStaticData()
+
+// 底板图片路径
+const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
 
 const showAddWeaponDialog = ref(false)
 const weaponSearch = ref('')
@@ -667,6 +670,12 @@ function isCustomEntry(weaponId: string): boolean {
 function getCustomStatName(weaponId: string): string {
   const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
   return customStats.value[index]?.name || `自定义基质 ${index + 1}`
+}
+
+/** 获取自定义基质的技能属性ID */
+function getCustomStatSkillId(weaponId: string): string | null {
+  const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+  return customStats.value[index]?.skill || null
 }
 
 /** 自定义宝藏基质属性配置列表，用于读取自定义条目的属性名 */
@@ -689,6 +698,7 @@ const customMatrixEntries = computed(() => {
     syntheticId: `custom_stat_${index}`,
     displayName: stat.name || `自定义基质 ${index + 1}`,
     index,
+    skillStatId: stat.skill,
   }))
 })
 
@@ -1590,6 +1600,13 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
+}
+
+.essence-icon-small {
+  width: 1.5rem;
+  height: 1.5rem;
+  vertical-align: middle;
+  border-radius: 4px;
 }
 
 .weapon-grid {

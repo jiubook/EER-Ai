@@ -1,5 +1,6 @@
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
 from endfield_essence_recognizer.schemas.static_data import (
+    MatrixIconResponse,
     RarityColorResponse,
     StatInfo,
     StatListResponse,
@@ -24,6 +25,7 @@ class StaticDataService:
         self.group_icon_base_url = (
             "/api/assets/beyond/dynamicassets/gameplay/ui/sprites/wiki/groupicon/"
         )
+        self.matrix_icon_base_url = "/images/matrix/"
         self.data = data
 
     def _get_item_icon_url(self, icon_id: str | None) -> str:
@@ -179,3 +181,43 @@ class StaticDataService:
             if essence:
                 essences.append(essence)
         return StatListResponse(items=essences)
+
+    def get_matrix_icons(self) -> MatrixIconResponse:
+        """
+        Get the mapping of matrix icon URLs.
+
+        Returns:
+            A MatrixIconResponse containing the essence background URL
+            and skill stat ID to icon URL mapping.
+        """
+        # 技能属性ID列表
+        skill_stat_ids = [
+            "gst_passive_break",
+            "gst_passive_burst",
+            "gst_passive_combo",
+            "gst_passive_crit",
+            "gst_passive_force",
+            "gst_passive_heal",
+            "gst_passive_keyword",
+            "gst_passive_magabn",
+            "gst_passive_phyabn",
+            "gst_passive_smash",
+            "gst_passive_spirit",
+            "gst_passive_tacafter",
+            "gst_passive_tactic",
+            "gst_passive_ult",
+        ]
+
+        # 生成技能属性图标URL映射
+        skills = {}
+        for skill_id in skill_stat_ids:
+            # 同时支持两种格式
+            skills[skill_id] = f"{self.matrix_icon_base_url}{skill_id}.webp"
+            skills[f"weapon.stat.{skill_id}"] = (
+                f"{self.matrix_icon_base_url}{skill_id}.webp"
+            )
+
+        return MatrixIconResponse(
+            essence_bg=f"{self.matrix_icon_base_url}EssenceBG.webp",
+            skills=skills,
+        )

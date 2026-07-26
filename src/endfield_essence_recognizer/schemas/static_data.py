@@ -111,3 +111,16 @@ class StatListResponse(BaseModel):
 
 class RarityColorResponse(BaseModel):
     colors: dict[int, str] = Field(description="稀有度到颜色代码的映射")
+
+
+class MatrixIconResponse(BaseModel):
+    essence_bg: str = Field(description="基质底板图片的URL")
+    skills: dict[str, str] = Field(description="技能属性ID到图标URL的映射")
+
+    model_config = ConfigDict(
+        alias_generator=AliasGenerator(
+            validation_alias=to_camel,
+            serialization_alias=to_camel,
+        ),
+        populate_by_name=True,
+    )

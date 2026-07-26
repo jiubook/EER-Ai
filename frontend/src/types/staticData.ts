@@ -39,10 +39,16 @@ export interface RarityColorResponse {
   colors: Record<number, string>
 }
 
+export interface MatrixIconResponse {
+  essenceBg: string
+  skills: Record<string, string>
+}
+
 export interface StaticDataState {
   weaponsMap: Map<string, WeaponInfo>
   weaponTypes: WeaponTypeInfo[]
   essencesMap: Map<string, EssenceInfo>
   rarityColors: Record<number, string>
+  matrixIcons: MatrixIconResponse
   isLoaded: boolean
 }

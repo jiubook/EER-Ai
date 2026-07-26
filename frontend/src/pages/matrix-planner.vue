@@ -70,7 +70,7 @@
                               <v-tooltip location="top" open-delay="0">
                                 <template #activator="{ props }">
                                   <div v-bind="props" class="h-100">
-                                    <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
+                                    <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" :skill-stat-id="getCustomStatSkillId(weaponId)" small />
                                     <template v-else>
                                       <item-icon :item-id="weaponId" show-item-name />
                                     </template>
@@ -198,7 +198,7 @@
                                   <v-tooltip location="top" open-delay="0">
                                     <template #activator="{ props }">
                                       <div v-bind="props" class="h-100">
-                                        <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" small />
+                                        <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" :skill-stat-id="getCustomStatSkillId(weaponId)" small />
                                         <item-icon v-else :item-id="weaponId" show-item-name />
                                       </div>
                                     </template>
@@ -448,7 +448,7 @@
               <!-- 自定义基质区段 -->
               <template v-if="selectedRarities.includes('custom') && customMatrixEntries.length > 0">
                 <div class="d-flex align-center mb-2 mt-4">
-                  <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+                  <img alt="基质底板" class="essence-icon-small me-2" :src="essenceBgSrc" />
                   <h4>自定义基质</h4>
                 </div>
                 <div class="weapon-grid">
@@ -466,7 +466,7 @@
                     <v-tooltip location="top" open-delay="0">
                       <template #activator="{ props }">
                         <div v-bind="props" class="weapon-item-content">
-                          <custom-stat-icon :name="entry.displayName" />
+                          <custom-stat-icon :name="entry.displayName" :skill-stat-id="entry.skillStatId" />
                         </div>
                       </template>
                       <span>{{ getCustomStatTooltip(entry.index) }}</span>
@@ -556,9 +556,12 @@ import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 
 const route = useRoute()
-const { weaponTypes, weaponsMap, essencesMap } = useStaticData()
+const { weaponTypes, weaponsMap, essencesMap, matrixIcons } = useStaticData()
 const { treasureMatrix } = useProfiles()
 const { selectedRarities } = useRarityFilters()
+
+// 底板图片路径
+const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
 // 页面渲染中会频繁判断"是否已有基质"，用 Set 避免对 treasureMatrix 反复线性扫描。
 const obtainedWeaponIds = computed(
   () => new Set(treasureMatrix.value.map((entry) => entry.weapon_id)),
@@ -649,6 +652,7 @@ const customMatrixEntries = computed(() => {
     syntheticId: `custom_stat_${index}`,
     displayName: stat.name || `自定义基质 ${index + 1}`,
     index,
+    skillStatId: stat.skill,
   }))
 })
 
@@ -895,6 +899,16 @@ function getCustomStatDisplayName(id: string): string {
   return customStats.value[index]?.name || `自定义基质 ${index + 1}`
 }
 
+/**
+ * 获取自定义基质的技能属性ID
+ */
+function getCustomStatSkillId(id: string): string | null {
+  const match = id.match(/^custom_stat_(\d+)$/)
+  if (!match) return null
+  const index = Number.parseInt(match[1]!, 10)
+  return customStats.value[index]?.skill || null
+}
+
 function sortedWeaponIds(weaponIds: string[]): string[] {
   return weaponIds.toSorted((a, b) => {
     const aObtained = isWeaponObtained(a)
@@ -1077,6 +1091,13 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
+}
+
+.essence-icon-small {
+  width: 1.5rem;
+  height: 1.5rem;
+  vertical-align: middle;
+  border-radius: 4px;
 }
 
 .weapon-grid {

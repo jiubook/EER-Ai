@@ -91,7 +91,7 @@
         <!-- 自定义基质区段 -->
         <template v-if="showCustomSection">
           <div class="d-flex align-center mb-1 mt-3">
-            <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+            <img alt="基质底板" class="essence-icon-small me-2" :src="essenceBgSrc" />
             <h4>自定义基质</h4>
           </div>
           <div class="weapon-overview-grid">
@@ -125,7 +125,7 @@
                         'weapon-maxed': isWeaponMaxed(entry.syntheticId),
                       }"
                     >
-                      <custom-stat-icon :name="entry.displayName" />
+                      <custom-stat-icon :name="entry.displayName" :skill-stat-id="entry.skillStatId" />
 
                       <!-- 满级的彩虹边框 -->
                       <div v-if="isWeaponMaxed(entry.syntheticId)" class="rainbow-border" />
@@ -202,7 +202,7 @@
     <v-card v-if="detailWeaponId">
       <v-card-item>
         <template #prepend>
-          <custom-stat-icon v-if="isCustomEntry(detailWeaponId) || isNewCustom" hide-name :name="customEntryName || '新基质'" />
+          <custom-stat-icon v-if="isCustomEntry(detailWeaponId) || isNewCustom" class="weapon-icon-detail" hide-name :name="customEntryName || '新基质'" :skill-stat-id="customEditSkill" />
           <item-icon v-else class="weapon-icon-detail" :item-id="detailWeaponId" />
         </template>
         <v-card-title>
@@ -525,7 +525,7 @@ import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
 
-const { weaponTypes, weaponsMap, essencesMap } = useStaticData()
+const { weaponTypes, weaponsMap, essencesMap, matrixIcons } = useStaticData()
 const {
   activeProfile,
   treasureMatrix,
@@ -535,6 +535,9 @@ const {
   updateWeaponPriority,
 } = useProfiles()
 const { selectedRarities } = useRarityFilters()
+
+// 底板图片路径
+const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
 
 // --- 属性选项列表 ---
 const allAttributeStats = computed(() =>
@@ -758,6 +761,7 @@ const customMatrixEntries = computed(() => {
       syntheticId: `custom_stat_${index}`,
       displayName: stat.name || `自定义基质 ${index + 1}`,
       index,
+      skillStatId: stat.skill,
     }))
 })
 
@@ -1388,6 +1392,13 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
+}
+
+.essence-icon-small {
+  width: 1.5rem;
+  height: 1.5rem;
+  vertical-align: middle;
+  border-radius: 4px;
 }
 
 .weapon-overview-container {
