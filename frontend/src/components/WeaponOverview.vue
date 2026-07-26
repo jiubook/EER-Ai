@@ -89,12 +89,21 @@
         </div>
 
         <!-- 自定义基质区段 -->
-        <template v-if="showCustomSection && customMatrixEntries.length > 0">
+        <template v-if="showCustomSection">
           <div class="d-flex align-center mb-1 mt-3">
             <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
             <h4>自定义基质</h4>
           </div>
           <div class="weapon-overview-grid">
+            <!-- [+] 新建按钮 -->
+            <div
+              class="weapon-overview-item"
+              @click="showNewCustomDialog"
+            >
+              <div class="weapon-add-button">
+                <v-icon color="grey" size="28">mdi-plus</v-icon>
+              </div>
+            </div>
             <div
               v-for="entry in customMatrixEntries"
               :key="entry.syntheticId"
@@ -189,50 +198,159 @@
   </v-expansion-panel>
 
   <!-- 武器详情弹窗 -->
-  <v-dialog v-model="detailDialog" max-width="600">
+  <v-dialog v-model="detailDialog" max-width="680">
     <v-card v-if="detailWeaponId">
       <v-card-item>
         <template #prepend>
-          <custom-stat-icon v-if="isCustomEntry(detailWeaponId)" hide-name :name="customEntryName || detailWeaponId" />
+          <custom-stat-icon v-if="isCustomEntry(detailWeaponId) || isNewCustom" hide-name :name="customEntryName || '新基质'" />
           <item-icon v-else class="weapon-icon-detail" :item-id="detailWeaponId" />
         </template>
         <v-card-title>
           <v-text-field
-            v-if="isCustomEntry(detailWeaponId)"
+            v-if="isCustomEntry(detailWeaponId) || isNewCustom"
             v-model="customEntryName"
             density="compact"
             hide-details
             placeholder="自定义基质名称"
             variant="underlined"
-            @blur="saveCustomEntryName"
-            @keydown.enter="saveCustomEntryName"
           />
           <template v-else>
             {{ weaponsMap.get(detailWeaponId)?.name || detailWeaponId }}
           </template>
         </v-card-title>
-        <v-card-subtitle>{{ getWeaponStatsText(detailWeaponId) }}</v-card-subtitle>
         <template #append>
           <v-btn icon="mdi-close" variant="text" @click="detailDialog = false" />
         </template>
       </v-card-item>
       <v-divider />
       <v-card-text>
-        <!-- 当前状态 -->
+        <!-- 基质属性 -->
         <div class="mb-4">
-          <div class="text-subtitle-2 mb-1">当前基质等级</div>
-          <v-chip :color="isWeaponOwned(detailWeaponId) ? 'primary' : 'grey'" variant="flat">
-            {{ getMatrixLevelText(detailWeaponId) }}
-          </v-chip>
-          <v-chip
-            v-if="isWeaponMaxed(detailWeaponId)"
-            class="ml-2"
-            color="success"
-            size="small"
-            variant="flat"
-          >
-            已满级
-          </v-chip>
+          <div class="text-subtitle-2 mb-2">基质属性</div>
+          <v-row dense>
+            <v-col cols="12" sm="4">
+              <v-select
+                :clearable="isCustomEntry(detailWeaponId) || isNewCustom"
+                density="compact"
+                :disabled="!(isCustomEntry(detailWeaponId) || isNewCustom)"
+                hide-details
+                :items="allAttributeStats.map(id => ({ title: getGemTagName(id), value: id }))"
+                label="基础属性"
+                :model-value="isCustomEntry(detailWeaponId) || isNewCustom ? customEditAttribute : weaponsMap.get(detailWeaponId)?.attributeStatId ?? null"
+                variant="outlined"
+                @update:model-value="isCustomEntry(detailWeaponId) || isNewCustom ? customEditAttribute = $event : undefined"
+              />
+            </v-col>
+            <v-col cols="12" sm="4">
+              <v-select
+                :clearable="isCustomEntry(detailWeaponId) || isNewCustom"
+                density="compact"
+                :disabled="!(isCustomEntry(detailWeaponId) || isNewCustom)"
+                hide-details
+                :items="allSecondaryStats.map(id => ({ title: getGemTagName(id), value: id }))"
+                label="附加属性"
+                :model-value="isCustomEntry(detailWeaponId) || isNewCustom ? customEditSecondary : weaponsMap.get(detailWeaponId)?.secondaryStatId ?? null"
+                variant="outlined"
+                @update:model-value="isCustomEntry(detailWeaponId) || isNewCustom ? customEditSecondary = $event : undefined"
+              />
+            </v-col>
+            <v-col cols="12" sm="4">
+              <v-select
+                :clearable="isCustomEntry(detailWeaponId) || isNewCustom"
+                density="compact"
+                :disabled="!(isCustomEntry(detailWeaponId) || isNewCustom)"
+                hide-details
+                :items="allSkillStats.map(id => ({ title: getGemTagName(id), value: id }))"
+                label="技能属性"
+                :model-value="isCustomEntry(detailWeaponId) || isNewCustom ? customEditSkill : weaponsMap.get(detailWeaponId)?.skillStatId ?? null"
+                variant="outlined"
+                @update:model-value="isCustomEntry(detailWeaponId) || isNewCustom ? customEditSkill = $event : undefined"
+              />
+            </v-col>
+          </v-row>
+        </div>
+
+        <!-- 基质等级 -->
+        <div class="mb-4">
+          <div class="text-subtitle-2 mb-2">当前基质等级</div>
+          <div class="detail-level-wrapper">
+            <div class="detail-level-section">
+              <div class="detail-attr-control detail-attr-control--primary">
+                <span class="detail-attr-label">基础属性</span>
+                <div class="detail-attr-pips">
+                  <span
+                    v-for="level in affixLevelItems"
+                    :key="`d-a1-${level}`"
+                    class="detail-pip"
+                    :class="{
+                      active: level <= detailAffix1,
+                      'detail-pip--max': detailAffix1 === 6,
+                    }"
+                    @click="detailAffix1 = level"
+                  />
+                </div>
+                <span class="detail-attr-value" :class="{ 'detail-attr-value--full': detailAffix1 === 6 }">
+                  +{{ detailAffix1 }} / 6
+                </span>
+              </div>
+
+              <div class="detail-attr-control detail-attr-control--teal">
+                <span class="detail-attr-label">附加属性</span>
+                <div class="detail-attr-pips">
+                  <span
+                    v-for="level in affixLevelItems"
+                    :key="`d-a2-${level}`"
+                    class="detail-pip"
+                    :class="{
+                      active: level <= detailAffix2,
+                      'detail-pip--max': detailAffix2 === 6,
+                    }"
+                    @click="detailAffix2 = level"
+                  />
+                </div>
+                <span class="detail-attr-value" :class="{ 'detail-attr-value--full': detailAffix2 === 6 }">
+                  +{{ detailAffix2 }} / 6
+                </span>
+              </div>
+
+              <div class="detail-attr-control detail-attr-control--indigo">
+                <span class="detail-attr-label">技能属性</span>
+                <div class="detail-attr-pips detail-attr-pips--skill">
+                  <span
+                    v-for="level in skillLevelItems"
+                    :key="`d-a3-${level}`"
+                    class="detail-pip"
+                    :class="{
+                      active: level <= detailAffix3,
+                      'detail-pip--max': detailAffix3 === 3,
+                    }"
+                    @click="detailAffix3 = level"
+                  />
+                </div>
+                <span class="detail-attr-value" :class="{ 'detail-attr-value--full': detailAffix3 === 3 }">
+                  +{{ detailAffix3 }} / 3
+                </span>
+              </div>
+            </div>
+
+            <!-- 未拥有斜向胶带遮罩（贯穿三个属性） -->
+            <div v-if="!isDetailOwned" class="not-owned-tape-detail">
+              <span class="not-owned-tape-detail-text">» 未拥有 » NOT OWNED » 未拥有 » NOT OWNED » </span>
+            </div>
+          </div>
+
+          <!-- 拥有状态切换 -->
+          <div class="mt-2">
+            <v-chip
+              :color="isDetailOwned ? 'success' : 'grey'"
+              :prepend-icon="isDetailOwned ? 'mdi-check-circle' : 'mdi-close-circle'"
+              size="small"
+              variant="tonal"
+              @click="toggleDetailOwnership"
+            >
+              {{ isDetailOwned ? '已拥有' : '未拥有 · 点击切换为拥有' }}
+            </v-chip>
+          </div>
         </div>
 
         <!-- 优先级设置 -->
@@ -242,10 +360,10 @@
             <v-chip
               v-for="p in [1, 2, 3, 4, 5, 6, 7, 8, 9]"
               :key="p"
-              :color="getWeaponPriority(detailWeaponId!) === p ? 'primary' : undefined"
+              :color="detailPriority === p ? 'primary' : undefined"
               size="small"
-              :variant="getWeaponPriority(detailWeaponId!) === p ? 'flat' : 'outlined'"
-              @click="setWeaponPriority(detailWeaponId!, p)"
+              :variant="detailPriority === p ? 'flat' : 'outlined'"
+              @click="detailPriority = p"
             >
               {{ p }}
             </v-chip>
@@ -258,8 +376,8 @@
           </div>
         </div>
 
-        <!-- 同类武器（自定义条目不显示） -->
-        <div v-if="!isCustomEntry(detailWeaponId) && getSameStatWeapons(detailWeaponId).length > 0">
+        <!-- 同类武器（仅非自定义且非新建时显示） -->
+        <div v-if="!isCustomEntry(detailWeaponId) && !isNewCustom && getSameStatWeapons(detailWeaponId).length > 0">
           <div class="text-subtitle-2 mb-2">同类属性武器</div>
           <div class="d-flex flex-column ga-2">
             <v-card
@@ -293,16 +411,18 @@
             </v-card>
           </div>
         </div>
-        <div v-else-if="!isCustomEntry(detailWeaponId)" class="text-medium-emphasis text-caption">
+        <div v-else-if="!isCustomEntry(detailWeaponId) && !isNewCustom" class="text-medium-emphasis text-caption">
           没有其他武器与此武器共享相同属性组合。
         </div>
       </v-card-text>
 
-      <!-- 自定义基质：删除操作 -->
-      <template v-if="isCustomEntry(detailWeaponId)">
-        <v-divider />
-        <v-card-actions>
+      <!-- 操作按钮 -->
+      <v-divider />
+      <v-card-actions>
+        <!-- 自定义基质（新建+编辑）：保存 + 删除 -->
+        <template v-if="isCustomEntry(detailWeaponId) || isNewCustom">
           <v-btn
+            v-if="!isNewCustom"
             color="error"
             prepend-icon="mdi-delete"
             variant="text"
@@ -312,8 +432,29 @@
             删除此自定义基质
           </v-btn>
           <v-spacer />
-        </v-card-actions>
-      </template>
+          <v-btn
+            color="primary"
+            prepend-icon="mdi-content-save"
+            variant="flat"
+            @click="saveCustomEntry"
+          >
+            保存
+          </v-btn>
+        </template>
+        <!-- 非自定义基质：删除 -->
+        <template v-else>
+          <v-btn
+            v-if="isWeaponOwned(detailWeaponId)"
+            color="error"
+            prepend-icon="mdi-delete-outline"
+            variant="text"
+            @click="removeNonCustomEntry(detailWeaponId!)"
+          >
+            从基质配置中移除
+          </v-btn>
+          <v-spacer />
+        </template>
+      </v-card-actions>
     </v-card>
   </v-dialog>
 
@@ -384,7 +525,7 @@ import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { getGemTagName } from '@/utils/gameData/weapon'
 
-const { weaponTypes, weaponsMap } = useStaticData()
+const { weaponTypes, weaponsMap, essencesMap } = useStaticData()
 const {
   activeProfile,
   treasureMatrix,
@@ -394,6 +535,27 @@ const {
   updateWeaponPriority,
 } = useProfiles()
 const { selectedRarities } = useRarityFilters()
+
+// --- 属性选项列表 ---
+const allAttributeStats = computed(() =>
+  Array.from(essencesMap.value.values())
+    .filter((e) => e.type === 'ATTRIBUTE')
+    .map((e) => e.id),
+)
+const allSecondaryStats = computed(() =>
+  Array.from(essencesMap.value.values())
+    .filter((e) => e.type === 'SECONDARY')
+    .map((e) => e.id),
+)
+const allSkillStats = computed(() =>
+  Array.from(essencesMap.value.values())
+    .filter((e) => e.type === 'SKILL')
+    .map((e) => e.id),
+)
+
+// --- 等级选项 ---
+const affixLevelItems = [1, 2, 3, 4, 5, 6]
+const skillLevelItems = [1, 2, 3]
 
 // 武器详情弹窗
 const detailDialog = ref(false)
@@ -519,6 +681,46 @@ onUnmounted(() => {
 /** 自定义宝藏基质属性配置列表 */
 const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null; no_prompt_switch?: boolean }>>([])
 
+// --- 详情弹窗编辑状态 ---
+
+/** 新建模式标识 */
+const isNewCustom = computed(() => detailWeaponId.value === '__new_custom__')
+
+/** 自定义基质编辑中的属性 */
+const customEditAttribute = ref<string | null>(null)
+const customEditSecondary = ref<string | null>(null)
+const customEditSkill = ref<string | null>(null)
+
+/** 等级编辑状态 */
+const detailAffix1 = ref(1)
+const detailAffix2 = ref(1)
+const detailAffix3 = ref(1)
+
+/** 优先级编辑状态 */
+const detailPriority = ref(6)
+
+/** 新建模式下的拥有状态（用户手动切换） */
+const detailOwnedOverride = ref(false)
+
+/** 当前弹窗中的条目是否已拥有 */
+const isDetailOwned = computed(() => {
+  const weaponId = detailWeaponId.value
+  if (!weaponId) return false
+  if (weaponId === '__new_custom__') return detailOwnedOverride.value
+  return isWeaponOwned(weaponId)
+})
+
+/** 切换当前弹窗条目的拥有状态 */
+async function toggleDetailOwnership() {
+  const weaponId = detailWeaponId.value
+  if (!weaponId) return
+  if (weaponId === '__new_custom__') {
+    detailOwnedOverride.value = !detailOwnedOverride.value
+  } else {
+    await toggleWeaponOwnership(weaponId)
+  }
+}
+
 // --- 自定义基质与内置武器重合检测 ---
 
 interface OverlapItem {
@@ -573,13 +775,50 @@ const deleteCustomName = ref('')
 // @blur 保存跳过本次写入，避免与删除流程交错写后端。
 const pendingCustomDelete = ref(false)
 
-// 弹窗打开时，如果是自定义条目，加载其名称
+// 弹窗打开时，加载编辑状态
 watch([detailDialog, detailWeaponId], () => {
   // 弹窗关闭时复位删除标记，避免 mousedown 后放弃点击导致标记卡住
-  if (!detailDialog.value) pendingCustomDelete.value = false
-  if (detailDialog.value && isCustomEntry(detailWeaponId.value)) {
-    const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
-    customEntryName.value = customStats.value[index]?.name || ''
+  if (!detailDialog.value) {
+    pendingCustomDelete.value = false
+    return
+  }
+
+  if (detailDialog.value) {
+    const weaponId = detailWeaponId.value
+
+    if (weaponId === '__new_custom__') {
+      // 新建模式：重置所有字段
+      customEntryName.value = ''
+      customEditAttribute.value = null
+      customEditSecondary.value = null
+      customEditSkill.value = null
+      detailAffix1.value = 1
+      detailAffix2.value = 1
+      detailAffix3.value = 1
+      detailPriority.value = 6
+      detailOwnedOverride.value = false
+    } else if (isCustomEntry(weaponId)) {
+      // 编辑自定义条目
+      const index = Number.parseInt(weaponId!.replace('custom_stat_', ''), 10)
+      const stat = customStats.value[index]
+      customEntryName.value = stat?.name || ''
+      customEditAttribute.value = stat?.attribute ?? null
+      customEditSecondary.value = stat?.secondary ?? null
+      customEditSkill.value = stat?.skill ?? null
+      // 从 profile 中读取等级
+      const entry = matrixEntryByWeaponId.value.get(weaponId!)
+      detailAffix1.value = entry?.affix1_level ?? 1
+      detailAffix2.value = entry?.affix2_level ?? 1
+      detailAffix3.value = entry?.affix3_level ?? 1
+      detailPriority.value = getWeaponPriority(weaponId!)
+    } else {
+      // 非自定义条目：从 profile 中读取等级
+      const entry = matrixEntryByWeaponId.value.get(weaponId!)
+      detailAffix1.value = entry?.affix1_level ?? 1
+      detailAffix2.value = entry?.affix2_level ?? 1
+      detailAffix3.value = entry?.affix3_level ?? 1
+      detailPriority.value = getWeaponPriority(weaponId!)
+    }
   }
 })
 
@@ -588,23 +827,97 @@ watch(deleteCustomConfirm, (open) => {
   if (!open) pendingCustomDelete.value = false
 })
 
-/** 保存自定义条目名称到配置和 profile */
-async function saveCustomEntryName() {
-  // 正在发起删除时跳过保存，规避 @blur 与删除点击的竞态
-  if (pendingCustomDelete.value) return
-  if (!isCustomEntry(detailWeaponId.value)) return
-  const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
-  if (customStats.value[index]) {
-    customStats.value[index].name = customEntryName.value
+/** 打开新建自定义基质弹窗 */
+function showNewCustomDialog() {
+  detailWeaponId.value = '__new_custom__'
+  detailDialog.value = true
+}
+
+/** 保存自定义基质（新建或编辑） */
+async function saveCustomEntry() {
+  const weaponId = detailWeaponId.value
+  if (!weaponId) return
+
+  if (weaponId === '__new_custom__') {
+    // 新建模式：先写入 config
+    customStats.value.push({
+      name: customEntryName.value || `自定义基质 ${customStats.value.length + 1}`,
+      attribute: customEditAttribute.value,
+      secondary: customEditSecondary.value,
+      skill: customEditSkill.value,
+    })
     await postCustomStatsUpdate()
-    // 同步更新 profile 中的 weapon_name
-    const entry = matrixEntryByWeaponId.value.get(detailWeaponId.value!)
+
+    // 只有标记为"已拥有"时才写入 profile
+    if (isDetailOwned.value) {
+      const newIndex = customStats.value.length - 1
+      const syntheticId = `custom_stat_${newIndex}`
+      await addTreasureMatrixEntry({
+        weapon_id: syntheticId,
+        weapon_name: customEntryName.value || `自定义基质 ${newIndex + 1}`,
+        affix1_level: detailAffix1.value,
+        affix2_level: detailAffix2.value,
+        affix3_level: detailAffix3.value,
+        priority: detailPriority.value,
+        include_in_calculation: true,
+      })
+    }
+  } else if (isCustomEntry(weaponId)) {
+    // 编辑模式：更新 config 和 profile
+    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+    if (customStats.value[index]) {
+      customStats.value[index].name = customEntryName.value
+      customStats.value[index].attribute = customEditAttribute.value
+      customStats.value[index].secondary = customEditSecondary.value
+      customStats.value[index].skill = customEditSkill.value
+      await postCustomStatsUpdate()
+    }
+
+    // 更新 profile 中的等级和优先级
+    const entry = matrixEntryByWeaponId.value.get(weaponId)
     if (entry) {
       entry.weapon_name = customEntryName.value
+      entry.affix1_level = detailAffix1.value
+      entry.affix2_level = detailAffix2.value
+      entry.affix3_level = detailAffix3.value
+      entry.priority = detailPriority.value
       await updateTreasureMatrix([...treasureMatrix.value])
+      await updateWeaponPriority(weaponId, detailPriority.value)
     }
   }
+
+  detailDialog.value = false
+  await fetchCustomStats()
 }
+
+/** 非自定义基质：从基质配置中移除 */
+async function removeNonCustomEntry(weaponId: string) {
+  await removeTreasureMatrixEntry(weaponId)
+  detailDialog.value = false
+}
+
+/** 非自定义基质：等级/优先级变化时自动保存（防抖） */
+let detailSaveTimer: ReturnType<typeof setTimeout> | null = null
+watch([detailAffix1, detailAffix2, detailAffix3, detailPriority], async () => {
+  const weaponId = detailWeaponId.value
+  // 仅对已存在的非自定义条目自动保存
+  if (!weaponId || weaponId === '__new_custom__' || isCustomEntry(weaponId)) return
+  if (!isWeaponOwned(weaponId)) return
+
+  if (detailSaveTimer) clearTimeout(detailSaveTimer)
+  detailSaveTimer = setTimeout(async () => {
+    const entry = matrixEntryByWeaponId.value.get(weaponId)
+    if (entry) {
+      entry.affix1_level = detailAffix1.value
+      entry.affix2_level = detailAffix2.value
+      entry.affix3_level = detailAffix3.value
+      entry.priority = detailPriority.value
+      await updateTreasureMatrix([...treasureMatrix.value])
+      await updateWeaponPriority(weaponId, detailPriority.value)
+    }
+    detailSaveTimer = null
+  }, 400)
+})
 
 /** 打开删除自定义基质的二次确认弹窗 */
 function promptDeleteCustomEntry() {
@@ -996,17 +1309,6 @@ function getEffectivePriorityForSwap(weaponId: string, entry?: TreasureMatrixEnt
 }
 
 /**
- * 设置武器优先级
- */
-async function setWeaponPriority(weaponId: string, priority: number) {
-  const entry = matrixEntryByWeaponId.value.get(weaponId)
-  if (entry) {
-    entry.priority = priority
-  }
-  await updateWeaponPriority(weaponId, priority)
-}
-
-/**
  * 交换两把武器的基质数据
  */
 async function swapMatrix(weaponAId: string, weaponBId: string) {
@@ -1134,6 +1436,116 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   gap: 0.5rem;
 }
 
+.weapon-add-button {
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  border: 2px dashed rgba(var(--v-theme-on-surface), 0.25);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s;
+
+  &:hover {
+    border-color: rgba(var(--v-theme-primary), 0.6);
+    background: rgba(var(--v-theme-primary), 0.05);
+  }
+}
+
+// --- 详情弹窗等级编辑样式 ---
+.detail-level-section {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.detail-attr-control {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--v-border-color), 0.12);
+  border-radius: 12px;
+  transition: background 0.18s;
+
+  &:hover {
+    background: rgba(var(--v-theme-on-surface), 0.03);
+  }
+}
+
+.detail-attr-label {
+  color: rgba(var(--v-theme-on-surface), 0.52);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.detail-attr-pips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+}
+
+.detail-pip {
+  width: 10px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(var(--v-theme-on-surface), 0.12);
+  cursor: pointer;
+  transition: background 0.18s, box-shadow 0.18s, transform 0.18s;
+
+  &:hover {
+    transform: translateY(-1px) scaleY(1.08);
+  }
+}
+
+.detail-attr-control--primary .detail-pip.active {
+  background: rgb(var(--v-theme-primary));
+  box-shadow: 0 2px 7px rgba(var(--v-theme-primary), 0.32);
+}
+
+.detail-attr-control--teal .detail-pip.active {
+  background: #48a9a6;
+  box-shadow: 0 2px 7px rgba(72, 169, 166, 0.34);
+}
+
+.detail-attr-control--indigo .detail-pip.active {
+  background: #5c6bc0;
+  box-shadow: 0 2px 7px rgba(92, 107, 192, 0.34);
+}
+
+.detail-pip.detail-pip--max.active {
+  animation: detailPipPulse 2.2s ease-in-out infinite;
+}
+
+.detail-attr-value {
+  color: rgba(var(--v-theme-on-surface), 0.68);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.detail-attr-value--full {
+  color: rgb(var(--v-theme-primary));
+}
+
+@keyframes detailPipPulse {
+  0%, 100% {
+    transform: scaleY(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scaleY(1.08);
+    filter: brightness(1.18);
+  }
+}
+
 .weapon-overview-item {
   width: 3.5rem;
   height: 3.5rem;
@@ -1154,6 +1566,7 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
     opacity 0.15s,
     filter 0.15s;
   border-radius: 6px;
+  overflow: hidden;
 
   // 未拥有：灰色滤镜必须作用于上级容器，标记作为兄弟节点避免被叠加影响
   &.weapon-not-owned {
@@ -1170,6 +1583,40 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   &.weapon-maxed {
     animation: rainbow-glow 3s linear infinite;
   }
+}
+
+// 未拥有斜向胶带遮罩（弹窗内等级区域）
+.detail-level-wrapper {
+  position: relative;
+}
+
+.not-owned-tape-detail {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 110%;
+  height: 24px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 193, 7, 0.95) 0%,
+    rgba(255, 193, 7, 0.88) 40%,
+    rgba(255, 193, 7, 0.80) 100%
+  );
+  transform: translate(-50%, -50%) rotate(-8deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.not-owned-tape-detail-text {
+  color: rgba(0, 0, 0, 0.8);
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  white-space: nowrap;
 }
 
 .weapon-icon-detail {
