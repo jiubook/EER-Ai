@@ -96,15 +96,30 @@
             >
               GitHub 提 Issue
             </v-btn>
-            <v-btn
-              href="https://qm.qq.com/cgi-bin/qm/qr?k=-GykJWhnZEN5F2aZ1nrVd3xs9RGkMBI2"
-              prepend-icon="mdi-qqchat"
-              rel="noopener noreferrer"
-              target="_blank"
-              variant="tonal"
-            >
-              基质小助手反馈交流③群：1042417974
-            </v-btn>
+            <v-menu content-class="qq-group-menu-content">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  append-icon="mdi-dots-vertical"
+                  prepend-icon="mdi-qqchat"
+                  style="background-color: rgb(24, 166, 189); color: rgb(255, 255, 255);"
+                >
+                  反馈交流群
+                </v-btn>
+              </template>
+              <v-list density="compact">
+                <v-list-item
+                  v-for="(group, index) in qqGroups"
+                  :key="index"
+                  :href="group.link"
+                  prepend-icon="mdi-qqchat"
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  <v-list-item-title>{{ group.name }}</v-list-item-title>
+                </v-list-item>
+              </v-list>
+            </v-menu>
           </div>
         </v-card-text>
         <v-divider />
@@ -165,6 +180,12 @@ const clearActiveConfirm = ref(false)
 const resetConfigConfirm = ref(false)
 const showActionMsg = ref(false)
 const actionMsg = ref('')
+
+const qqGroups = [
+  { name: '①群：486622964', link: 'https://qm.qq.com/cgi-bin/qm/qr?k=1xqRp7JwQHwGswa-8_SMFuAsRYYRnF8J' },
+  { name: '②群：1082880855', link: 'https://qm.qq.com/cgi-bin/qm/qr?k=qAmvmHCc3HuESiJhZVe6Ytgj7foOxXx9' },
+  { name: '③群：1042417974', link: 'https://qm.qq.com/cgi-bin/qm/qr?k=-GykJWhnZEN5F2aZ1nrVd3xs9RGkMBI2' },
+]
 
 function notify(message: string) {
   actionMsg.value = message
@@ -239,3 +260,9 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss"></style>
+
+<style lang="scss">
+.qq-group-menu-content .v-list-item__spacer {
+  width: 0 !important;
+}
+</style>
