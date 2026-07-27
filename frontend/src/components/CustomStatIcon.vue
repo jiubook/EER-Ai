@@ -7,6 +7,7 @@
     <img
       alt="基质底板"
       class="essence-bg-img"
+      loading="lazy"
       :src="essenceBgSrc"
     />
     <!-- 技能属性图标（叠加在底板上） -->
@@ -14,6 +15,7 @@
       v-if="skillIconSrc"
       :alt="skillAltText"
       class="skill-icon-img"
+      loading="lazy"
       :src="skillIconSrc"
     />
     <div class="custom-entry-gradient" />

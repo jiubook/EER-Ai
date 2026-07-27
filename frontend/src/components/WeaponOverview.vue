@@ -155,11 +155,12 @@
           </div>
         </template>
 
-        <template v-for="wType in filteredWeaponTypes" :key="wType.id">
+        <template v-for="wType in visibleWeaponTypes" :key="wType.id">
           <div class="d-flex align-center mb-1 mt-3">
             <img
               :alt="wType.name"
               class="group-icon me-2"
+              loading="lazy"
               :src="wType.iconUrl"
             />
             <h4>{{ wType.name }}</h4>
@@ -197,8 +198,8 @@
                           'weapon-matrix-badge--medium': matrixBadgeDisplayMode === 'medium',
                         }"
                       >
-                        <img alt="基质底板" class="weapon-matrix-badge-bg" :src="essenceBgSrc" />
-                        <img v-if="getWeaponSkillIcon(weaponId)" alt="技能" class="weapon-matrix-badge-skill" :src="getWeaponSkillIcon(weaponId)!" />
+                        <img alt="基质底板" class="weapon-matrix-badge-bg" loading="lazy" :src="essenceBgSrc" />
+                        <img v-if="getWeaponSkillIcon(weaponId)" alt="技能" class="weapon-matrix-badge-skill" loading="lazy" :src="getWeaponSkillIcon(weaponId)!" />
                       </div>
 
                       <!-- 满级的彩虹边框 -->
@@ -1211,6 +1212,7 @@ async function confirmOverlapActions() {
 onMounted(async () => {
   await fetchCustomStats()
   checkCustomOverlap()
+  startBatchRender()
 })
 
 const matrixEntryByWeaponId = computed(
@@ -1247,6 +1249,51 @@ const filteredWeaponTypes = computed(() => {
     }))
     .filter((wType) => wType.weaponIds.length > 0)
 })
+
+// --- 分批渲染：展开面板时逐步渲染武器类型，避免瞬间加载大量图标 ---
+
+const renderedTypeCount = ref(0)
+const batchRendering = ref(false)
+
+/** 实际用于模板渲染的武器类型列表（分批渲染期间只渲染前 N 个） */
+const visibleWeaponTypes = computed(() => {
+  if (!batchRendering.value) return filteredWeaponTypes.value
+  return filteredWeaponTypes.value.slice(0, renderedTypeCount.value)
+})
+
+/** 开始分批渲染：第 1 个类型立即渲染，后续类型等动画结束后每 80ms 追加 1 个 */
+function startBatchRender() {
+  const total = filteredWeaponTypes.value.length
+  if (total === 0) return
+
+  // 第 1 个武器类型立即渲染（让用户马上看到内容）
+  renderedTypeCount.value = 1
+  batchRendering.value = true
+
+  if (total <= 1) {
+    batchRendering.value = false
+    return
+  }
+
+  // 等展开动画完成（Vuetify expansion-panel 动画约 250-300ms）后再开始后续批次
+  const delayTimer = setTimeout(() => {
+    const intervalId = setInterval(() => {
+      renderedTypeCount.value++
+      if (renderedTypeCount.value >= total) {
+        batchRendering.value = false
+        clearInterval(intervalId)
+      }
+    }, 80)
+
+    onUnmounted(() => {
+      clearInterval(intervalId)
+    })
+  }, 300)
+
+  onUnmounted(() => {
+    clearTimeout(delayTimer)
+  })
+}
 
 function isWeaponOwned(weaponId: string): boolean {
   return ownedWeaponIds.value.has(weaponId)
