@@ -64,17 +64,26 @@
         </v-chip-group>
       </div>
 
-      <!-- 自定义基质重合检测按钮 -->
-      <v-btn
-        class="mb-4"
-        color="warning"
-        prepend-icon="mdi-swap-horizontal"
-        size="small"
-        variant="tonal"
-        @click="checkCustomOverlap"
-      >
-        检查自定义基质重合
-      </v-btn>
+      <!-- 自定义基质重合检测按钮 + 可切换提示模式 -->
+      <div class="d-flex align-center ga-2 mb-4">
+        <v-btn
+          color="warning"
+          prepend-icon="mdi-swap-horizontal"
+          size="small"
+          variant="tonal"
+          @click="checkCustomOverlap"
+        >
+          检查自定义基质重合
+        </v-btn>
+        <v-btn
+          :prepend-icon="switchModeIcons[switchDisplayMode]"
+          size="small"
+          variant="tonal"
+          @click="toggleSwitchDisplayMode"
+        >
+          {{ switchModeLabels[switchDisplayMode] }}
+        </v-btn>
+      </div>
 
       <!-- 武器总览容器（包含连线层） -->
       <div ref="containerRef" class="weapon-overview-container">
@@ -172,6 +181,12 @@
                     >
                       <item-icon :item-id="weaponId" show-item-name />
 
+                      <!-- 左上角：缩小版圆形基质图标（底板+技能属性叠加） -->
+                      <div class="weapon-matrix-badge">
+                        <img alt="基质底板" class="weapon-matrix-badge-bg" :src="essenceBgSrc" />
+                        <img v-if="getWeaponSkillIcon(weaponId)" alt="技能" class="weapon-matrix-badge-skill" :src="getWeaponSkillIcon(weaponId)!" />
+                      </div>
+
                       <!-- 满级的彩虹边框 -->
                       <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
                     </div>
@@ -180,9 +195,9 @@
                 <span>{{ getWeaponStatsText(weaponId) }}</span>
               </v-tooltip>
 
-              <!-- 可切换标记放在灰色滤镜容器外，避免被 opacity/filter 叠加 -->
+              <!-- 可切换标记：根据模式显示标签/圆点/关闭 -->
               <v-chip
-                v-if="isSwitchable(weaponId) && !isWeaponMaxed(weaponId)"
+                v-if="switchDisplayMode === 'chip' && isSwitchable(weaponId) && !isWeaponMaxed(weaponId)"
                 class="switchable-badge"
                 color="warning"
                 size="x-small"
@@ -190,6 +205,10 @@
               >
                 可切换
               </v-chip>
+              <div
+                v-else-if="switchDisplayMode === 'dot' && isSwitchable(weaponId) && !isWeaponMaxed(weaponId)"
+                class="switch-dot"
+              />
             </div>
           </div>
         </template>
@@ -532,12 +551,54 @@ const {
   addTreasureMatrixEntry,
   removeTreasureMatrixEntry,
   updateTreasureMatrix,
+  updateSwitchDisplayMode,
   updateWeaponPriority,
 } = useProfiles()
 const { selectedRarities } = useRarityFilters()
 
+// 可切换提示显示模式：'chip'=大号提示(默认), 'dot'=小橙点, 'off'=关闭
+type SwitchDisplayMode = 'chip' | 'dot' | 'off'
+const switchDisplayMode = ref<SwitchDisplayMode>((activeProfile.value.switch_display_mode ?? 'chip') as SwitchDisplayMode)
+const switchModeLabels: Record<SwitchDisplayMode, string> = {
+  chip: '切换提示：标签',
+  dot: '切换提示：圆点',
+  off: '切换提示：关闭',
+}
+const switchModeIcons: Record<SwitchDisplayMode, string> = {
+  chip: 'mdi-tag-outline',
+  dot: 'mdi-circle-small',
+  off: 'mdi-eye-off-outline',
+}
+function toggleSwitchDisplayMode() {
+  const next: SwitchDisplayMode = switchDisplayMode.value === 'chip' ? 'dot' : switchDisplayMode.value === 'dot' ? 'off' : 'chip'
+  switchDisplayMode.value = next
+  updateSwitchDisplayMode(next)
+}
+
+// 切换账号时同步显示模式
+watch(() => activeProfile.value.switch_display_mode, (mode) => {
+  if (mode && mode !== switchDisplayMode.value) {
+    switchDisplayMode.value = mode
+  }
+})
+
 // 底板图片路径
 const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
+
+// --- 武器卡片辅助函数 ---
+
+/** 获取武器的技能属性图标 URL */
+function getWeaponSkillIcon(weaponId: string): string | null {
+  if (isCustomEntry(weaponId)) {
+    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+    const stat = customStats.value[index]
+    if (!stat?.skill) return null
+    return matrixIcons.value.skills[stat.skill] || null
+  }
+  const weapon = weaponsMap.value.get(weaponId)
+  if (!weapon?.skillStatId) return null
+  return matrixIcons.value.skills[weapon.skillStatId] || null
+}
 
 // --- 属性选项列表 ---
 const allAttributeStats = computed(() =>
@@ -1596,6 +1657,51 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   }
 }
 
+// 左上角缩小版圆形基质图标（底板+技能叠加）
+.weapon-matrix-badge {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  overflow: hidden;
+  z-index: 5;
+  pointer-events: none;
+  border: 1.5px solid rgba(255, 255, 255, 0);
+}
+
+.weapon-matrix-badge-bg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+.weapon-matrix-badge-skill {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+  transform: translate(5%, -5%);
+}
+
+// 可切换小橙点（通知 badge 样式）
+.switch-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ff7100;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow: 0 0 4px rgba(255, 113, 0, 0.6);
+}
+
 // 未拥有斜向胶带遮罩（弹窗内等级区域）
 .detail-level-wrapper {
   position: relative;
@@ -1712,6 +1818,7 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   height: 14px !important;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
 }
+
 
 @keyframes switch-target-breathe {
   0%,

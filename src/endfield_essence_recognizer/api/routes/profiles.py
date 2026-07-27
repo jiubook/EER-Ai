@@ -341,6 +341,33 @@ async def update_weapon_overview_filters(
     return manager.update_weapon_overview_filters(request.filters)
 
 
+VALID_SWITCH_MODES = {"chip", "dot", "off"}
+
+
+class UpdateSwitchDisplayModeRequest(BaseModel):
+    """更新"可切换"提示显示模式的请求体。"""
+
+    mode: str
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        if value not in VALID_SWITCH_MODES:
+            raise ValueError(
+                f"未知显示模式: {value}，可选: {sorted(VALID_SWITCH_MODES)}"
+            )
+        return value
+
+
+@router.post("/switch_display_mode")
+async def update_switch_display_mode(
+    request: UpdateSwitchDisplayModeRequest,
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> ProfileData:
+    """更新当前激活账号的"可切换"提示显示模式。"""
+    return manager.update_switch_display_mode(request.mode)
+
+
 class UpdateWeaponPriorityRequest(BaseModel):
     """更新单把武器优先级的请求体。"""
 

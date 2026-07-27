@@ -63,6 +63,9 @@ class ProfileData(BaseModel):
     weapon_priorities: dict[str, int] = Field(default_factory=dict)
     """武器优先级配置，允许未拥有宝藏基质的武器也设置优先级。"""
 
+    switch_display_mode: str = "chip"
+    """武器总览"可切换"提示的显示模式：'chip'=标签, 'dot'=小圆点, 'off'=关闭。"""
+
 
 class ProfileCollection(BaseModel):
     """所有账号的集合。"""

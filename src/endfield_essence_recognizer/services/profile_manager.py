@@ -492,6 +492,22 @@ class ProfileManager:
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
 
+    def update_switch_display_mode(self, mode: str) -> ProfileData:
+        """更新激活账号的"可切换"提示显示模式。
+
+        Args:
+            mode: 显示模式，'chip' | 'dot' | 'off'。
+
+        Returns:
+            更新后的 ProfileData。
+        """
+        with self._lock:
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
+            profile.switch_display_mode = mode
+            self._commit_collection_unlocked(collection)
+            return profile.model_copy(deep=True)
+
     def update_weapon_priority(self, weapon_id: str, priority: int) -> ProfileData:
         """更新单个武器优先级，未拥有宝藏基质的武器也会保存。
 
