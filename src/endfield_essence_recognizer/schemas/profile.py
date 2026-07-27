@@ -66,6 +66,9 @@ class ProfileData(BaseModel):
     switch_display_mode: str = "chip"
     """武器总览"可切换"提示的显示模式：'chip'=标签, 'dot'=小圆点, 'off'=关闭。"""
 
+    matrix_badge_display_mode: str = "small"
+    """武器总览基质图标显示模式：'small'=小号(默认), 'medium'=中号(2倍), 'off'=关闭。"""
+
 
 class ProfileCollection(BaseModel):
     """所有账号的集合。"""

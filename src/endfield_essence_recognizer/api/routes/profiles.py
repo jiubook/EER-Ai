@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
@@ -366,6 +366,33 @@ async def update_switch_display_mode(
 ) -> ProfileData:
     """更新当前激活账号的"可切换"提示显示模式。"""
     return manager.update_switch_display_mode(request.mode)
+
+
+VALID_MATRIX_BADGE_MODES: Final = {"small", "medium", "off"}
+
+
+class UpdateMatrixBadgeDisplayModeRequest(BaseModel):
+    """更新基质图标显示模式的请求体。"""
+
+    mode: str
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        if value not in VALID_MATRIX_BADGE_MODES:
+            raise ValueError(
+                f"未知显示模式: {value}，可选: {sorted(VALID_MATRIX_BADGE_MODES)}"
+            )
+        return value
+
+
+@router.post("/matrix_badge_display_mode")
+async def update_matrix_badge_display_mode(
+    request: UpdateMatrixBadgeDisplayModeRequest,
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> ProfileData:
+    """更新当前激活账号的基质图标显示模式。"""
+    return manager.update_matrix_badge_display_mode(request.mode)
 
 
 class UpdateWeaponPriorityRequest(BaseModel):

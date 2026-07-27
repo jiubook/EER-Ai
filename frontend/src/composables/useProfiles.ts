@@ -29,6 +29,7 @@ export interface ProfileData {
   }
   weapon_priorities?: Record<string, number>
   switch_display_mode?: 'chip' | 'dot' | 'off'
+  matrix_badge_display_mode?: 'small' | 'medium' | 'off'
 }
 
 export interface ProfileCollection {
@@ -325,6 +326,19 @@ export function useProfiles() {
     }
   }
 
+  async function updateMatrixBadgeDisplayMode(mode: 'small' | 'medium' | 'off') {
+    try {
+      const res = await fetch('/api/profiles/matrix_badge_display_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to update matrix badge display mode'))
+    } catch (error) {
+      _handleError('更新基质图标显示模式失败', error)
+    }
+  }
+
   async function updateWeaponPriority(weaponId: string, priority: number) {
     try {
       const res = await fetch('/api/profiles/weapon_priority', {
@@ -357,6 +371,7 @@ export function useProfiles() {
     getBatchFarmingRecommendations,
     updateWeaponOverviewFilters,
     updateSwitchDisplayMode,
+    updateMatrixBadgeDisplayMode,
     updateWeaponPriority,
   }
 }

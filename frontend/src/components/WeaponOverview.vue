@@ -64,7 +64,7 @@
         </v-chip-group>
       </div>
 
-      <!-- 自定义基质重合检测按钮 + 可切换提示模式 -->
+      <!-- 自定义基质重合检测按钮 + 可切换提示模式 + 基质图标显示模式 -->
       <div class="d-flex align-center ga-2 mb-4">
         <v-btn
           color="warning"
@@ -74,6 +74,14 @@
           @click="checkCustomOverlap"
         >
           检查自定义基质重合
+        </v-btn>
+        <v-btn
+          :prepend-icon="matrixBadgeModeIcons[matrixBadgeDisplayMode]"
+          size="small"
+          variant="tonal"
+          @click="toggleMatrixBadgeDisplayMode"
+        >
+          {{ matrixBadgeModeLabels[matrixBadgeDisplayMode] }}
         </v-btn>
         <v-btn
           :prepend-icon="switchModeIcons[switchDisplayMode]"
@@ -182,7 +190,13 @@
                       <item-icon :item-id="weaponId" show-item-name />
 
                       <!-- 左上角：缩小版圆形基质图标（底板+技能属性叠加） -->
-                      <div class="weapon-matrix-badge">
+                      <div
+                        v-if="matrixBadgeDisplayMode !== 'off'"
+                        class="weapon-matrix-badge"
+                        :class="{
+                          'weapon-matrix-badge--medium': matrixBadgeDisplayMode === 'medium',
+                        }"
+                      >
                         <img alt="基质底板" class="weapon-matrix-badge-bg" :src="essenceBgSrc" />
                         <img v-if="getWeaponSkillIcon(weaponId)" alt="技能" class="weapon-matrix-badge-skill" :src="getWeaponSkillIcon(weaponId)!" />
                       </div>
@@ -552,6 +566,7 @@ const {
   removeTreasureMatrixEntry,
   updateTreasureMatrix,
   updateSwitchDisplayMode,
+  updateMatrixBadgeDisplayMode,
   updateWeaponPriority,
 } = useProfiles()
 const { selectedRarities } = useRarityFilters()
@@ -579,6 +594,32 @@ function toggleSwitchDisplayMode() {
 watch(() => activeProfile.value.switch_display_mode, (mode) => {
   if (mode && mode !== switchDisplayMode.value) {
     switchDisplayMode.value = mode
+  }
+})
+
+// 基质图标显示模式：'small'=小号(默认), 'medium'=中号(2倍), 'off'=关闭
+type MatrixBadgeDisplayMode = 'small' | 'medium' | 'off'
+const matrixBadgeDisplayMode = ref<MatrixBadgeDisplayMode>((activeProfile.value.matrix_badge_display_mode ?? 'small') as MatrixBadgeDisplayMode)
+const matrixBadgeModeLabels: Record<MatrixBadgeDisplayMode, string> = {
+  small: '基质图标：小号',
+  medium: '基质图标：中号',
+  off: '基质图标：关闭',
+}
+const matrixBadgeModeIcons: Record<MatrixBadgeDisplayMode, string> = {
+  small: 'mdi-circle-outline',
+  medium: 'mdi-circle-double',
+  off: 'mdi-eye-off-outline',
+}
+function toggleMatrixBadgeDisplayMode() {
+  const next: MatrixBadgeDisplayMode = matrixBadgeDisplayMode.value === 'small' ? 'medium' : matrixBadgeDisplayMode.value === 'medium' ? 'off' : 'small'
+  matrixBadgeDisplayMode.value = next
+  updateMatrixBadgeDisplayMode(next)
+}
+
+// 切换账号时同步基质图标显示模式
+watch(() => activeProfile.value.matrix_badge_display_mode, (mode) => {
+  if (mode && mode !== matrixBadgeDisplayMode.value) {
+    matrixBadgeDisplayMode.value = mode
   }
 })
 
@@ -1669,6 +1710,16 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   z-index: 5;
   pointer-events: none;
   border: 1.5px solid rgba(255, 255, 255, 0);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  // 中号模式：2倍大小
+  &--medium {
+    width: 2.4rem;
+    height: 2.4rem;
+    top: -5.3px;
+    left: -5.3px;
+    z-index: 5;
+  }
 }
 
 .weapon-matrix-badge-bg {
@@ -1812,7 +1863,7 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   top: -6px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 3;
+  z-index: 6;
   pointer-events: none;
   font-size: 0.55rem !important;
   height: 14px !important;
