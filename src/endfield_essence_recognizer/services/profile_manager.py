@@ -549,3 +549,41 @@ class ProfileManager:
 
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
+
+    def update_matrix_view_config(self, config_updates: dict) -> ProfileData:
+        """更新激活账号的矩阵视图配置。
+
+        Args:
+            config_updates: 配置更新字典，只包含需要更新的字段。
+
+        Returns:
+            更新后的 ProfileData。
+        """
+        with self._lock:
+            collection = self._collection.model_copy(deep=True)
+            profile = collection.get_active()
+
+            # 更新配置
+            for key, value in config_updates.items():
+                if hasattr(profile.matrix_view_config, key):
+                    setattr(profile.matrix_view_config, key, value)
+
+            self._commit_collection_unlocked(collection)
+            return profile.model_copy(deep=True)
+
+    def get_profile(self, name: str) -> ProfileData:
+        """获取指定账号的数据。
+
+        Args:
+            name: 账号名称。
+
+        Returns:
+            账号的 ProfileData。
+
+        Raises:
+            ValueError: 如果账号不存在。
+        """
+        with self._lock:
+            if name not in self._collection.profiles:
+                raise ValueError(f"账号 '{name}' 不存在")
+            return self._collection.profiles[name].model_copy(deep=True)

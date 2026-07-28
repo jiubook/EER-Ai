@@ -1,11 +1,27 @@
 <template>
   <v-container class="treasure-matrix-page">
-    <v-expansion-panels v-model="openedPanels" multiple>
-      <!-- 武器总览 -->
-      <weapon-overview />
+    <!-- 视图切换标签页 -->
+    <v-tabs v-model="activeTab" class="mb-4" density="compact">
+      <v-tab value="list">
+        <v-icon class="mr-2">mdi-view-list</v-icon>
+        列表视图
+      </v-tab>
+      <v-tab value="matrix">
+        <v-icon class="mr-2">mdi-grid</v-icon>
+        矩阵视图
+      </v-tab>
+    </v-tabs>
 
-      <!-- Treasure Matrix Config -->
-      <v-expansion-panel :value="1">
+    <!-- 矩阵视图内容 -->
+    <v-window v-model="activeTab">
+      <!-- 列表视图 -->
+      <v-window-item value="list">
+        <v-expansion-panels v-model="openedPanels" multiple>
+          <!-- 武器总览 -->
+          <weapon-overview />
+
+          <!-- Treasure Matrix Config -->
+          <v-expansion-panel :value="1">
         <v-expansion-panel-title>
           <v-icon class="mr-2">mdi-diamond-stone</v-icon>
           宝藏基质配置
@@ -621,6 +637,53 @@
 
     <!-- 回到顶部按钮 -->
     <back-to-top />
+      </v-window-item>
+
+      <!-- 矩阵视图 -->
+      <v-window-item value="matrix">
+        <v-card variant="outlined">
+          <v-card-title class="d-flex align-center">
+            <v-icon class="mr-2">mdi-grid</v-icon>
+            宝藏基质矩阵视图
+            <v-spacer />
+            <v-chip color="info" size="small" variant="tonal">
+              90720 种组合
+            </v-chip>
+          </v-card-title>
+          <v-card-text>
+            <v-alert border="start" class="mb-4" type="info" variant="tonal">
+              可视化所有 90720 种基质组合（5种基础属性 × 12种附加属性 × 14种技能属性 × 6×6×3等级）。
+              横轴为基础属性，纵轴为附加属性×技能属性。
+              每个单元格显示对应的编码和等级，颜色深浅表示等级高低。
+            </v-alert>
+
+            <!-- 矩阵图例、统计和导出 -->
+            <v-row class="mb-4">
+              <v-col cols="12" md="3">
+                <MatrixLegend :stats="matrixStats" />
+              </v-col>
+              <v-col cols="12" md="6">
+                <MatrixStats
+                  :attribute-names="matrixAttributeNames"
+                  :secondary-names="matrixSecondaryNames"
+                  :skill-names="matrixSkillNames"
+                  @update:stats="matrixStats = $event"
+                />
+              </v-col>
+              <v-col cols="12" md="3">
+                <MatrixExport :target-element="matrixViewRef?.$el" />
+              </v-col>
+            </v-row>
+
+            <!-- 矩阵视图组件 -->
+            <MatrixView
+              ref="matrixViewRef"
+              style="height: 600px;"
+            />
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+    </v-window>
   </v-container>
 </template>
 
@@ -630,6 +693,7 @@ import { useRouter } from 'vue-router'
 import BackToTop from '@/components/BackToTop.vue'
 import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
+import { MatrixExport, MatrixLegend, MatrixStats, MatrixView } from '@/components/matrix'
 import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
@@ -638,6 +702,45 @@ import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
 import { safeLoadJson, safeRemoveJson, safeSetJson } from '@/utils/safeStorage'
 
 const router = useRouter()
+
+// ============================================================================
+// 矩阵视图相关状态
+// ============================================================================
+
+const activeTab = ref<'list' | 'matrix'>('list')
+const matrixViewRef = ref<InstanceType<typeof MatrixView>>()
+const matrixStats = ref<{
+  total: number
+  owned: number
+  max_level: number
+  completion_rate: number
+} | null>(null)
+
+// 矩阵视图的属性名称（用于统计组件）
+const matrixAttributeNames = ref<Record<string, string>>({})
+const matrixSecondaryNames = ref<Record<string, string>>({})
+const matrixSkillNames = ref<Record<string, string>>({})
+
+// 矩阵视图的属性ID列表
+const matrixAttributeIds = ref<string[]>([])
+const matrixSecondaryIds = ref<string[]>([])
+const matrixSkillIds = ref<string[]>([])
+
+// 加载矩阵数据
+async function loadMatrixData() {
+  try {
+    const response = await fetch('/api/profiles/matrix_view')
+    const data = await response.json()
+    matrixAttributeNames.value = data.attribute_names
+    matrixSecondaryNames.value = data.secondary_names
+    matrixSkillNames.value = data.skill_names
+    matrixAttributeIds.value = data.attribute_ids
+    matrixSecondaryIds.value = data.secondary_ids
+    matrixSkillIds.value = data.skill_ids
+  } catch (error) {
+    console.error('Failed to load matrix data:', error)
+  }
+}
 
 const {
   activeProfileName,
@@ -842,6 +945,18 @@ onUnmounted(() => {
   if (debounceTimer) {
     clearTimeout(debounceTimer)
     debounceTimer = null
+  }
+})
+
+// 监听标签页切换，当切换到矩阵视图时重新加载数据
+watch(activeTab, (newTab) => {
+  if (newTab === 'matrix') {
+    // 刷新矩阵视图数据
+    if (matrixViewRef.value) {
+      matrixViewRef.value.refreshData()
+    }
+    // 重新加载属性名称数据
+    loadMatrixData()
   }
 })
 
@@ -1216,6 +1331,7 @@ function navigateToPlanner() {
 onMounted(() => {
   fetchProfiles()
   fetchCustomStats()
+  loadMatrixData()
 })
 </script>
 

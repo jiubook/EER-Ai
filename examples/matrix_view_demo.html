@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>宝藏基质矩阵视图示例</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #1976D2;
+            padding-bottom: 10px;
+        }
+
+        .demo-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+
+        .demo-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1976D2;
+            margin-bottom: 10px;
+        }
+
+        .code-block {
+            background: #263238;
+            color: #EEFFFF;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        .comment {
+            color: #546E7A;
+        }
+
+        .keyword {
+            color: #C792EA;
+        }
+
+        .string {
+            color: #C3E88D;
+        }
+
+        .number {
+            color: #F78C6C;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background: #1976D2;
+            color: white;
+        }
+
+        tr:nth-child(even) {
+            background: #f2f2f2;
+        }
+
+        .highlight {
+            background: #FFF3E0;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+
+        .tip {
+            background: #E3F2FD;
+            border-left: 4px solid #1976D2;
+            padding: 10px 15px;
+            margin: 10px 0;
+            border-radius: 0 4px 4px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 宝藏基质矩阵视图功能演示</h1>
+
+        <div class="demo-section">
+            <div class="demo-title">1. 编码系统介绍</div>
+            <p>矩阵视图使用6位混合编码来表示每种基质组合：</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>位置</th>
+                        <th>类型</th>
+                        <th>编码范围</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>第1位</td>
+                        <td>基础属性</td>
+                        <td><code>0-4</code></td>
+                        <td>0=敏捷, 1=主能力, 2=力量, 3=意志, 4=智识</td>
+                    </tr>
+                    <tr>
+                        <td>第2位</td>
+                        <td>附加属性</td>
+                        <td><code>0-B</code></td>
+                        <td>0=攻击, 1=暴击, 2=灼热, ..., B=终结技充能</td>
+                    </tr>
+                    <tr>
+                        <td>第3位</td>
+                        <td>技能属性</td>
+                        <td><code>0-D</code></td>
+                        <td>0=残暴, 1=迸发, 2=追袭, ..., D=夜幕</td>
+                    </tr>
+                    <tr>
+                        <td>第4位</td>
+                        <td>基础等级</td>
+                        <td><code>1-6</code></td>
+                        <td>基础属性等级</td>
+                    </tr>
+                    <tr>
+                        <td>第5位</td>
+                        <td>附加等级</td>
+                        <td><code>1-6</code></td>
+                        <td>附加属性等级</td>
+                    </tr>
+                    <tr>
+                        <td>第6位</td>
+                        <td>技能等级</td>
+                        <td><code>1-3</code></td>
+                        <td>技能属性等级</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="tip">
+                <strong>示例：</strong>编码 <span class="highlight">40D331</span> 表示：
+                基础属性=智识(4), 附加属性=攻击(0), 技能属性=夜幕(D),
+                等级=3-3-1
+            </div>
+        </div>
+
+        <div class="demo-section">
+            <div class="demo-title">2. 编码示例</div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>编码</th>
+                        <th>基础属性</th>
+                        <th>附加属性</th>
+                        <th>技能属性</th>
+                        <th>等级</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>40D331</code></td>
+                        <td>智识提升</td>
+                        <td>攻击提升</td>
+                        <td>夜幕</td>
+                        <td>3-3-1</td>
+                        <td>智识3 + 攻击3 + 夜幕1</td>
+                    </tr>
+                    <tr>
+                        <td><code>113331</code></td>
+                        <td>主能力提升</td>
+                        <td>暴击率提升</td>
+                        <td>切骨</td>
+                        <td>3-3-1</td>
+                        <td>主能力3 + 暴击3 + 切骨1</td>
+                    </tr>
+                    <tr>
+                        <td><code>249562</code></td>
+                        <td>力量提升</td>
+                        <td>生命提升</td>
+                        <td>粉碎</td>
+                        <td>5-6-2</td>
+                        <td>力量5 + 生命6 + 粉碎2</td>
+                    </tr>
+                    <tr>
+                        <td><code>02B123</code></td>
+                        <td>敏捷提升</td>
+                        <td>灼热伤害提升</td>
+                        <td>流转</td>
+                        <td>1-2-3</td>
+                        <td>敏捷1 + 灼热2 + 流转3</td>
+                    </tr>
+                    <tr>
+                        <td><code>35C663</code></td>
+                        <td>意志提升</td>
+                        <td>寒冷伤害提升</td>
+                        <td>压制</td>
+                        <td>6-6-3</td>
+                        <td>满级组合</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="demo-section">
+            <div class="demo-title">3. 统计信息</div>
+
+            <div class="tip">
+                <strong>总组合数：</strong>90,720 种<br>
+                <strong>计算公式：</strong>5(基础) × 12(附加) × 14(技能) × 6(基础等级) × 6(附加等级) × 3(技能等级)
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>分类</th>
+                        <th>数量</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>基础属性</td>
+                        <td>5</td>
+                        <td>敏捷、主能力、力量、意志、智识</td>
+                    </tr>
+                    <tr>
+                        <td>附加属性</td>
+                        <td>12</td>
+                        <td>攻击、暴击、灼热、治疗、生命、寒冷、法术、自然、物理、源石技艺、电磁、终结技充能</td>
+                    </tr>
+                    <tr>
+                        <td>技能属性</td>
+                        <td>14</td>
+                        <td>残暴、迸发、追袭、切骨、强攻、医疗、效益、附术、巧技、粉碎、昂扬、流转、压制、夜幕</td>
+                    </tr>
+                    <tr>
+                        <td>基础等级</td>
+                        <td>6</td>
+                        <td>1-6级</td>
+                    </tr>
+                    <tr>
+                        <td>附加等级</td>
+                        <td>6</td>
+                        <td>1-6级</td>
+                    </tr>
+                    <tr>
+                        <td>技能等级</td>
+                        <td>3</td>
+                        <td>1-3级</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="demo-section">
+            <div class="demo-title">4. 功能特性</div>
+
+            <ul>
+                <li><strong>矩阵可视化：</strong>横轴为基础属性，纵轴为附加属性×技能属性</li>
+                <li><strong>颜色编码：</strong>根据等级或稀有度着色，直观显示收集进度</li>
+                <li><strong>筛选功能：</strong>按属性类型、已拥有状态筛选</li>
+                <li><strong>搜索功能：</strong>按编码快速搜索</li>
+                <li><strong>统计面板：</strong>显示总体统计、按属性统计、按武器类型统计</li>
+                <li><strong>导出功能：</strong>支持导出为CSV、JSON、图片格式</li>
+                <li><strong>悬停提示：</strong>显示完整的基质信息</li>
+                <li><strong>点击详情：</strong>查看武器信息和等级</li>
+            </ul>
+        </div>
+
+        <div class="demo-section">
+            <div class="demo-title">5. 使用示例</div>
+
+            <div class="code-block">
+<span class="comment">// 在 Vue 组件中使用</span>
+<span class="keyword">import</span> { MatrixView, MatrixLegend, MatrixStats } <span class="keyword">from</span> <span class="string">'@/components/matrix'</span>
+
+<span class="comment">// 模板</span>
+&lt;template&gt;
+  &lt;MatrixView
+    ref=<span class="string">"matrixViewRef"</span>
+    style=<span class="string">"height: 600px;"</span>
+  /&gt;
+&lt;/template&gt;
+
+<span class="comment">// 获取矩阵数据</span>
+<span class="keyword">const</span> response = <span class="keyword">await</span> fetch(<span class="string">'/api/profiles/matrix_view'</span>)
+<span class="keyword">const</span> data = <span class="keyword">await</span> response.json()
+
+<span class="comment">// 遍历矩阵</span>
+Object.entries(data.matrix).forEach(([code, cell]) =&gt; {
+  console.log(`${code}: ${cell.attribute_name} ${cell.attribute_level}`)
+})
+            </div>
+        </div>
+
+        <div class="demo-section">
+            <div class="demo-title">6. API 接口</div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>接口</th>
+                        <th>方法</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>/api/profiles/matrix_view</code></td>
+                        <td>GET</td>
+                        <td>获取矩阵视图数据</td>
+                    </tr>
+                    <tr>
+                        <td><code>/api/profiles/matrix_stats</code></td>
+                        <td>GET</td>
+                        <td>获取统计信息</td>
+                    </tr>
+                    <tr>
+                        <td><code>/api/profiles/matrix_view_config</code></td>
+                        <td>POST</td>
+                        <td>更新视图配置</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="demo-section">
+            <div class="demo-title">7. 扩展功能</div>
+
+            <ul>
+                <li><strong>热力图模式：</strong>用颜色深浅表示拥有率</li>
+                <li><strong>推荐系统：</strong>基于现有组合推荐下一步目标</li>
+                <li><strong>社区对比：</strong>匿名统计全服玩家的拥有情况</li>
+                <li><strong>历史追踪：</strong>记录收集进度趋势</li>
+            </ul>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px; color: #666;">
+            <p>宝藏基质矩阵视图 v1.0.0 | 2026-07-28</p>
+        </div>
+    </div>
+</body>
+</html>
