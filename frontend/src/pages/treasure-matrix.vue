@@ -4,6 +4,9 @@
       <!-- 武器总览 -->
       <weapon-overview />
 
+      <!-- 基质总览 -->
+      <matrix-overview />
+
       <!-- Treasure Matrix Config -->
       <v-expansion-panel :value="1">
         <v-expansion-panel-title>
@@ -630,6 +633,7 @@ import { useRouter } from 'vue-router'
 import BackToTop from '@/components/BackToTop.vue'
 import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
+import MatrixOverview from '@/components/MatrixOverview.vue'
 import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
