@@ -677,6 +677,7 @@
                 <v-radio label="解锁且取消弃用" value="unlock_and_undeprecate"></v-radio>
                 <v-radio disabled label="如果没有上锁，则弃用" value="deprecate_if_not_locked" />
                 <v-radio label="如果没有弃用，则上锁" value="lock_if_not_deprecated" />
+                <v-radio disabled label="如果缺少词条，则弃用" value="deprecate_if_missing_stats" />
               </v-radio-group>
             </v-col>
             <v-col cols="12" md="6">
