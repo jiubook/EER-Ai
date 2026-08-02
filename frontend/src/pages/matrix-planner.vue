@@ -710,7 +710,7 @@ const allLocationChoices = computed<LocationChoice[]>(() => {
   const locations: LocationChoice[] = []
 
   // 遍历所有能量淤积点
-  for (const [_battleName, alluvium] of Object.entries(energyAlluviums)) {
+  for (const [_battleName, alluvium] of Object.entries(energyAlluviums.value)) {
     // 获取该地点能刷取的所有武器
     const matchedWeaponIds: string[] = []
 

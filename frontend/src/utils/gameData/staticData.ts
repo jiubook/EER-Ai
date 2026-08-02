@@ -1,4 +1,6 @@
 import type {
+  EnergyAlluviumInfo,
+  EnergyAlluviumListResponse,
   EssenceInfo,
   EssenceListResponse,
   MatrixIconResponse,
@@ -15,11 +17,12 @@ const weaponTypes = ref<WeaponTypeInfo[]>([])
 const essencesMap = ref<Map<string, EssenceInfo>>(new Map())
 const rarityColors = ref<Record<number, string>>({})
 const matrixIcons = ref<MatrixIconResponse>({ essenceBg: '', skills: {} })
+const energyAlluviums = ref<EnergyAlluviumInfo[]>([])
 const isLoaded = ref(false)
 
 async function fetchStaticData() {
   try {
-    const [weaponsRes, weaponTypesRes, essencesRes, rarityColorsRes, matrixIconsRes] =
+    const [weaponsRes, weaponTypesRes, essencesRes, rarityColorsRes, matrixIconsRes, alluviumsRes] =
       await Promise.all([
         fetch(`/api/static/weapons`).then((res) => res.json() as Promise<WeaponListResponse>),
         fetch(`/api/static/weapon_types`).then(
@@ -34,13 +37,17 @@ async function fetchStaticData() {
         fetch(`/api/static/matrix_icons`).then(
           (res) => res.json() as Promise<MatrixIconResponse>,
         ),
+        fetch(`/api/static/energy_alluviums`).then(
+          (res) => res.json() as Promise<EnergyAlluviumListResponse>,
+        ),
       ])
 
     weaponsMap.value = new Map(weaponsRes.weapons.map((w) => [w.id, w]))
     weaponTypes.value = weaponTypesRes.weaponTypes
-    essencesMap.value = new Map((essencesRes.items).map((e) => [e.id, e]))
+    essencesMap.value = new Map(essencesRes.items.map((e) => [e.id, e]))
     rarityColors.value = rarityColorsRes.colors
     matrixIcons.value = matrixIconsRes
+    energyAlluviums.value = alluviumsRes.items
     isLoaded.value = true
   } catch (error) {
     console.error('Failed to fetch static data:', error)
@@ -54,6 +61,7 @@ export function useStaticData() {
     essencesMap,
     rarityColors,
     matrixIcons,
+    energyAlluviums,
     isLoaded,
     fetchStaticData,
   }

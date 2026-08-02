@@ -9,7 +9,7 @@
           <h3>按稀有度快捷选择</h3>
           <div class="d-flex flex-row flex-wrap gc-4">
             <v-checkbox
-              v-for="rarity in [3, 4, 5, 6]"
+              v-for="rarity in [6, 5, 4, 3]"
               :key="rarity"
               :color="rarityColors[rarity]"
               density="compact"
@@ -24,7 +24,7 @@
             </v-checkbox>
           </div>
           <v-divider class="my-4" />
-          <template v-for="weaponType in weaponTypes" :key="weaponType.id">
+          <template v-for="weaponType in sortedWeaponTypes" :key="weaponType.id">
             <h3>
               <v-checkbox
                 density="compact"
@@ -52,7 +52,7 @@
                 :key="weaponId"
                 class="d-flex flex-column align-center"
                 :class="{
-                  'opacity-50': !selectedWeaponIds.includes(weaponId),
+                  'weapon-disabled': !selectedWeaponIds.includes(weaponId),
                 }"
               >
                 <div
@@ -73,12 +73,6 @@
                   </v-badge>
                   <item-icon v-else :item-id="weaponId" show-item-name />
                 </div>
-                <v-checkbox-btn
-                  v-model="selectedWeaponIds"
-                  color="primary"
-                  density="comfortable"
-                  :value="weaponId"
-                />
                 <v-tooltip activator="parent" location="bottom">
                   {{ getWeaponStatsDescription(weaponId) }}
                 </v-tooltip>
@@ -369,39 +363,35 @@
       <v-expansion-panel :value="2">
         <v-expansion-panel-title>扫描行为设置</v-expansion-panel-title>
         <v-expansion-panel-text>
-          <h2>遇到非无瑕基质（即遇到非橙色基质）时，该如何操作？</h2>
+          <h2>遇到非无瑕基质(紫色及以下)时，该如何操作？</h2>
           <v-radio-group v-model="nonFiveStarBehavior" color="primary" density="comfortable" inline>
-            <v-radio label="跳过对它的操作" value="skip" />
-            <v-radio label="继续操作（当作无瑕基质进行操作）" value="process" />
+            <v-radio label="当作无瑕基质并继续操作" value="process" />
+            <v-radio label="跳过它并继续操作" value="skip" />
             <v-radio label="结束本次扫描" value="stop" />
             <v-radio
-              label="仅高等级判定（只按高等级属性词条判定，不匹配武器）"
+              label="仅高等级判定（只按高等级词条，不匹配武器）"
               value="high_level_only"
             />
           </v-radio-group>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            "跳过对它的操作"只是不锁定/解锁/弃用该基质，扫描会继续前往下一个基质；"结束本次扫描"等同于再次按下
-            ]
-            中断扫描，并会保留已扫描到的统计数据。"仅高等级判定"会使用下方的高等级属性词条判定规则，但不进行武器匹配。
+          "仅高等级判定"会使用最上方"启用高等级基质属性词条判定"的设置，启用"与无瑕基质区分设置"后可单独设置。
           </v-alert>
 
           <!-- 非无瑕基质高等级判定设置 -->
           <v-expand-transition>
             <div v-if="nonFiveStarBehavior === 'high_level_only'">
               <v-divider class="my-4" />
-              <h2>非无瑕基质高等级属性词条判定设置</h2>
-              <v-alert border="start" class="mb-4" type="info" variant="tonal">
-                启用"区分设置"后，非无瑕基质将使用独立的高等级判定阈值；否则使用宝藏基质判定规则中的高等级设置。
-              </v-alert>
-
+              <h2>非无瑕基质(紫色及以下)高等级属性词条判定设置</h2>
               <v-switch
                 v-model="nonFiveStarSeparateHighLevelSettings"
                 color="primary"
                 density="comfortable"
                 hide-details
-                label="区分设置（为非无瑕基质启用独立的高等级判定阈值）"
+                label="与无瑕基质区分设置（为非无瑕基质(紫色及以下)启用独立的高等级判定阈值）"
               />
-
+              <v-alert border="start" class="mb-4" type="info" variant="tonal">
+                启用后，非无瑕基质(紫色及以下)将使用独立的高等级判定阈值；否则使用最上方"启用高等级基质属性词条判定"的设置。
+              </v-alert>
               <v-expand-transition>
                 <div v-if="nonFiveStarSeparateHighLevelSettings">
                   <v-row align="center" class="my-4">
@@ -530,9 +520,6 @@
           <v-divider class="my-4" />
 
           <h2>同类型宝藏基质达到指定数量后，该如何处理？</h2>
-          <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            启用后，扫描中同一组基础属性、附加属性、技能属性的宝藏基质达到上限后，后续同类型基质会视为养成材料并执行养成材料操作。
-          </v-alert>
           <v-row align="center">
             <v-col cols="12" md="6">
               <v-switch
@@ -556,6 +543,9 @@
               />
             </v-col>
           </v-row>
+          <v-alert border="start" class="mb-4" type="info" variant="tonal">
+            启用后，扫描中同一组基础、附加、技能的宝藏基质达到上限后，后续同类型基质会视为"养成材料"并执行"养成材料"操作。
+          </v-alert>
 
           <!-- 新增：分组模式 -->
           <v-row align="center" class="mt-2">
@@ -568,11 +558,14 @@
                 inline
                 label="同类型划分方式"
               >
-                <v-radio label="按基质划分（词条名称完全一致即为同类型）" value="by_stat" />
                 <v-radio label="按武器划分（每把武器独立计数）" value="by_weapon" />
+                <v-radio label="按基质划分（词条名称完全一致即为同类型）" value="by_stat" />
               </v-radio-group>
             </v-col>
           </v-row>
+          <v-alert border="start" class="mb-4" type="info" variant="tonal">
+          "按武器划分"会同步到"宝藏基质"的"武器总览"页面；"按基质划分"只在游戏内操作，不保存本地。
+          </v-alert>
 
           <!-- 新增：非降级原则过滤（仅按武器划分时可用） -->
           <v-row align="center" class="mt-2">
@@ -586,7 +579,7 @@
                 label="非降级原则过滤（按武器划分时，过滤无法升级武器已有基质的矩阵）"
               />
               <v-alert border="start" class="mt-2" type="info" variant="tonal">
-                启用后，仅在[按武器划分]模式下生效，每个词条都 ≥ 旧等级才会被保留。无法升级任何匹配武器的将视为养成材料。此选项在"留大弃小"规则前生效。
+                启用后，每个词条都 ≥ 旧等级才会被保留。无法升级任何匹配武器的将视为养成材料。此选项在"留大弃小"规则前生效。
               </v-alert>
             </v-col>
           </v-row>
@@ -603,7 +596,7 @@
                 label="留大弃小（同类型中保留等级更高的基质）"
               />
               <v-alert border="start" class="mt-2" type="info" variant="tonal">
-                启用后，遇到同类型基质时会与已保留的基质比较等级。如果新基质的词条等级更高，则替换旧的；否则视为养成材料。扫描开始前会读取账号中已有的基质等级作为基准。
+                启用后，如果新基质的词条等级更高，则替换旧的；否则视为养成材料。扫描开始前会读取"宝藏基质"页面为基准。
               </v-alert>
               <v-radio-group
                 v-model="sameTypeKeepBestMode"
@@ -625,9 +618,6 @@
           <v-divider class="my-4" />
 
           <h2>扫描时自动翻页</h2>
-          <v-alert border="start" class="mb-4" type="info" variant="tonal">
-            启用后，扫描完当前页会自动拖动翻页继续扫描，直到滚动条到达底部。
-          </v-alert>
           <v-switch
             v-model="autoPageFlip"
             color="primary"
@@ -635,6 +625,9 @@
             hide-details
             label="启用自动翻页扫描"
           />
+          <v-alert border="start" class="mb-4" type="info" variant="tonal">
+            启用后，扫描完当前页会自动拖动翻页继续扫描，直到滚动条到达底部。
+          </v-alert>
           <v-expand-transition>
             <div v-if="autoPageFlip" class="mt-2">
               <v-switch
@@ -642,10 +635,10 @@
                 color="primary"
                 density="comfortable"
                 hide-details
-                label="修复翻页后网格行偏移（实验性质）"
+                label="修复翻页后网格行偏移"
               />
-              <v-alert border="start" class="mt-2" type="warning" variant="tonal">
-                默认开启。若翻页后扫描位置异常，可以关闭此实验修复回退到原有翻页行为。
+              <v-alert border="start" class="mt-2" type="info" variant="tonal">
+                启用后，翻页结束时会根据基质间的间隙暗带匹配，微调页面。
               </v-alert>
               <v-switch
                 v-model="fixPageFlipOverscroll"
@@ -656,7 +649,7 @@
                 label="修正翻页滚动过量（实验性质）"
               />
               <v-alert border="start" class="mt-2" type="warning" variant="tonal">
-                默认关闭。开启后，若翻页后第一行被判定为已扫描过的重复基质，会向上微调 3/4
+                默认关闭。启用后，若翻页后第一行被判定为已扫描过的重复基质，会向上调整 3/4
                 行并重扫第一行。
               </v-alert>
             </div>
@@ -718,12 +711,12 @@
                 label="启用轮询状态更新"
                 @update:model-value="onStatusPollingToggle"
               />
-              <v-alert border="start" class="mt-2" type="info" variant="tonal">
-                启用后，前端会轮询更新扫描状态和基质数量。禁用可减少网络请求以避免日志膨胀。
-                <!-- [TODO] uvicorn 日志改等级? 之后默认启用 -->
-              </v-alert>
             </v-col>
           </v-row>
+          <v-alert border="start" class="mb-4" type="info" variant="tonal">
+            启用后，前端会轮询更新扫描状态和基质数量。禁用可减少网络请求以避免日志膨胀。
+            <!-- [TODO] uvicorn 日志改等级? 之后默认启用 -->
+          </v-alert>
 
           <v-divider class="my-4" />
 
@@ -824,6 +817,9 @@
               />
             </v-col>
           </v-row>
+          <v-alert border="start" class="mb-4" type="info" variant="tonal">
+          在网络通畅时，请尽量使用"GitHub Release"中"GitHub 官方"选项，以降低一图流的cdn流量压力。
+          </v-alert>
         </v-expansion-panel-text>
       </v-expansion-panel>
     </v-expansion-panels>
@@ -923,6 +919,19 @@ const notSelectedWeaponIds = computed(() => {
     (weaponId) => !selectedWeaponIds.value.includes(weaponId),
   )
 })
+
+// 武器组内按稀有度降序排序（6★ -> 3★）
+const sortedWeaponTypes = computed(() =>
+  weaponTypes.value.map((weaponType) => ({
+    ...weaponType,
+    weaponIds: weaponType.weaponIds.toSorted((a, b) => {
+      const wa = weaponsMap.value.get(a)
+      const wb = weaponsMap.value.get(b)
+      if (wa && wb) return wb.rarity - wa.rarity
+      return 0
+    }),
+  })),
+)
 
 const selectedMirrorName = computed(() => {
   const mirror = mirrorOptions.value.find((m) => m.value === updateGithubMirror.value)
@@ -1237,7 +1246,7 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
-$weapon-icon-size: clamp(3rem, 16vw, 6rem);
+$weapon-icon-size: 3.5rem;
 
 .group-icon {
   width: 2rem;
@@ -1258,5 +1267,19 @@ $weapon-icon-size: clamp(3rem, 16vw, 6rem);
 .weapon-item {
   width: $weapon-icon-size;
   height: $weapon-icon-size;
+  cursor: pointer;
+  transition: transform 0.15s;
+
+  &:hover {
+    transform: scale(1.05);
+  }
+}
+
+.weapon-disabled {
+  opacity: 0.4;
+  filter: grayscale(0.8);
+  transition:
+    opacity 0.15s,
+    filter 0.15s;
 }
 </style>

@@ -1,5 +1,7 @@
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
 from endfield_essence_recognizer.schemas.static_data import (
+    EnergyAlluviumInfo,
+    EnergyAlluviumListResponse,
     MatrixIconResponse,
     RarityColorResponse,
     StatInfo,
@@ -222,3 +224,23 @@ class StaticDataService:
             essence_bg=f"{self.matrix_icon_base_url}item_gem_rarity_5.png",
             skills=skills,
         )
+
+    def list_energy_alluviums(self) -> EnergyAlluviumListResponse:
+        """
+        List all energy alluviums (farming locations).
+
+        Returns:
+            An EnergyAlluviumListResponse containing the full list of energy alluviums.
+        """
+        items = []
+        for alluvium in self.data.list_energy_alluviums():
+            items.append(
+                EnergyAlluviumInfo(
+                    battle_id=alluvium.battle_id,
+                    battle_name=alluvium.battle_name,
+                    image_url=alluvium.image_url,
+                    secondary_stats=alluvium.secondary_stats,
+                    skill_stats=alluvium.skill_stats,
+                )
+            )
+        return EnergyAlluviumListResponse(items=items)
