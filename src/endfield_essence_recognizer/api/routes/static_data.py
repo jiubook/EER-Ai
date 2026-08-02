@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from endfield_essence_recognizer.dependencies.services import get_static_data_service
 from endfield_essence_recognizer.schemas.static_data import (
+    EnergyAlluviumListResponse,
     RarityColorResponse,
     StatInfo,
     StatListResponse,
@@ -81,3 +82,13 @@ async def list_essences(
     List all available essences.
     """
     return service.list_essences()
+
+
+@router.get("/energy_alluviums")
+async def list_energy_alluviums(
+    service: StaticDataService = Depends(get_static_data_service),
+) -> EnergyAlluviumListResponse:
+    """
+    List all energy alluviums (farming locations).
+    """
+    return service.list_energy_alluviums()
