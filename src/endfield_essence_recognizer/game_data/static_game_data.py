@@ -4,6 +4,7 @@ import json
 from typing import TYPE_CHECKING
 
 from endfield_essence_recognizer.game_data.models.v2 import (
+    EnergyAlluviumV2,
     EssenceStatV2,
     StatId,
     WeaponId,
@@ -36,6 +37,7 @@ class StaticGameData:
         self._stats: dict[StatId, EssenceStatV2] = {}
         self._weapon_types: dict[WeaponTypeId, WeaponTypeV2] = {}
         self._rarity_colors: dict[int, str] = {}
+        self._energy_alluviums: dict[str, EnergyAlluviumV2] = {}
 
         # Index for faster lookup
 
@@ -80,6 +82,20 @@ class StaticGameData:
                 rarity_data = json.load(f)
                 for r_id, data in rarity_data.items():
                     self._rarity_colors[int(r_id)] = data["color"]
+
+            # Load Energy Alluviums
+            alluvium_file = self._data_root / "EnergyAlluviums.json"
+            with open(alluvium_file, encoding="utf-8") as f:
+                alluvium_data = json.load(f)
+                for _key, data in alluvium_data.items():
+                    alluvium = EnergyAlluviumV2(
+                        battle_id=data["battleId"],
+                        battle_name=data["battleName"],
+                        image_url=data.get("imageUrl"),
+                        secondary_stats=data["secondaryStats"],
+                        skill_stats=data["skillStats"],
+                    )
+                    self._energy_alluviums[alluvium.battle_id] = alluvium
         except Exception as e:
             raise RuntimeError(f"Failed to load static game data V2: {e}") from e
 
@@ -141,3 +157,7 @@ class StaticGameData:
     def get_rarity_color(self, rarity: int) -> str:
         """Returns the hex color code for a given rarity, or white if not found."""
         return self._rarity_colors.get(rarity, "#FFFFFF")
+
+    def list_energy_alluviums(self) -> list[EnergyAlluviumV2]:
+        """Returns a list of all energy alluviums."""
+        return list(self._energy_alluviums.values())

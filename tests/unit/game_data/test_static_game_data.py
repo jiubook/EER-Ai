@@ -55,6 +55,20 @@ def mock_data_root(tmp_path):
         json.dumps(rarity_data), encoding="utf-8"
     )
 
+    # Energy Alluviums
+    alluvium_data = {
+        "battle_1": {
+            "battleId": "battle_1",
+            "battleName": "Test Battle",
+            "imageUrl": None,
+            "secondaryStats": ["stat_b"],
+            "skillStats": ["stat_c"],
+        }
+    }
+    (tmp_path / "EnergyAlluviums.json").write_text(
+        json.dumps(alluvium_data), encoding="utf-8"
+    )
+
     return tmp_path
 
 

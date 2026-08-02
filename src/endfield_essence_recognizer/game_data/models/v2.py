@@ -85,3 +85,19 @@ class RarityColorV2:
     """武器稀有度级别（如 3, 4, 5）"""
     color: str
     """关联的十六进制颜色代码，以 '#' 开头"""
+
+
+@dataclass(frozen=True, slots=True)
+class EnergyAlluviumV2:
+    """表示能量淤积点（刷取位置）。"""
+
+    battle_id: str
+    """主键、战斗的唯一标识符"""
+    battle_name: str
+    """战斗的中文显示名称"""
+    image_url: str | None
+    """背景图片的 URL"""
+    secondary_stats: list[StatId]
+    """该淤积点可刷出的次属性词条 ID 列表"""
+    skill_stats: list[StatId]
+    """该淤积点可刷出的技能词条 ID 列表"""

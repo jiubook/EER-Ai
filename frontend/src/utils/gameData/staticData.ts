@@ -1,4 +1,6 @@
 import type {
+  EnergyAlluviumInfo,
+  EnergyAlluviumListResponse,
   EssenceInfo,
   EssenceListResponse,
   RarityColorResponse,
@@ -13,25 +15,33 @@ const weaponsMap = ref<Map<string, WeaponInfo>>(new Map())
 const weaponTypes = ref<WeaponTypeInfo[]>([])
 const essencesMap = ref<Map<string, EssenceInfo>>(new Map())
 const rarityColors = ref<Record<number, string>>({})
+const energyAlluviums = ref<EnergyAlluviumInfo[]>([])
 const isLoaded = ref(false)
 
 async function fetchStaticData() {
   try {
-    const [weaponsRes, weaponTypesRes, essencesRes, rarityColorsRes] = await Promise.all([
-      fetch(`/api/static/weapons`).then((res) => res.json() as Promise<WeaponListResponse>),
-      fetch(`/api/static/weapon_types`).then(
-        (res) => res.json() as Promise<WeaponTypeListResponse>,
-      ),
-      fetch(`/api/static/essences`).then(
-        (res) => res.json() as Promise<EssenceListResponse>,
-      ),
-      fetch(`/api/static/rarity_colors`).then((res) => res.json() as Promise<RarityColorResponse>),
-    ])
+    const [weaponsRes, weaponTypesRes, essencesRes, rarityColorsRes, alluviumsRes] =
+      await Promise.all([
+        fetch(`/api/static/weapons`).then((res) => res.json() as Promise<WeaponListResponse>),
+        fetch(`/api/static/weapon_types`).then(
+          (res) => res.json() as Promise<WeaponTypeListResponse>,
+        ),
+        fetch(`/api/static/essences`).then(
+          (res) => res.json() as Promise<EssenceListResponse>,
+        ),
+        fetch(`/api/static/rarity_colors`).then(
+          (res) => res.json() as Promise<RarityColorResponse>,
+        ),
+        fetch(`/api/static/energy_alluviums`).then(
+          (res) => res.json() as Promise<EnergyAlluviumListResponse>,
+        ),
+      ])
 
     weaponsMap.value = new Map(weaponsRes.weapons.map((w) => [w.id, w]))
     weaponTypes.value = weaponTypesRes.weaponTypes
-    essencesMap.value = new Map((essencesRes.items).map((e) => [e.id, e]))
+    essencesMap.value = new Map(essencesRes.items.map((e) => [e.id, e]))
     rarityColors.value = rarityColorsRes.colors
+    energyAlluviums.value = alluviumsRes.items
     isLoaded.value = true
   } catch (error) {
     console.error('Failed to fetch static data:', error)
@@ -44,6 +54,7 @@ export function useStaticData() {
     weaponTypes,
     essencesMap,
     rarityColors,
+    energyAlluviums,
     isLoaded,
     fetchStaticData,
   }
