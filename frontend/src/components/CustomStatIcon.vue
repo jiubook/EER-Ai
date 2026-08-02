@@ -151,8 +151,8 @@ const skillAltText = computed(() => {
 }
 
 .custom-entry-icon-small {
-  min-width: 40px;
-  min-height: 40px;
+  min-width: 2rem;
+  min-height: 2rem;
 
   .custom-entry-tier-bar {
     height: 6%;

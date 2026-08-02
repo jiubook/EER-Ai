@@ -309,6 +309,67 @@ async def get_batch_farming_recommendations(
     return results
 
 
+# --- 等级比较 ---
+
+
+class CompareLevelsItem(BaseModel):
+    """单组等级比较请求。"""
+
+    current_levels: tuple[int, int, int] = Field(
+        description="当前基质的三个词条等级",
+    )
+    existing_levels: tuple[int, int, int] = Field(
+        description="已保存基质的三个词条等级",
+    )
+    stat_types: list[str | None] = Field(
+        default=["ATTRIBUTE", "SECONDARY", "SKILL"],
+        description="各槽位的词条类型（ATTRIBUTE/SECONDARY/SKILL/null）",
+    )
+
+
+class CompareLevelsRequest(BaseModel):
+    """批量等级比较请求体。"""
+
+    items: list[CompareLevelsItem] = Field(max_length=100)
+    mode: str = Field(
+        default="sequential",
+        description="比较模式：sequential/sum/grease/weighted_sum",
+    )
+
+
+class CompareLevelsResponse(BaseModel):
+    """批量等级比较响应。"""
+
+    results: list[int] = Field(
+        description="每组的比较结果：1（当前更优）/ 0（相等）/ -1（当前更差）",
+    )
+
+
+@router.post("/compare_levels")
+async def post_compare_levels(request: CompareLevelsRequest) -> CompareLevelsResponse:
+    """批量比较等级，返回每组的比较结果。"""
+    from endfield_essence_recognizer.core.scanner.evaluate import compare_levels
+    from endfield_essence_recognizer.game_data.models.v2 import StatType
+    from endfield_essence_recognizer.schemas.user_setting import KeepBestMode
+
+    mode = KeepBestMode(request.mode)
+    stat_type_map = {
+        "ATTRIBUTE": StatType.ATTRIBUTE,
+        "SECONDARY": StatType.SECONDARY,
+        "SKILL": StatType.SKILL,
+    }
+    results: list[int] = []
+    for item in request.items:
+        parsed_types: list[StatType | None] = [
+            stat_type_map.get(t) if t else None for t in item.stat_types
+        ]
+        result = compare_levels(
+            item.current_levels, item.existing_levels, mode, parsed_types
+        )
+        results.append(result)
+    return CompareLevelsResponse(results=results)
+
+
 # --- 武器总览过滤器 ---
 
 

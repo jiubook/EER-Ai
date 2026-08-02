@@ -7,7 +7,10 @@ from endfield_essence_recognizer.core.recognition import (
     LockStatusLabel,
     RarityLabel,
 )
-from endfield_essence_recognizer.core.scanner.evaluate import evaluate_essence
+from endfield_essence_recognizer.core.scanner.evaluate import (
+    compare_levels,
+    evaluate_essence,
+)
 from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
     EssenceQuality,
@@ -15,6 +18,7 @@ from endfield_essence_recognizer.core.scanner.models import (
 from endfield_essence_recognizer.game_data.models.v2 import EssenceStatV2, StatType
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
+    KeepBestMode,
     NonFiveStarBehavior,
     TreasureMatchMode,
     UserSetting,
@@ -428,3 +432,155 @@ def test_evaluate_non_five_star_process(
     # Should fall through to normal evaluation (Trash in this blank case)
     assert result.quality == EssenceQuality.TRASH
     assert "养成材料" in result.log_message
+
+
+# --- compare_levels 测试 ---
+
+
+class TestCompareLevelsSequential:
+    """sequential 模式：逐维度从左到右比较 A → B → C。"""
+
+    def test_current_greater_first_dim(self):
+        assert compare_levels((3, 1, 1), (2, 1, 1)) == 1
+
+    def test_existing_greater_first_dim(self):
+        assert compare_levels((2, 1, 1), (3, 1, 1)) == -1
+
+    def test_equal(self):
+        assert compare_levels((3, 3, 3), (3, 3, 3)) == 0
+
+    def test_second_dim_decides(self):
+        assert compare_levels((3, 4, 1), (3, 3, 1)) == 1
+
+    def test_third_dim_decides(self):
+        assert compare_levels((3, 3, 2), (3, 3, 1)) == 1
+
+    def test_first_dim_overrides_later(self):
+        """第一维度不等时，后续维度不影响结果。"""
+        assert compare_levels((2, 6, 3), (3, 1, 1)) == -1
+
+
+class TestCompareLevelsSum:
+    """sum 模式：比较三词条等级之和。"""
+
+    def test_current_sum_greater(self):
+        assert compare_levels((6, 6, 3), (5, 5, 3), KeepBestMode.SUM) == 1
+
+    def test_existing_sum_greater(self):
+        assert compare_levels((1, 1, 1), (2, 2, 2), KeepBestMode.SUM) == -1
+
+    def test_equal_sum(self):
+        assert compare_levels((4, 4, 1), (3, 3, 3), KeepBestMode.SUM) == 0
+
+    def test_different_distribution_same_sum(self):
+        """分布不同但和相等时返回 0。"""
+        assert compare_levels((6, 1, 1), (3, 3, 2), KeepBestMode.SUM) == 0
+
+
+class TestCompareLevelsGrease:
+    """grease 模式：按冷却脂消耗总量比较。"""
+
+    def test_current_more_grease(self):
+        """高等级消耗更多冷却脂，current 更优。"""
+        assert (
+            compare_levels(
+                (6, 6, 3),
+                (1, 1, 1),
+                KeepBestMode.GREASE,
+                [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
+            )
+            == 1
+        )
+
+    def test_equal_grease(self):
+        assert (
+            compare_levels(
+                (3, 3, 1),
+                (3, 3, 1),
+                KeepBestMode.GREASE,
+                [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
+            )
+            == 0
+        )
+
+    def test_existing_more_grease(self):
+        assert (
+            compare_levels(
+                (1, 1, 1),
+                (3, 3, 1),
+                KeepBestMode.GREASE,
+                [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
+            )
+            == -1
+        )
+
+    def test_default_stat_types_when_none(self):
+        """stat_types 为 None 时使用默认值 [ATTRIBUTE, SECONDARY, SKILL]。"""
+        assert (
+            compare_levels(
+                (6, 6, 3),
+                (1, 1, 1),
+                KeepBestMode.GREASE,
+            )
+            == 1
+        )
+
+
+class TestCompareLevelsWeightedSum:
+    """weighted_sum 模式：按升级难度加权比较。"""
+
+    def test_current_higher_weight(self):
+        assert (
+            compare_levels(
+                (6, 6, 3),
+                (1, 1, 1),
+                KeepBestMode.WEIGHTED_SUM,
+                [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
+            )
+            == 1
+        )
+
+    def test_equal_weight(self):
+        assert (
+            compare_levels(
+                (3, 3, 1),
+                (3, 3, 1),
+                KeepBestMode.WEIGHTED_SUM,
+                [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
+            )
+            == 0
+        )
+
+    def test_existing_higher_weight(self):
+        assert (
+            compare_levels(
+                (1, 1, 1),
+                (3, 3, 1),
+                KeepBestMode.WEIGHTED_SUM,
+                [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
+            )
+            == -1
+        )
+
+    def test_default_stat_types_when_none(self):
+        """stat_types 为 None 时使用默认值。"""
+        assert (
+            compare_levels(
+                (6, 6, 3),
+                (1, 1, 1),
+                KeepBestMode.WEIGHTED_SUM,
+            )
+            == 1
+        )
+
+    def test_skill_slot_uses_different_weights(self):
+        """技能槽位使用不同的权重表，与基础/附加不同。"""
+        # 同样是等级 3，技能属性的权重与基础属性不同
+        # (1,1,3) vs (1,1,1) — 只有技能槽不同
+        result = compare_levels(
+            (1, 1, 3),
+            (1, 1, 1),
+            KeepBestMode.WEIGHTED_SUM,
+            [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
+        )
+        assert result == 1

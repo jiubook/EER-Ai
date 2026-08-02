@@ -457,6 +457,20 @@ def _level_cmp(
     return 0
 
 
+def compare_levels(
+    current: tuple[int, int, int],
+    existing: tuple[int, int, int],
+    mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
+    stat_types: list[StatType | None] | None = None,
+) -> int:
+    """比较等级元组的公开接口，供 API 路由调用。
+
+    Returns:
+        1（当前更优）/ 0（相等）/ -1（当前更差）
+    """
+    return _level_cmp(current, existing, mode, stat_types)
+
+
 def _make_trash_by_limit(
     evaluation: EvaluationResult, current_count: int, limit: int
 ) -> EvaluationResult:

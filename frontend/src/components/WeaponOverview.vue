@@ -517,17 +517,33 @@
           class="d-flex align-center mb-3 pa-3 border rounded flex-wrap"
           style="gap: 8px"
         >
-          <div class="overlap-icon-wrapper">
-            <custom-stat-icon hide-name :name="item.customName" small/>
-          </div>
+          <v-tooltip location="top" open-delay="0">
+            <template #activator="{ props: tooltipProps }">
+              <div v-bind="tooltipProps" class="overlap-icon-wrapper" :class="{ 'weapon-not-owned': !isWeaponOwned(item.customWeaponId) }">
+                <custom-stat-icon hide-name :name="item.customName" :skill-stat-id="customStats[item.customIndex]?.skill ?? null" small/>
+              </div>
+            </template>
+            <span>{{ getOverlapTooltipText(item.customWeaponId) }}</span>
+          </v-tooltip>
           <span class="font-weight-bold">{{ item.customName }}</span>
-          <v-icon size="small">mdi-arrow-left-right</v-icon>
-          <div class="overlap-icon-wrapper">
-            <item-icon class="weapon-icon-overlap" :item-id="item.matchedWeaponId" />
-          </div>
+          <v-icon
+            :color="getOverlapCompareResult(item) > 0 ? 'success' : getOverlapCompareResult(item) < 0 ? 'error' : 'grey'"
+            size="small"
+          >
+            {{ getOverlapCompareResult(item) > 0 ? 'mdi-arrow-right-bold' : getOverlapCompareResult(item) < 0 ? 'mdi-arrow-left-bold' : 'mdi-arrow-left-right' }}
+          </v-icon>
+          <v-tooltip location="top" open-delay="0">
+            <template #activator="{ props: tooltipProps }">
+              <div v-bind="tooltipProps" class="overlap-icon-wrapper" :class="{ 'weapon-not-owned': !isWeaponOwned(item.matchedWeaponId) }">
+                <item-icon class="weapon-icon-overlap" :item-id="item.matchedWeaponId" />
+              </div>
+            </template>
+            <span>{{ getOverlapTooltipText(item.matchedWeaponId) }}</span>
+          </v-tooltip>
           <span class="font-weight-bold">{{ item.matchedWeaponName }}</span>
           <v-spacer />
           <v-chip-group v-model="item.action" mandatory>
+            <v-chip color="error" filter size="small" value="delete" variant="outlined">删除自定义基质</v-chip>
             <v-chip filter size="small" value="ignore" variant="outlined">本次忽略</v-chip>
             <v-chip filter size="small" value="suppress" variant="outlined">不再提示</v-chip>
             <v-chip color="primary" filter size="small" value="switch" variant="outlined">切换</v-chip>
@@ -535,6 +551,7 @@
         </div>
       </v-card-text>
       <v-card-actions>
+        <v-btn color="secondary" variant="outlined" @click="autoSelectOverlap">一键选择</v-btn>
         <v-spacer />
         <v-btn @click="overlapDialog = false">取消</v-btn>
         <v-btn color="primary" @click="confirmOverlapActions">确认</v-btn>
@@ -843,11 +860,13 @@ interface OverlapItem {
   customWeaponId: string
   matchedWeaponId: string
   matchedWeaponName: string
-  action: 'ignore' | 'suppress' | 'switch'
+  action: 'ignore' | 'suppress' | 'switch' | 'delete'
 }
 
 const overlapItems = ref<OverlapItem[]>([])
 const overlapDialog = ref(false)
+/** 重合检测的等级比较结果（按 overlapItems 索引缓存） */
+const overlapCompareResults = ref<Map<number, number>>(new Map())
 
 /** 从后端获取配置中的自定义宝藏基质属性列表 */
 async function fetchCustomStats() {
@@ -1107,6 +1126,117 @@ async function postCustomStatsUpdate() {
   }
 }
 
+/** 获取重合检测中某个武器 ID 的属性词条文本（含等级） */
+function getOverlapTooltipText(weaponId: string): string {
+  const entry = matrixEntryByWeaponId.value.get(weaponId)
+  const levels: [number, number, number] = [
+    entry?.affix1_level ?? 0,
+    entry?.affix2_level ?? 0,
+    entry?.affix3_level ?? 0,
+  ]
+
+  let statIds: (string | null)[] = []
+  if (isCustomEntry(weaponId)) {
+    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+    const stat = customStats.value[index]
+    statIds = [stat?.attribute ?? null, stat?.secondary ?? null, stat?.skill ?? null]
+  } else {
+    const weapon = weaponsMap.value.get(weaponId)
+    statIds = [weapon?.attributeStatId ?? null, weapon?.secondaryStatId ?? null, weapon?.skillStatId ?? null]
+  }
+
+  const parts: string[] = []
+  for (let i = 0; i < 3; i++) {
+    const sid = statIds[i]
+    if (sid) {
+      parts.push(`${getGemTagName(sid)} Lv.${levels[i]}`)
+    }
+  }
+  return parts.join('、') || '无属性'
+}
+
+/**
+ * 解析武器 ID 对应的三个槽位词条类型
+ * 返回 ["ATTRIBUTE", "SECONDARY", "SKILL"] 或对应的 null
+ */
+function resolveStatTypes(weaponId: string): (string | null)[] {
+  if (isCustomEntry(weaponId)) {
+    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+    const stat = customStats.value[index]
+    return [
+      stat?.attribute ? essencesMap.value.get(stat.attribute)?.type ?? null : null,
+      stat?.secondary ? essencesMap.value.get(stat.secondary)?.type ?? null : null,
+      stat?.skill ? essencesMap.value.get(stat.skill)?.type ?? null : null,
+    ]
+  }
+  const weapon = weaponsMap.value.get(weaponId)
+  return [
+    weapon?.attributeStatId ? 'ATTRIBUTE' : null,
+    weapon?.secondaryStatId ? 'SECONDARY' : null,
+    weapon?.skillStatId ? 'SKILL' : null,
+  ]
+}
+
+/** 从后端批量获取重合检测的等级比较结果 */
+async function fetchOverlapCompareResults() {
+  if (overlapItems.value.length === 0) return
+  try {
+    const results = new Map<number, number>()
+    const res = await fetch('/api/profiles/compare_levels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: overlapItems.value.map((item) => {
+          const customEntry = matrixEntryByWeaponId.value.get(item.customWeaponId)
+          const matchedEntry = matrixEntryByWeaponId.value.get(item.matchedWeaponId)
+          return {
+            current_levels: [
+              customEntry?.affix1_level ?? 0,
+              customEntry?.affix2_level ?? 0,
+              customEntry?.affix3_level ?? 0,
+            ],
+            existing_levels: [
+              matchedEntry?.affix1_level ?? 0,
+              matchedEntry?.affix2_level ?? 0,
+              matchedEntry?.affix3_level ?? 0,
+            ],
+            stat_types: resolveStatTypes(item.customWeaponId),
+          }
+        }),
+      }),
+    })
+    const data = await res.json()
+    for (let i = 0; i < overlapItems.value.length; i++) {
+      results.set(i, data.results?.[i] ?? 0)
+    }
+    overlapCompareResults.value = results
+  } catch (error) {
+    console.error('获取等级比较结果失败:', error)
+  }
+}
+
+/** 获取预计算的比较结果：1（自定义更优）/ 0（相等）/ -1（内置更优） */
+function getOverlapCompareResult(item: OverlapItem): number {
+  const idx = overlapItems.value.indexOf(item)
+  return overlapCompareResults.value.get(idx) ?? 0
+}
+
+/** 一键选择：根据比较结果自动选择动作 */
+function autoSelectOverlap() {
+  for (let i = 0; i < overlapItems.value.length; i++) {
+    const item = overlapItems.value[i]
+    if (!item) continue
+    const cmp = overlapCompareResults.value.get(i) ?? 0
+    if (cmp < 0) {
+      item.action = 'delete'   // 自定义更小 → 删除自定义
+    } else if (cmp === 0) {
+      item.action = 'ignore'   // 相等 → 忽略
+    } else {
+      item.action = 'switch'   // 自定义更大 → 切换到内置
+    }
+  }
+}
+
 /**
  * 检查自定义基质与内置武器的词条重合
  * 匹配规则：三个槽位完全相等（含 null 对 null）
@@ -1145,6 +1275,7 @@ function checkCustomOverlap() {
   if (items.length === 0) return
   overlapItems.value = items
   overlapDialog.value = true
+  fetchOverlapCompareResults()
 }
 
 /** 确认重合操作 */
@@ -1181,6 +1312,13 @@ async function confirmOverlapActions() {
           })
         await updateTreasureMatrix(newEntries)
       }
+      indicesToDelete.push(item.customIndex)
+    }
+
+    if (item.action === 'delete') {
+      // 删除自定义基质：从 treasure_matrix 中移除对应条目
+      const newEntries = treasureMatrix.value.filter((e) => e.weapon_id !== item.customWeaponId)
+      await updateTreasureMatrix(newEntries)
       indicesToDelete.push(item.customIndex)
     }
   }
@@ -1859,6 +1997,11 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   width: 2rem;
   height: 2rem;
   flex-shrink: 0;
+
+  &.weapon-not-owned {
+    opacity: 0.4;
+    filter: grayscale(0.8);
+  }
 }
 
 .rainbow-border {
