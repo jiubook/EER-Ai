@@ -304,7 +304,7 @@
         </div>
 
         <!-- 基质等级 -->
-        <div class="mb-4">
+        <div class="mb-4 detail-level-outer">
           <div class="text-subtitle-2 mb-2">当前基质等级</div>
           <div class="detail-level-wrapper">
             <div class="detail-level-section">
@@ -366,11 +366,20 @@
               </div>
             </div>
 
-            <!-- 未拥有斜向胶带遮罩（贯穿三个属性） -->
-            <div v-if="!isDetailOwned" class="not-owned-tape-detail">
-              <span class="not-owned-tape-detail-text">» 未拥有 » NOT OWNED » 未拥有 » NOT OWNED » </span>
-            </div>
+            <!-- 未拥有斜向胶带遮罩（贯穿三个属性，可点击切换拥有） -->
+            <transition name="tape-peel">
+              <div
+                v-if="!isDetailOwned"
+                class="not-owned-tape-detail"
+                @click="toggleDetailOwnership"
+              >
+                <span class="not-owned-tape-detail-text">» 未拥有 » NOT OWNED » 点击切换为拥有 » CLICK TO TOGGLE » </span>
+              </div>
+            </transition>
           </div>
+
+          <!-- 未拥有遮罩：覆盖等级区域，阻止交互 -->
+          <div v-if="!isDetailOwned" class="not-owned-block-overlay" @click="toggleDetailOwnership" />
 
           <!-- 拥有状态切换 -->
           <div class="mt-2">
@@ -381,7 +390,7 @@
               variant="tonal"
               @click="toggleDetailOwnership"
             >
-              {{ isDetailOwned ? '已拥有' : '未拥有 · 点击切换为拥有' }}
+              {{ isDetailOwned ? '已拥有 · 点击可切换为 未拥有' : '未拥有 · 点击可切换为 已拥有' }}
             </v-chip>
           </div>
         </div>
@@ -462,7 +471,7 @@
             @click="promptDeleteCustomEntry"
             @mousedown="pendingCustomDelete = true"
           >
-            删除此自定义基质
+            删除此自定义基质·无法恢复
           </v-btn>
           <v-spacer />
           <v-btn
@@ -474,7 +483,7 @@
             保存
           </v-btn>
         </template>
-        <!-- 非自定义基质：删除 -->
+        <!-- 非自定义基质：清空 -->
         <template v-else>
           <v-btn
             v-if="isWeaponOwned(detailWeaponId)"
@@ -483,7 +492,7 @@
             variant="text"
             @click="removeNonCustomEntry(detailWeaponId!)"
           >
-            从基质配置中移除
+            清空此基质的保存数据
           </v-btn>
           <v-spacer />
         </template>
@@ -1785,6 +1794,48 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   font-weight: 900;
   letter-spacing: 0.2em;
   white-space: nowrap;
+}
+
+// 撕开胶布动画（左到右渐出/渐入）
+.tape-peel-enter-active {
+  animation: tape-peel-in 0.2s ease-out forwards;
+}
+
+.tape-peel-leave-active {
+  animation: tape-peel-out 0.2s ease-in forwards;
+}
+
+@keyframes tape-peel-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes tape-peel-out {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 100%);
+  }
+}
+
+// 未拥有遮罩层：覆盖等级区域，阻止点击
+.detail-level-outer {
+  position: relative;
+}
+
+.not-owned-block-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  cursor: pointer;
 }
 
 .weapon-icon-detail {
