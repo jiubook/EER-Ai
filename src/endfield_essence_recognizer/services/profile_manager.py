@@ -25,6 +25,7 @@ from endfield_essence_recognizer.schemas.profile import (
 from endfield_essence_recognizer.utils.log import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 __all__ = [
@@ -156,6 +157,37 @@ class ProfileManager:
     def _get_active_unlocked(self) -> ProfileData:
         """获取激活账号；调用方必须已经持有 `_lock`。"""
         return self._collection.get_active()
+
+    def _update_active_profile(
+        self,
+        mutator: Callable[[ProfileData], None],
+        *,
+        name: str | None = None,
+    ) -> ProfileData:
+        """更新账号数据并提交到磁盘。
+
+        这是一个辅助方法，用于简化常见的 lock-copy-modify-commit 模式。
+
+        Args:
+            mutator: 一个函数，接收 ProfileData 并就地修改它。
+            name: 要更新的账号名称；None 表示更新当前激活账号。
+
+        Returns:
+            更新后的 ProfileData 的深拷贝。
+
+        Raises:
+            ValueError: 如果指定的账号不存在。
+        """
+        collection = self._collection.model_copy(deep=True)
+        if name is None:
+            profile = collection.get_active()
+        elif name in collection.profiles:
+            profile = collection.profiles[name]
+        else:
+            raise ValueError(f"账号 '{name}' 不存在")
+        mutator(profile)
+        self._commit_collection_unlocked(collection)
+        return profile.model_copy(deep=True)
 
     def get_collection(self) -> ProfileCollection:
         """获取当前账号集合。"""
@@ -442,18 +474,14 @@ class ProfileManager:
             ValueError: 如果指定的账号不存在。
         """
         with self._lock:
-            collection = self._collection.model_copy(deep=True)
-            if name is None:
-                profile = collection.get_active()
-            elif name in collection.profiles:
-                profile = collection.profiles[name]
-            else:
-                raise ValueError(f"账号 '{name}' 不存在")
-            profile.treasure_matrix = []
-            profile.weapon_priorities = {}
-            self._commit_collection_unlocked(collection)
-            logger.info("清空账号数据: {}", profile.name)
-            return profile.model_copy(deep=True)
+
+            def _mutator(profile: ProfileData) -> None:
+                profile.treasure_matrix = []
+                profile.weapon_priorities = {}
+
+            result = self._update_active_profile(_mutator, name=name)
+            logger.info("清空账号数据: {}", result.name)
+            return result
 
     def fix_weapon_id(self, old_weapon_id: str, new_weapon_id: str) -> None:
         """修正 profile 中错误的武器 ID（如名称 → 正确 ID）。
@@ -502,11 +530,11 @@ class ProfileManager:
             更新后的 ProfileData。
         """
         with self._lock:
-            collection = self._collection.model_copy(deep=True)
-            profile = collection.get_active()
-            profile.switch_display_mode = mode
-            self._commit_collection_unlocked(collection)
-            return profile.model_copy(deep=True)
+
+            def _mutator(profile: ProfileData) -> None:
+                profile.switch_display_mode = mode
+
+            return self._update_active_profile(_mutator)
 
     def update_matrix_badge_display_mode(self, mode: str) -> ProfileData:
         """更新激活账号的基质图标显示模式。
@@ -518,11 +546,11 @@ class ProfileManager:
             更新后的 ProfileData。
         """
         with self._lock:
-            collection = self._collection.model_copy(deep=True)
-            profile = collection.get_active()
-            profile.matrix_badge_display_mode = mode
-            self._commit_collection_unlocked(collection)
-            return profile.model_copy(deep=True)
+
+            def _mutator(profile: ProfileData) -> None:
+                profile.matrix_badge_display_mode = mode
+
+            return self._update_active_profile(_mutator)
 
     def update_weapon_priority(self, weapon_id: str, priority: int) -> ProfileData:
         """更新单个武器优先级，未拥有宝藏基质的武器也会保存。

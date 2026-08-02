@@ -95,7 +95,7 @@
               <div class="matrix-card-body">
                 <section class="weapon-identity">
                   <div class="weapon-icon-wrap" :class="getWeaponTierClass(entry.weapon_id)">
-                    <custom-stat-icon v-if="isCustomEntry(entry.weapon_id)" hide-name :name="entry.weapon_name || entry.weapon_id" :skill-stat-id="getCustomStatSkillId(entry.weapon_id)" small />
+                    <custom-stat-icon v-if="isCustomEntry(entry.weapon_id)" hide-name :name="entry.weapon_name || entry.weapon_id" :skill-stat-id="getCustomStatSkillId(entry.weapon_id, customStats)" small />
                     <item-icon v-else class="weapon-icon-small" :item-id="entry.weapon_id" />
                     <span class="weapon-tier">{{ getWeaponRarityText(entry.weapon_id) }}</span>
                   </div>
@@ -387,10 +387,10 @@
           >
             <v-card-item>
               <template #prepend>
-                <custom-stat-icon v-if="isCustomEntry(rec.weapon_id)" hide-name :name="getCustomStatName(rec.weapon_id)" :skill-stat-id="getCustomStatSkillId(rec.weapon_id)" small />
+                <custom-stat-icon v-if="isCustomEntry(rec.weapon_id)" hide-name :name="getCustomStatName(rec.weapon_id, customStats)" :skill-stat-id="getCustomStatSkillId(rec.weapon_id, customStats)" small />
                 <item-icon v-else class="weapon-icon-small" :item-id="rec.weapon_id" />
               </template>
-              <v-card-title>{{ isCustomEntry(rec.weapon_id) ? getCustomStatName(rec.weapon_id) : rec.weapon_name }}</v-card-title>
+              <v-card-title>{{ isCustomEntry(rec.weapon_id) ? getCustomStatName(rec.weapon_id, customStats) : rec.weapon_name }}</v-card-title>
               <v-card-subtitle>
                 当前: +{{ rec.current_levels[0] }} / +{{ rec.current_levels[1] }} / +{{ rec.current_levels[2] }}
                 → 目标: +{{ rec.target_levels[0] }} / +{{ rec.target_levels[1] }} / +{{ rec.target_levels[2] }}
@@ -634,7 +634,7 @@ import WeaponOverview from '@/components/WeaponOverview.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
+import { getCustomStatName, getCustomStatSkillId, getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
 import { safeLoadJson, safeRemoveJson, safeSetJson } from '@/utils/safeStorage'
 
 const router = useRouter()
@@ -666,17 +666,6 @@ function isCustomEntry(weaponId: string): boolean {
   return weaponId.startsWith('custom_stat_')
 }
 
-/** 获取自定义基质的显示名称 */
-function getCustomStatName(weaponId: string): string {
-  const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
-  return customStats.value[index]?.name || `自定义基质 ${index + 1}`
-}
-
-/** 获取自定义基质的技能属性ID */
-function getCustomStatSkillId(weaponId: string): string | null {
-  const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
-  return customStats.value[index]?.skill || null
-}
 
 /** 自定义宝藏基质属性配置列表，用于读取自定义条目的属性名 */
 const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null }>>([])
@@ -685,6 +674,9 @@ const customStats = ref<Array<{ name: string; attribute: string | null; secondar
 async function fetchCustomStats() {
   try {
     const res = await fetch('/api/config')
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    }
     const config = await res.json()
     customStats.value = config.treasure_essence_stats || []
   } catch (error) {
@@ -1600,13 +1592,6 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
-}
-
-.essence-icon-small {
-  width: 1.5rem;
-  height: 1.5rem;
-  vertical-align: middle;
-  border-radius: 4px;
 }
 
 .weapon-grid {

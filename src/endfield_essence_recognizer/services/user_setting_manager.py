@@ -190,9 +190,9 @@ class UserSettingManager:
         Reset the in-memory UserSetting to defaults (UserSetting()) and save.
 
         Returns:
-            A reference to the reset in-memory UserSetting.
+            A deep copy of the reset UserSetting.
         """
         self._user_setting = UserSetting()
         self.save_user_setting()
         logger.info("配置已重置为默认值。")
-        return self._user_setting
+        return self._user_setting.model_copy(deep=True)

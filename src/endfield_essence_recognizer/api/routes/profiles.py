@@ -336,6 +336,20 @@ class CompareLevelsRequest(BaseModel):
         description="比较模式：sequential/sum/grease/weighted_sum",
     )
 
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        """校验比较模式是否合法。"""
+        from endfield_essence_recognizer.schemas.user_setting import KeepBestMode
+
+        try:
+            KeepBestMode(value)
+        except ValueError as err:
+            raise ValueError(
+                f"未知比较模式: {value}，可选: {[m.value for m in KeepBestMode]}"
+            ) from err
+        return value
+
 
 class CompareLevelsResponse(BaseModel):
     """批量等级比较响应。"""
@@ -402,7 +416,7 @@ async def update_weapon_overview_filters(
     return manager.update_weapon_overview_filters(request.filters)
 
 
-VALID_SWITCH_MODES = {"chip", "dot", "off"}
+VALID_SWITCH_MODES: Final = {"chip", "dot", "off"}
 
 
 class UpdateSwitchDisplayModeRequest(BaseModel):

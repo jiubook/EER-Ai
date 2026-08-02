@@ -70,7 +70,7 @@
                               <v-tooltip location="top" open-delay="0">
                                 <template #activator="{ props }">
                                   <div v-bind="props" class="h-100">
-                                    <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" :skill-stat-id="getCustomStatSkillId(weaponId)" small />
+                                    <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatName(weaponId, customStats)" :skill-stat-id="getCustomStatSkillId(weaponId, customStats)" small />
                                     <template v-else>
                                       <item-icon :item-id="weaponId" show-item-name />
                                     </template>
@@ -198,7 +198,7 @@
                                   <v-tooltip location="top" open-delay="0">
                                     <template #activator="{ props }">
                                       <div v-bind="props" class="h-100">
-                                        <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatDisplayName(weaponId)" :skill-stat-id="getCustomStatSkillId(weaponId)" small />
+                                        <custom-stat-icon v-if="isCustomStatId(weaponId)" :name="getCustomStatName(weaponId, customStats)" :skill-stat-id="getCustomStatSkillId(weaponId, customStats)" small />
                                         <item-icon v-else :item-id="weaponId" show-item-name />
                                       </div>
                                     </template>
@@ -554,6 +554,7 @@ import { type BattleChoice, getDisplayName, useMatrixPlanner } from '@/composabl
 import { useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
+import { getCustomStatName, getCustomStatSkillId } from '@/utils/gameData/weapon'
 
 const route = useRoute()
 const { weaponTypes, weaponsMap, essencesMap, matrixIcons } = useStaticData()
@@ -892,22 +893,7 @@ function getWeaponTooltipText(weaponId: string): string {
   return getWeaponStatNames(weaponId)
 }
 
-function getCustomStatDisplayName(id: string): string {
-  const match = id.match(/^custom_stat_(\d+)$/)
-  if (!match) return id
-  const index = Number.parseInt(match[1]!, 10)
-  return customStats.value[index]?.name || `自定义基质 ${index + 1}`
-}
 
-/**
- * 获取自定义基质的技能属性ID
- */
-function getCustomStatSkillId(id: string): string | null {
-  const match = id.match(/^custom_stat_(\d+)$/)
-  if (!match) return null
-  const index = Number.parseInt(match[1]!, 10)
-  return customStats.value[index]?.skill || null
-}
 
 function sortedWeaponIds(weaponIds: string[]): string[] {
   return weaponIds.toSorted((a, b) => {
@@ -1091,13 +1077,6 @@ $weapon-icon-size: clamp(2.5rem, 12vw, 4.5rem);
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
-}
-
-.essence-icon-small {
-  width: 1.5rem;
-  height: 1.5rem;
-  vertical-align: middle;
-  border-radius: 4px;
 }
 
 .weapon-grid {

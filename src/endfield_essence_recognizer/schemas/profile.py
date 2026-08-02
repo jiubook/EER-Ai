@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
@@ -63,10 +63,10 @@ class ProfileData(BaseModel):
     weapon_priorities: dict[str, int] = Field(default_factory=dict)
     """武器优先级配置，允许未拥有宝藏基质的武器也设置优先级。"""
 
-    switch_display_mode: str = "chip"
+    switch_display_mode: Literal["chip", "dot", "off"] = "chip"
     """武器总览"可切换"提示的显示模式：'chip'=标签, 'dot'=小圆点, 'off'=关闭。"""
 
-    matrix_badge_display_mode: str = "small"
+    matrix_badge_display_mode: Literal["small", "medium", "off"] = "small"
     """武器总览基质图标显示模式：'small'=小号(默认), 'medium'=中号(2倍), 'off'=关闭。"""
 
 

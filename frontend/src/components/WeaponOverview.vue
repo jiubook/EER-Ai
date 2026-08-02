@@ -114,8 +114,13 @@
           <div class="weapon-overview-grid">
             <!-- [+] 新建按钮 -->
             <div
+              aria-label="新建自定义基质"
               class="weapon-overview-item"
+              role="button"
+              tabindex="0"
               @click="showNewCustomDialog"
+              @keydown.enter="showNewCustomDialog"
+              @keydown.space.prevent="showNewCustomDialog"
             >
               <div class="weapon-add-button">
                 <v-icon color="grey" size="28">mdi-plus</v-icon>
@@ -509,7 +514,7 @@
       </v-card-title>
       <v-card-text>
         <v-alert class="mb-4" type="info" variant="tonal">
-          以下自定义基质与内置武器的三个词条完全相同，可选择切换为内置武器。
+          以下自定义基质与内置武器词条重复，可选择移除或切换。
         </v-alert>
         <div
           v-for="(item, idx) in overlapItems"
@@ -543,10 +548,10 @@
           <span class="font-weight-bold">{{ item.matchedWeaponName }}</span>
           <v-spacer />
           <v-chip-group v-model="item.action" mandatory>
-            <v-chip color="error" filter size="small" value="delete" variant="outlined">删除自定义基质</v-chip>
+            <v-chip color="error" filter size="small" value="delete" variant="outlined">移除</v-chip>
+            <v-chip color="primary" filter size="small" value="switch" variant="outlined">切换</v-chip>
             <v-chip filter size="small" value="ignore" variant="outlined">本次忽略</v-chip>
             <v-chip filter size="small" value="suppress" variant="outlined">不再提示</v-chip>
-            <v-chip color="primary" filter size="small" value="switch" variant="outlined">切换</v-chip>
           </v-chip-group>
         </div>
       </v-card-text>
@@ -805,6 +810,11 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', updateConnectionLines)
   connectionLines.value = []
+  // 清理防抖定时器，避免组件销毁后发起无效请求
+  if (detailSaveTimer) {
+    clearTimeout(detailSaveTimer)
+    detailSaveTimer = null
+  }
 })
 
 // --- 自定义基质相关 ---
@@ -872,6 +882,9 @@ const overlapCompareResults = ref<Map<number, number>>(new Map())
 async function fetchCustomStats() {
   try {
     const res = await fetch('/api/config')
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    }
     const config = await res.json()
     customStats.value = config.treasure_essence_stats || []
   } catch (error) {
@@ -972,62 +985,72 @@ async function saveCustomEntry() {
   const weaponId = detailWeaponId.value
   if (!weaponId) return
 
-  if (weaponId === '__new_custom__') {
-    // 新建模式：先写入 config
-    customStats.value.push({
-      name: customEntryName.value || `自定义基质 ${customStats.value.length + 1}`,
-      attribute: customEditAttribute.value,
-      secondary: customEditSecondary.value,
-      skill: customEditSkill.value,
-    })
-    await postCustomStatsUpdate()
-
-    // 只有标记为"已拥有"时才写入 profile
-    if (isDetailOwned.value) {
-      const newIndex = customStats.value.length - 1
-      const syntheticId = `custom_stat_${newIndex}`
-      await addTreasureMatrixEntry({
-        weapon_id: syntheticId,
-        weapon_name: customEntryName.value || `自定义基质 ${newIndex + 1}`,
-        affix1_level: detailAffix1.value,
-        affix2_level: detailAffix2.value,
-        affix3_level: detailAffix3.value,
-        priority: detailPriority.value,
-        include_in_calculation: true,
+  try {
+    if (weaponId === '__new_custom__') {
+      // 新建模式：先写入 config
+      customStats.value.push({
+        name: customEntryName.value || `自定义基质 ${customStats.value.length + 1}`,
+        attribute: customEditAttribute.value,
+        secondary: customEditSecondary.value,
+        skill: customEditSkill.value,
       })
-    }
-  } else if (isCustomEntry(weaponId)) {
-    // 编辑模式：更新 config 和 profile
-    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
-    if (customStats.value[index]) {
-      customStats.value[index].name = customEntryName.value
-      customStats.value[index].attribute = customEditAttribute.value
-      customStats.value[index].secondary = customEditSecondary.value
-      customStats.value[index].skill = customEditSkill.value
       await postCustomStatsUpdate()
+
+      // 只有标记为"已拥有"时才写入 profile
+      if (isDetailOwned.value) {
+        const newIndex = customStats.value.length - 1
+        const syntheticId = `custom_stat_${newIndex}`
+        await addTreasureMatrixEntry({
+          weapon_id: syntheticId,
+          weapon_name: customEntryName.value || `自定义基质 ${newIndex + 1}`,
+          affix1_level: detailAffix1.value,
+          affix2_level: detailAffix2.value,
+          affix3_level: detailAffix3.value,
+          priority: detailPriority.value,
+          include_in_calculation: true,
+        })
+      }
+    } else if (isCustomEntry(weaponId)) {
+      // 编辑模式：更新 config 和 profile
+      const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
+      if (customStats.value[index]) {
+        customStats.value[index].name = customEntryName.value
+        customStats.value[index].attribute = customEditAttribute.value
+        customStats.value[index].secondary = customEditSecondary.value
+        customStats.value[index].skill = customEditSkill.value
+        await postCustomStatsUpdate()
+      }
+
+      // 更新 profile 中的等级和优先级
+      const entry = matrixEntryByWeaponId.value.get(weaponId)
+      if (entry) {
+        entry.weapon_name = customEntryName.value
+        entry.affix1_level = detailAffix1.value
+        entry.affix2_level = detailAffix2.value
+        entry.affix3_level = detailAffix3.value
+        entry.priority = detailPriority.value
+        await updateTreasureMatrix([...treasureMatrix.value])
+        await updateWeaponPriority(weaponId, detailPriority.value)
+      }
     }
 
-    // 更新 profile 中的等级和优先级
-    const entry = matrixEntryByWeaponId.value.get(weaponId)
-    if (entry) {
-      entry.weapon_name = customEntryName.value
-      entry.affix1_level = detailAffix1.value
-      entry.affix2_level = detailAffix2.value
-      entry.affix3_level = detailAffix3.value
-      entry.priority = detailPriority.value
-      await updateTreasureMatrix([...treasureMatrix.value])
-      await updateWeaponPriority(weaponId, detailPriority.value)
-    }
+    detailDialog.value = false
+    await fetchCustomStats()
+  } catch (error) {
+    console.error('保存自定义基质失败:', error)
+    // TODO: 显示 snackbar 错误提示
   }
-
-  detailDialog.value = false
-  await fetchCustomStats()
 }
 
 /** 非自定义基质：从基质配置中移除 */
 async function removeNonCustomEntry(weaponId: string) {
-  await removeTreasureMatrixEntry(weaponId)
-  detailDialog.value = false
+  try {
+    await removeTreasureMatrixEntry(weaponId)
+    detailDialog.value = false
+  } catch (error) {
+    console.error('移除基质条目失败:', error)
+    // TODO: 显示 snackbar 错误提示
+  }
 }
 
 /** 非自定义基质：等级/优先级变化时自动保存（防抖） */
@@ -1040,16 +1063,22 @@ watch([detailAffix1, detailAffix2, detailAffix3, detailPriority], async () => {
 
   if (detailSaveTimer) clearTimeout(detailSaveTimer)
   detailSaveTimer = setTimeout(async () => {
-    const entry = matrixEntryByWeaponId.value.get(weaponId)
-    if (entry) {
-      entry.affix1_level = detailAffix1.value
-      entry.affix2_level = detailAffix2.value
-      entry.affix3_level = detailAffix3.value
-      entry.priority = detailPriority.value
-      await updateTreasureMatrix([...treasureMatrix.value])
-      await updateWeaponPriority(weaponId, detailPriority.value)
+    try {
+      const entry = matrixEntryByWeaponId.value.get(weaponId)
+      if (entry) {
+        entry.affix1_level = detailAffix1.value
+        entry.affix2_level = detailAffix2.value
+        entry.affix3_level = detailAffix3.value
+        entry.priority = detailPriority.value
+        await updateTreasureMatrix([...treasureMatrix.value])
+        await updateWeaponPriority(weaponId, detailPriority.value)
+      }
+    } catch (error) {
+      console.error('自动保存等级/优先级失败:', error)
+      // TODO: 显示 snackbar 错误提示
+    } finally {
+      detailSaveTimer = null
     }
-    detailSaveTimer = null
   }, 400)
 })
 
@@ -1083,46 +1112,53 @@ async function confirmDeleteCustomEntry() {
   }
   const targetId = `custom_stat_${index}`
 
-  // 1) 删除目标条目，并将所有索引 > index 的自定义条目前移一位
-  const newMatrix = treasureMatrix.value
-    .filter((e) => e.weapon_id !== targetId)
-    .map((e) => {
-      if (e.weapon_id.startsWith('custom_stat_')) {
-        const cur = Number.parseInt(e.weapon_id.replace('custom_stat_', ''), 10)
-        if (cur > index) return { ...e, weapon_id: `custom_stat_${cur - 1}` }
-      }
-      return e
-    })
+  try {
+    // 1) 删除目标条目，并将所有索引 > index 的自定义条目前移一位
+    const newMatrix = treasureMatrix.value
+      .filter((e) => e.weapon_id !== targetId)
+      .map((e) => {
+        if (e.weapon_id.startsWith('custom_stat_')) {
+          const cur = Number.parseInt(e.weapon_id.replace('custom_stat_', ''), 10)
+          if (cur > index) return { ...e, weapon_id: `custom_stat_${cur - 1}` }
+        }
+        return e
+      })
 
-  // 2) 从 config 的自定义基质列表中移除该项
-  customStats.value.splice(index, 1)
+    // 2) 从 config 的自定义基质列表中移除该项
+    customStats.value.splice(index, 1)
 
-  // 3) 持久化：先 profile，再 config，最后回读配置
-  await updateTreasureMatrix(newMatrix)
-  await postCustomStatsUpdate()
-  await fetchCustomStats()
+    // 3) 持久化：先 profile，再 config，最后回读配置
+    await updateTreasureMatrix(newMatrix)
+    await postCustomStatsUpdate()
+    await fetchCustomStats()
 
-  // 4) 关闭弹窗并清理引用（重索引后旧 syntheticId 已指向不同条目，必须清空）
-  deleteCustomConfirm.value = false
-  pendingCustomDelete.value = false
-  detailDialog.value = false
-  detailWeaponId.value = null
-  deleteCustomIndex.value = null
+    // 4) 关闭弹窗并清理引用（重索引后旧 syntheticId 已指向不同条目，必须清空）
+    deleteCustomConfirm.value = false
+    pendingCustomDelete.value = false
+    detailDialog.value = false
+    detailWeaponId.value = null
+    deleteCustomIndex.value = null
+  } catch (error) {
+    console.error('删除自定义基质失败:', error)
+    // TODO: 显示 snackbar 错误提示
+  }
 }
 
 /** 将自定义宝藏基质配置保存到后端 */
 async function postCustomStatsUpdate() {
-  try {
-    const res = await fetch('/api/config')
-    const currentConfig = await res.json()
-    currentConfig.treasure_essence_stats = customStats.value
-    await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(currentConfig),
-    })
-  } catch (error) {
-    console.error('保存自定义宝藏基质配置失败:', error)
+  const getRes = await fetch('/api/config')
+  if (!getRes.ok) {
+    throw new Error(`HTTP ${getRes.status}: ${getRes.statusText}`)
+  }
+  const currentConfig = await getRes.json()
+  currentConfig.treasure_essence_stats = customStats.value
+  const postRes = await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(currentConfig),
+  })
+  if (!postRes.ok) {
+    throw new Error(`HTTP ${postRes.status}: ${postRes.statusText}`)
   }
 }
 
@@ -1205,6 +1241,9 @@ async function fetchOverlapCompareResults() {
         }),
       }),
     })
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    }
     const data = await res.json()
     for (let i = 0; i < overlapItems.value.length; i++) {
       results.set(i, data.results?.[i] ?? 0)
@@ -1282,7 +1321,10 @@ function checkCustomOverlap() {
 async function confirmOverlapActions() {
   // 记录需要删除的自定义基质索引
   const indicesToDelete: number[] = []
+  // 记录是否有 suppress 操作需要更新配置
+  let hasSuppress = false
 
+  // 第一轮：在本地完成所有修改
   for (const item of overlapItems.value) {
     if (item.action === 'ignore') continue
 
@@ -1291,47 +1333,52 @@ async function confirmOverlapActions() {
 
     if (item.action === 'suppress') {
       stat.no_prompt_switch = true
-      await postCustomStatsUpdate()
+      hasSuppress = true
     }
 
-    if (item.action === 'switch') {
-      // 切换 weapon_id，保留 affix 等级，优先级用武器稀有度默认值（不手动设置）
-      const entry = matrixEntryByWeaponId.value.get(item.customWeaponId)
-      if (entry) {
-        const weapon = weaponsMap.value.get(item.matchedWeaponId)
-        const newEntries = treasureMatrix.value
-          .filter((e) => e.weapon_id !== item.customWeaponId)
-          .concat({
-            weapon_id: item.matchedWeaponId,
-            weapon_name: weapon?.name || item.matchedWeaponName,
-            affix1_level: entry.affix1_level,
-            affix2_level: entry.affix2_level,
-            affix3_level: entry.affix3_level,
-            include_in_calculation: entry.include_in_calculation,
-            // priority 不设置，使用武器稀有度默认值
-          })
-        await updateTreasureMatrix(newEntries)
-      }
-      indicesToDelete.push(item.customIndex)
-    }
-
-    if (item.action === 'delete') {
-      // 删除自定义基质：从 treasure_matrix 中移除对应条目
-      const newEntries = treasureMatrix.value.filter((e) => e.weapon_id !== item.customWeaponId)
-      await updateTreasureMatrix(newEntries)
+    if (item.action === 'switch' || item.action === 'delete') {
       indicesToDelete.push(item.customIndex)
     }
   }
 
   // 从大到小排序删除，避免索引偏移问题
   indicesToDelete.sort((a, b) => b - a)
+
+  // 构建新的 treasure_matrix（一次性完成所有 switch 和 delete 操作）
+  const toRemove = new Set(
+    overlapItems.value
+      .filter((i) => i.action === 'switch' || i.action === 'delete')
+      .map((i) => i.customWeaponId),
+  )
+  let newTreasureMatrix = treasureMatrix.value.filter((e) => !toRemove.has(e.weapon_id))
+
+  // 处理 switch 操作：追加内置武器条目
+  for (const item of overlapItems.value) {
+    if (item.action !== 'switch') continue
+
+    const entry = matrixEntryByWeaponId.value.get(item.customWeaponId)
+    if (entry) {
+      const weapon = weaponsMap.value.get(item.matchedWeaponId)
+      newTreasureMatrix.push({
+        weapon_id: item.matchedWeaponId,
+        weapon_name: weapon?.name || item.matchedWeaponName,
+        affix1_level: entry.affix1_level,
+        affix2_level: entry.affix2_level,
+        affix3_level: entry.affix3_level,
+        include_in_calculation: entry.include_in_calculation,
+        // priority 不设置，使用武器稀有度默认值
+      })
+    }
+  }
+
+  // 删除自定义基质配置
   for (const index of indicesToDelete) {
     customStats.value.splice(index, 1)
   }
 
   // 更新 treasure_matrix 中所有引用后续自定义基质的索引
   if (indicesToDelete.length > 0) {
-    const updatedTreasureMatrix = treasureMatrix.value.map((e) => {
+    newTreasureMatrix = newTreasureMatrix.map((e) => {
       if (e.weapon_id.startsWith('custom_stat_')) {
         const currentIndex = Number.parseInt(e.weapon_id.replace('custom_stat_', ''), 10)
         // 计算删除后的新索引
@@ -1347,8 +1394,19 @@ async function confirmOverlapActions() {
       }
       return e
     })
-    await updateTreasureMatrix(updatedTreasureMatrix)
-    await postCustomStatsUpdate()
+  }
+
+  // 第二轮：一次性提交所有修改到后端
+  try {
+    if (indicesToDelete.length > 0) {
+      await updateTreasureMatrix(newTreasureMatrix)
+    }
+    if (hasSuppress || indicesToDelete.length > 0) {
+      await postCustomStatsUpdate()
+    }
+  } catch (error) {
+    console.error('确认重合操作失败:', error)
+    // TODO: 显示 snackbar 错误提示
   }
 
   overlapDialog.value = false
@@ -1641,13 +1699,6 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   width: 1.5rem;
   height: 1.5rem;
   vertical-align: middle;
-}
-
-.essence-icon-small {
-  width: 1.5rem;
-  height: 1.5rem;
-  vertical-align: middle;
-  border-radius: 4px;
 }
 
 .weapon-overview-container {
