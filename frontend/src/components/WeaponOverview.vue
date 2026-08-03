@@ -587,7 +587,7 @@ import ItemIcon from '@/components/ItemIcon.vue'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { getGemTagName } from '@/utils/gameData/weapon'
+import { type CustomStat, getGemTagName } from '@/utils/gameData/weapon'
 
 const { weaponTypes, weaponsMap, essencesMap, matrixIcons } = useStaticData()
 const {
@@ -987,14 +987,20 @@ async function saveCustomEntry() {
 
   try {
     if (weaponId === '__new_custom__') {
-      // 新建模式：先写入 config
-      customStats.value.push({
+      // 新建模式：准备新条目数据
+      const newEntry = {
         name: customEntryName.value || `自定义基质 ${customStats.value.length + 1}`,
         attribute: customEditAttribute.value,
         secondary: customEditSecondary.value,
         skill: customEditSkill.value,
-      })
-      await postCustomStatsUpdate()
+      }
+
+      // 先发送请求，成功后再更新本地状态
+      const tempStats = [...customStats.value, newEntry]
+      await postCustomStatsUpdate(tempStats)
+
+      // 请求成功，更新本地状态
+      customStats.value.push(newEntry)
 
       // 只有标记为"已拥有"时才写入 profile
       if (isDetailOwned.value) {
@@ -1011,26 +1017,45 @@ async function saveCustomEntry() {
         })
       }
     } else if (isCustomEntry(weaponId)) {
-      // 编辑模式：更新 config 和 profile
+      // 编辑模式：准备更新数据
       const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
       if (customStats.value[index]) {
-        customStats.value[index].name = customEntryName.value
-        customStats.value[index].attribute = customEditAttribute.value
-        customStats.value[index].secondary = customEditSecondary.value
-        customStats.value[index].skill = customEditSkill.value
-        await postCustomStatsUpdate()
+        const originalEntry = { ...customStats.value[index] }
+        const updatedEntry = {
+          ...originalEntry,
+          name: customEntryName.value,
+          attribute: customEditAttribute.value,
+          secondary: customEditSecondary.value,
+          skill: customEditSkill.value,
+        }
+
+        // 先发送请求，成功后再更新本地状态
+        const tempStats = [...customStats.value]
+        tempStats[index] = updatedEntry
+        await postCustomStatsUpdate(tempStats)
+
+        // 请求成功，更新本地状态
+        customStats.value[index] = updatedEntry
       }
 
       // 更新 profile 中的等级和优先级
       const entry = matrixEntryByWeaponId.value.get(weaponId)
       if (entry) {
+        const originalEntry = { ...entry }
         entry.weapon_name = customEntryName.value
         entry.affix1_level = detailAffix1.value
         entry.affix2_level = detailAffix2.value
         entry.affix3_level = detailAffix3.value
         entry.priority = detailPriority.value
-        await updateTreasureMatrix([...treasureMatrix.value])
-        await updateWeaponPriority(weaponId, detailPriority.value)
+
+        try {
+          await updateTreasureMatrix([...treasureMatrix.value])
+          await updateWeaponPriority(weaponId, detailPriority.value)
+        } catch (profileError) {
+          // 回滚本地状态
+          Object.assign(entry, originalEntry)
+          throw profileError
+        }
       }
     }
 
@@ -1124,15 +1149,18 @@ async function confirmDeleteCustomEntry() {
         return e
       })
 
-    // 2) 从 config 的自定义基质列表中移除该项
-    customStats.value.splice(index, 1)
+    // 2) 准备新的 config 数据（不修改本地状态）
+    const tempStats = customStats.value.filter((_, i) => i !== index)
 
     // 3) 持久化：先 profile，再 config，最后回读配置
     await updateTreasureMatrix(newMatrix)
-    await postCustomStatsUpdate()
+    await postCustomStatsUpdate(tempStats)
+
+    // 4) 请求成功，更新本地状态
+    customStats.value.splice(index, 1)
     await fetchCustomStats()
 
-    // 4) 关闭弹窗并清理引用（重索引后旧 syntheticId 已指向不同条目，必须清空）
+    // 5) 关闭弹窗并清理引用（重索引后旧 syntheticId 已指向不同条目，必须清空）
     deleteCustomConfirm.value = false
     pendingCustomDelete.value = false
     detailDialog.value = false
@@ -1145,13 +1173,13 @@ async function confirmDeleteCustomEntry() {
 }
 
 /** 将自定义宝藏基质配置保存到后端 */
-async function postCustomStatsUpdate() {
+async function postCustomStatsUpdate(stats?: CustomStat[]) {
   const getRes = await fetch('/api/config')
   if (!getRes.ok) {
     throw new Error(`HTTP ${getRes.status}: ${getRes.statusText}`)
   }
   const currentConfig = await getRes.json()
-  currentConfig.treasure_essence_stats = customStats.value
+  currentConfig.treasure_essence_stats = stats ?? customStats.value
   const postRes = await fetch('/api/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1324,7 +1352,7 @@ async function confirmOverlapActions() {
   // 记录是否有 suppress 操作需要更新配置
   let hasSuppress = false
 
-  // 第一轮：在本地完成所有修改
+  // 第一轮：收集所有修改，不修改本地状态
   for (const item of overlapItems.value) {
     if (item.action === 'ignore') continue
 
@@ -1332,7 +1360,6 @@ async function confirmOverlapActions() {
     if (!stat) continue
 
     if (item.action === 'suppress') {
-      stat.no_prompt_switch = true
       hasSuppress = true
     }
 
@@ -1371,9 +1398,20 @@ async function confirmOverlapActions() {
     }
   }
 
-  // 删除自定义基质配置
+  // 准备新的 config 数据（不修改本地状态）
+  let tempStats = [...customStats.value]
   for (const index of indicesToDelete) {
-    customStats.value.splice(index, 1)
+    tempStats = tempStats.filter((_, i) => i !== index)
+  }
+
+  // 更新 suppress 标记
+  if (hasSuppress) {
+    for (const item of overlapItems.value) {
+      if (item.action === 'suppress' && tempStats[item.customIndex]) {
+        const stat = tempStats[item.customIndex]!
+        tempStats[item.customIndex] = { ...stat, no_prompt_switch: true }
+      }
+    }
   }
 
   // 更新 treasure_matrix 中所有引用后续自定义基质的索引
@@ -1402,7 +1440,19 @@ async function confirmOverlapActions() {
       await updateTreasureMatrix(newTreasureMatrix)
     }
     if (hasSuppress || indicesToDelete.length > 0) {
-      await postCustomStatsUpdate()
+      await postCustomStatsUpdate(tempStats)
+    }
+
+    // 请求成功，更新本地状态
+    for (const index of indicesToDelete) {
+      customStats.value.splice(index, 1)
+    }
+    if (hasSuppress) {
+      for (const item of overlapItems.value) {
+        if (item.action === 'suppress' && customStats.value[item.customIndex]) {
+          customStats.value[item.customIndex]!.no_prompt_switch = true
+        }
+      }
     }
   } catch (error) {
     console.error('确认重合操作失败:', error)
