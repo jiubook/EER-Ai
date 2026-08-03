@@ -35,6 +35,8 @@ export interface ProfileData {
 export interface ProfileCollection {
   version: number
   active_profile: string
+  /** 默认账号的当前名称（默认账号可重命名，重命名后同步更新） */
+  default_profile?: string
   profiles: Record<string, ProfileData>
 }
 
@@ -75,6 +77,7 @@ interface BatchFarmingItemResult {
 const collection = ref<ProfileCollection>({
   version: 1,
   active_profile: 'default',
+  default_profile: 'default',
   profiles: {},
 })
 
@@ -134,6 +137,7 @@ async function parseJsonResponse<T>(res: Response, fallbackMessage: string): Pro
 
 export function useProfiles() {
   const activeProfileName = computed(() => collection.value.active_profile)
+  const defaultProfileName = computed(() => collection.value.default_profile ?? 'default')
   const activeProfile = computed(() => {
     const name = collection.value.active_profile
     return collection.value.profiles[name] ?? { version: 1, name, treasure_matrix: [] }
@@ -193,6 +197,14 @@ export function useProfiles() {
       })
       if (!res.ok) {
         await parseJsonResponse<never>(res, 'Failed to delete profile')
+      }
+      // 后端删除激活账号后会自动回退到默认账号；先乐观同步本地，
+      // 避免随后重新拉取失败时 active_profile 仍指向已删除的账号。
+      if (collection.value.active_profile === name) {
+        collection.value = {
+          ...collection.value,
+          active_profile: collection.value.default_profile ?? 'default',
+        }
       }
       await fetchProfiles()
     } catch (error) {
@@ -357,6 +369,7 @@ export function useProfiles() {
     isLoaded,
     lastError,
     activeProfileName,
+    defaultProfileName,
     activeProfile,
     profileNames,
     treasureMatrix,

@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from endfield_essence_recognizer.schemas.profile import (
+    AFFIX1_MAX_LEVEL,
+    AFFIX2_MAX_LEVEL,
+    AFFIX3_MAX_LEVEL,
     ProfileCollection,
     ProfileData,
     TreasureMatrixEntry,
@@ -129,6 +132,11 @@ class ProfileManager:
             result = _load_profiles_from_file(self._profiles_file)
             if result is not None:
                 self._collection = result
+                if self._collection.default_profile not in self._collection.profiles:
+                    logger.warning(
+                        "默认账号 '{}' 在配置文件中不存在，已自动创建空账号",
+                        self._collection.default_profile,
+                    )
                 self._collection.ensure_default()
                 logger.info(
                     "加载账号配置成功，当前账号: {}", self._collection.active_profile
@@ -220,6 +228,11 @@ class ProfileManager:
         with self._lock:
             collection = self._collection.model_copy(deep=True)
             name = self._validate_profile_name(name)
+            if (
+                name == "default"
+                and collection.default_profile != "default"
+            ):
+                raise ValueError("不能使用保留名称 'default' 作为账号名称")
             if name not in collection.profiles:
                 collection.profiles[name] = ProfileData(name=name)
             collection.active_profile = name
@@ -264,7 +277,7 @@ class ProfileManager:
         return stripped
 
     def rename_profile(self, old_name: str, new_name: str) -> ProfileData:
-        """重命名账号。
+        """重命名账号（含默认账号）。
 
         Args:
             old_name: 当前账号名称。必须存在。
@@ -277,12 +290,15 @@ class ProfileManager:
             ValueError: 如果 old_name 不存在、new_name 已被占用或 new_name 无效。
         """
         with self._lock:
-            if old_name == "default":
-                raise ValueError("不能重命名默认账号")
             collection = self._collection.model_copy(deep=True)
             if old_name not in collection.profiles:
                 raise ValueError(f"账号 '{old_name}' 不存在")
             new_name = self._validate_profile_name(new_name)
+            if new_name == old_name:
+                # 同名重命名视为无操作，避免把"未修改"误报为名称冲突。
+                return collection.profiles[old_name].model_copy(deep=True)
+            if new_name == "default" and collection.default_profile != "default":
+                raise ValueError("不能使用保留名称 'default' 作为账号名称")
             if new_name in collection.profiles:
                 raise ValueError(f"账号 '{new_name}' 已存在")
 
@@ -292,6 +308,8 @@ class ProfileManager:
 
             if collection.active_profile == old_name:
                 collection.active_profile = new_name
+            if collection.default_profile == old_name:
+                collection.default_profile = new_name
 
             self._commit_collection_unlocked(collection)
             logger.info("重命名账号: {} -> {}", old_name, new_name)
@@ -300,24 +318,29 @@ class ProfileManager:
     def delete_profile(self, name: str) -> None:
         """删除账号。
 
-        不能删除 'default' 账号和当前激活的账号。
+        不能删除默认账号；删除当前激活的账号后会自动切换回默认账号。
 
         Args:
             name: 要删除的账号名称。
 
         Raises:
-            ValueError: 如果账号是 'default'、是激活账号或不存在。
+            ValueError: 如果账号是默认账号或不存在。
         """
         with self._lock:
             collection = self._collection.model_copy(deep=True)
-            if name == "default":
+            if name == collection.default_profile:
                 raise ValueError("不能删除默认账号")
             if name not in collection.profiles:
                 raise ValueError(f"账号 '{name}' 不存在")
-            if collection.active_profile == name:
-                raise ValueError("不能删除当前正在使用的账号")
 
             del collection.profiles[name]
+            if collection.active_profile == name:
+                collection.active_profile = collection.default_profile
+                logger.info(
+                    "删除激活账号: {}，已自动切换回默认账号: {}",
+                    name,
+                    collection.default_profile,
+                )
             self._commit_collection_unlocked(collection)
             logger.info("删除账号: {}", name)
 
@@ -418,9 +441,9 @@ class ProfileManager:
 
                 # 只在扫描到更高等级时自动关闭满级武器，避免无变更扫描覆盖用户选择。
                 if level_changed and (
-                    existing.affix1_level == 6
-                    and existing.affix2_level == 6
-                    and existing.affix3_level == 3
+                    existing.affix1_level == AFFIX1_MAX_LEVEL
+                    and existing.affix2_level == AFFIX2_MAX_LEVEL
+                    and existing.affix3_level == AFFIX3_MAX_LEVEL
                 ):
                     existing.include_in_calculation = False
 

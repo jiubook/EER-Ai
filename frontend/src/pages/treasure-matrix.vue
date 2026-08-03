@@ -132,7 +132,7 @@
                         class="pip"
                         :class="{
                           active: level <= entry.affix1_level,
-                          'pip--max': entry.affix1_level === 6,
+                          'pip--max': entry.affix1_level === AFFIX_MAX_LEVEL[0],
                         }"
                         role="button"
                         tabindex="0"
@@ -143,11 +143,11 @@
                     </div>
                     <span
                       class="attr-value"
-                      :class="{ 'attr-value--full': entry.affix1_level === 6 }"
+                      :class="{ 'attr-value--full': entry.affix1_level === AFFIX_MAX_LEVEL[0] }"
                     >
-                      +{{ entry.affix1_level }} / 6
+                      +{{ entry.affix1_level }} / {{ AFFIX_MAX_LEVEL[0] }}
                     </span>
-                    <span v-if="entry.affix1_level === 6" class="max-label">MAX</span>
+                    <span v-if="entry.affix1_level === AFFIX_MAX_LEVEL[0]" class="max-label">MAX</span>
                   </div>
 
                   <div class="attr-control attr-control--teal" @click.stop>
@@ -160,7 +160,7 @@
                         class="pip"
                         :class="{
                           active: level <= entry.affix2_level,
-                          'pip--max': entry.affix2_level === 6,
+                          'pip--max': entry.affix2_level === AFFIX_MAX_LEVEL[1],
                         }"
                         role="button"
                         tabindex="0"
@@ -171,11 +171,11 @@
                     </div>
                     <span
                       class="attr-value"
-                      :class="{ 'attr-value--full': entry.affix2_level === 6 }"
+                      :class="{ 'attr-value--full': entry.affix2_level === AFFIX_MAX_LEVEL[1] }"
                     >
-                      +{{ entry.affix2_level }} / 6
+                      +{{ entry.affix2_level }} / {{ AFFIX_MAX_LEVEL[1] }}
                     </span>
-                    <span v-if="entry.affix2_level === 6" class="max-label">MAX</span>
+                    <span v-if="entry.affix2_level === AFFIX_MAX_LEVEL[1]" class="max-label">MAX</span>
                   </div>
 
                   <div class="attr-control attr-control--indigo" @click.stop>
@@ -188,7 +188,7 @@
                         class="pip"
                         :class="{
                           active: level <= entry.affix3_level,
-                          'pip--max': entry.affix3_level === 3,
+                          'pip--max': entry.affix3_level === AFFIX_MAX_LEVEL[2],
                         }"
                         role="button"
                         tabindex="0"
@@ -199,11 +199,11 @@
                     </div>
                     <span
                       class="attr-value"
-                      :class="{ 'attr-value--full': entry.affix3_level === 3 }"
+                      :class="{ 'attr-value--full': entry.affix3_level === AFFIX_MAX_LEVEL[2] }"
                     >
-                      +{{ entry.affix3_level }} / 3
+                      +{{ entry.affix3_level }} / {{ AFFIX_MAX_LEVEL[2] }}
                     </span>
-                    <span v-if="entry.affix3_level === 3" class="max-label">MAX</span>
+                    <span v-if="entry.affix3_level === AFFIX_MAX_LEVEL[2]" class="max-label">MAX</span>
                   </div>
                 </section>
 
@@ -263,65 +263,36 @@
           刷取建议
         </v-expansion-panel-title>
         <v-expansion-panel-text>
-          <v-row align="center" class="mb-4">
-            <v-col cols="12" md="4">
-              <v-select
-                id="treasure-matrix-target-affix1"
-                v-model="targetAffix1"
-                density="compact"
-                hide-details
-                :items="affixLevelItems"
-                label="目标基础属性"
-                name="treasure-matrix-target-affix1"
-                variant="outlined"
-              >
-                <template #selection="{ item }">+{{ item.title }}</template>
-                <template #item="{ item, props }">
-                  <v-list-item v-bind="props">
-                    <template #title>+{{ item.title }}</template>
-                  </v-list-item>
-                </template>
-              </v-select>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-select
-                id="treasure-matrix-target-affix2"
-                v-model="targetAffix2"
-                density="compact"
-                hide-details
-                :items="affixLevelItems"
-                label="目标附加属性"
-                name="treasure-matrix-target-affix2"
-                variant="outlined"
-              >
-                <template #selection="{ item }">+{{ item.title }}</template>
-                <template #item="{ item, props }">
-                  <v-list-item v-bind="props">
-                    <template #title>+{{ item.title }}</template>
-                  </v-list-item>
-                </template>
-              </v-select>
-            </v-col>
-            <v-col cols="12" md="4">
-              <v-select
-                id="treasure-matrix-target-affix3"
-                v-model="targetAffix3"
-                density="compact"
-                hide-details
-                :items="skillLevelItems"
-                label="目标技能属性"
-                name="treasure-matrix-target-affix3"
-                variant="outlined"
-              >
-                <template #selection="{ item }">+{{ item.title }}</template>
-                <template #item="{ item, props }">
-                  <v-list-item v-bind="props">
-                    <template #title>+{{ item.title }}</template>
-                  </v-list-item>
-                </template>
-              </v-select>
-            </v-col>
-          </v-row>
+          <!-- 目标属性：卡片式布局，横条 pip 选择 -->
+          <section class="attr-grid target-attr-grid mb-4">
+            <div
+              v-for="slot in targetSlots"
+              :key="slot.key"
+              class="attr-card"
+            >
+              <div class="attr-card-header">
+                <span class="attr-card-label">{{ slot.label }}</span>
+                <span class="attr-card-value" :class="{ max: slot.get() === slot.maxLevel }">
+                  +{{ slot.get() }} / {{ slot.maxLevel }}
+                  <span v-if="slot.get() === slot.maxLevel" class="max-badge">MAX</span>
+                </span>
+              </div>
+              <div :aria-label="`${slot.label}等级`" class="attr-pip-row" role="group">
+                <span
+                  v-for="level in slot.levels"
+                  :key="level"
+                  :aria-label="`设置${slot.label}目标为 +${level}`"
+                  class="attr-pip"
+                  :class="[`attr-pip--${slot.color}`, { active: level <= slot.get() }]"
+                  role="button"
+                  tabindex="0"
+                  @click="slot.set(level)"
+                  @keydown.enter.prevent="slot.set(level)"
+                  @keydown.space.prevent="slot.set(level)"
+                />
+              </div>
+            </div>
+          </section>
 
           <v-btn
             class="mb-4"
@@ -385,133 +356,78 @@
             class="mb-4 rec-card"
             variant="outlined"
           >
-            <v-card-item>
+            <v-card-item class="rec-card-top">
               <template #prepend>
                 <custom-stat-icon v-if="isCustomEntry(rec.weapon_id)" hide-name :name="getCustomStatName(rec.weapon_id, customStats)" :skill-stat-id="getCustomStatSkillId(rec.weapon_id, customStats)" small />
                 <item-icon v-else class="weapon-icon-small" :item-id="rec.weapon_id" />
               </template>
               <v-card-title>{{ isCustomEntry(rec.weapon_id) ? getCustomStatName(rec.weapon_id, customStats) : rec.weapon_name }}</v-card-title>
-              <v-card-subtitle>
+              <v-card-subtitle class="weapon-progress">
                 当前: +{{ rec.current_levels[0] }} / +{{ rec.current_levels[1] }} / +{{ rec.current_levels[2] }}
-                → 目标: +{{ rec.target_levels[0] }} / +{{ rec.target_levels[1] }} / +{{ rec.target_levels[2] }}
+                <span class="arrow">→</span>
+                目标: <span class="target">+{{ rec.target_levels[0] }} / +{{ rec.target_levels[1] }} / +{{ rec.target_levels[2] }}</span>
               </v-card-subtitle>
               <template #append>
-                <v-chip color="warning" size="large" variant="flat">
-                  <v-icon start>mdi-sword</v-icon>
-                  约 {{ Math.ceil(getAdjustedStats(rec).totalRuns) }} 次刷取
-                </v-chip>
+                <div class="farming-badge">
+                  <span class="farming-badge-count">{{ Math.ceil(getAdjustedStats(rec).totalRuns) }}</span>
+                  <span class="farming-badge-label">刷取次数</span>
+                </div>
               </template>
             </v-card-item>
             <v-divider />
             <v-card-text>
               <v-row>
-                <v-col cols="12" md="4">
+                <v-col
+                  v-for="slot in recSlots"
+                  :key="slot.index"
+                  cols="12"
+                  md="4"
+                >
                   <v-list density="compact">
                     <v-list-subheader>
-                      <v-icon class="mr-1" color="primary" size="small">mdi-circle</v-icon>
-                      基础属性 +{{ rec.current_levels[0] }} → +{{ rec.target_levels[0] }}
+                      <span class="steps-col-dot" :class="`steps-col-dot--${slot.color}`" />
+                      {{ slot.label }}
                     </v-list-subheader>
                     <v-list-item
-                      v-for="step in rec.affix_results[0]?.steps"
-                      :key="'a1-' + step.from_level"
-                      :class="{ 'bg-success-lighten-5': isUsingGrease(rec.weapon_id, 0, step.from_level) }"
+                      v-for="step in rec.affix_results[slot.index]?.steps"
+                      :key="`a${slot.index}-` + step.from_level"
+                      class="rec-step-row"
+                      :class="{ 'bg-success-lighten-5': isUsingGrease(rec.weapon_id, slot.index, step.from_level) }"
                       density="compact"
                       style="cursor: pointer"
-                      @click="toggleUseGrease(rec.weapon_id, 0, step.from_level)"
+                      @click="toggleUseGrease(rec.weapon_id, slot.index, step.from_level)"
                     >
                       <v-list-item-title>
-                        +{{ step.from_level }} → +{{ step.to_level }}
+                        <div class="d-flex align-center ga-2">
+                          <span
+                            :aria-label="`${step.to_level}/${slot.maxLevel} 级`"
+                            class="rec-step-pips"
+                            :class="`rec-step-pips--${slot.color}`"
+                          >
+                            <span
+                              v-for="p in slot.maxLevel"
+                              :key="p"
+                              class="rec-step-pip"
+                              :class="{ active: p <= step.to_level }"
+                            />
+                          </span>
+                          <span class="text-body-2">+{{ step.from_level }} → +{{ step.to_level }}</span>
+                        </div>
                       </v-list-item-title>
                       <template #append>
                         <v-chip
-                          :color="isUsingGrease(rec.weapon_id, 0, step.from_level) ? 'success' : undefined"
+                          :color="isUsingGrease(rec.weapon_id, slot.index, step.from_level) ? 'success' : undefined"
                           size="x-small"
-                          :variant="isUsingGrease(rec.weapon_id, 0, step.from_level) ? 'flat' : 'tonal'"
+                          :variant="isUsingGrease(rec.weapon_id, slot.index, step.from_level) ? 'flat' : 'tonal'"
                         >
-                          {{ isUsingGrease(rec.weapon_id, 0, step.from_level) ? '100%' : (step.success_prob * 100).toFixed(1) + '%' }}
+                          {{ isUsingGrease(rec.weapon_id, slot.index, step.from_level) ? '100%' : (step.success_prob * 100).toFixed(1) + '%' }}
                         </v-chip>
                         <span class="text-caption ml-2">
-                          {{ isUsingGrease(rec.weapon_id, 0, step.from_level) ? `冷却脂 ${step.grease_threshold}` : `期望 ${step.expected_attempts.toFixed(1)} 次` }}
+                          {{ isUsingGrease(rec.weapon_id, slot.index, step.from_level) ? `冷却脂 ${step.grease_threshold}` : `期望 ${step.expected_attempts.toFixed(1)} 次` }}
                         </span>
                       </template>
                     </v-list-item>
-                    <v-list-item v-if="rec.affix_results[0]?.steps.length === 0" density="compact">
-                      <v-list-item-title class="text-medium-emphasis">
-                        <v-icon class="mr-1" color="success" size="small">mdi-check</v-icon>
-                        已达标
-                      </v-list-item-title>
-                    </v-list-item>
-                  </v-list>
-                </v-col>
-                <v-col cols="12" md="4">
-                  <v-list density="compact">
-                    <v-list-subheader>
-                      <v-icon class="mr-1" color="teal" size="small">mdi-circle</v-icon>
-                      附加属性 +{{ rec.current_levels[1] }} → +{{ rec.target_levels[1] }}
-                    </v-list-subheader>
-                    <v-list-item
-                      v-for="step in rec.affix_results[1]?.steps"
-                      :key="'a2-' + step.from_level"
-                      :class="{ 'bg-success-lighten-5': isUsingGrease(rec.weapon_id, 1, step.from_level) }"
-                      density="compact"
-                      style="cursor: pointer"
-                      @click="toggleUseGrease(rec.weapon_id, 1, step.from_level)"
-                    >
-                      <v-list-item-title>
-                        +{{ step.from_level }} → +{{ step.to_level }}
-                      </v-list-item-title>
-                      <template #append>
-                        <v-chip
-                          :color="isUsingGrease(rec.weapon_id, 1, step.from_level) ? 'success' : undefined"
-                          size="x-small"
-                          :variant="isUsingGrease(rec.weapon_id, 1, step.from_level) ? 'flat' : 'tonal'"
-                        >
-                          {{ isUsingGrease(rec.weapon_id, 1, step.from_level) ? '100%' : (step.success_prob * 100).toFixed(1) + '%' }}
-                        </v-chip>
-                        <span class="text-caption ml-2">
-                          {{ isUsingGrease(rec.weapon_id, 1, step.from_level) ? `冷却脂 ${step.grease_threshold}` : `期望 ${step.expected_attempts.toFixed(1)} 次` }}
-                        </span>
-                      </template>
-                    </v-list-item>
-                    <v-list-item v-if="rec.affix_results[1]?.steps.length === 0" density="compact">
-                      <v-list-item-title class="text-medium-emphasis">
-                        <v-icon class="mr-1" color="success" size="small">mdi-check</v-icon>
-                        已达标
-                      </v-list-item-title>
-                    </v-list-item>
-                  </v-list>
-                </v-col>
-                <v-col cols="12" md="4">
-                  <v-list density="compact">
-                    <v-list-subheader>
-                      <v-icon class="mr-1" color="blue" size="small">mdi-circle</v-icon>
-                      技能属性 +{{ rec.current_levels[2] }} → +{{ rec.target_levels[2] }}
-                    </v-list-subheader>
-                    <v-list-item
-                      v-for="step in rec.affix_results[2]?.steps"
-                      :key="'a3-' + step.from_level"
-                      :class="{ 'bg-success-lighten-5': isUsingGrease(rec.weapon_id, 2, step.from_level) }"
-                      density="compact"
-                      style="cursor: pointer"
-                      @click="toggleUseGrease(rec.weapon_id, 2, step.from_level)"
-                    >
-                      <v-list-item-title>
-                        +{{ step.from_level }} → +{{ step.to_level }}
-                      </v-list-item-title>
-                      <template #append>
-                        <v-chip
-                          :color="isUsingGrease(rec.weapon_id, 2, step.from_level) ? 'success' : undefined"
-                          size="x-small"
-                          :variant="isUsingGrease(rec.weapon_id, 2, step.from_level) ? 'flat' : 'tonal'"
-                        >
-                          {{ isUsingGrease(rec.weapon_id, 2, step.from_level) ? '100%' : (step.success_prob * 100).toFixed(1) + '%' }}
-                        </v-chip>
-                        <span class="text-caption ml-2">
-                          {{ isUsingGrease(rec.weapon_id, 2, step.from_level) ? `冷却脂 ${step.grease_threshold}` : `期望 ${step.expected_attempts.toFixed(1)} 次` }}
-                        </span>
-                      </template>
-                    </v-list-item>
-                    <v-list-item v-if="rec.affix_results[2]?.steps.length === 0" density="compact">
+                    <v-list-item v-if="rec.affix_results[slot.index]?.steps.length === 0" density="compact">
                       <v-list-item-title class="text-medium-emphasis">
                         <v-icon class="mr-1" color="success" size="small">mdi-check</v-icon>
                         已达标
@@ -714,6 +630,8 @@ const targetAffix1 = ref(6)
 const targetAffix2 = ref(6)
 const targetAffix3 = ref(3)
 
+// 各词条最大等级（与后端 schema 的 le 约束保持一致）
+const AFFIX_MAX_LEVEL = [6, 6, 3] as const
 const affixLevelItems = [1, 2, 3, 4, 5, 6]
 const skillLevelItems = [1, 2, 3]
 
@@ -919,7 +837,7 @@ const filteredMatrixEntries = computed(() => {
   if (!showMaxedWeapons.value) {
     entries = entries.filter(
       (entry) =>
-        !(entry.affix1_level === 6 && entry.affix2_level === 6 && entry.affix3_level === 3),
+        !(entry.affix1_level === AFFIX_MAX_LEVEL[0] && entry.affix2_level === AFFIX_MAX_LEVEL[1] && entry.affix3_level === AFFIX_MAX_LEVEL[2]),
     )
   }
 
@@ -1022,6 +940,45 @@ async function removeEntry(index: number) {
   }
 }
 
+// 刷取建议卡片内三个属性槽位的展示配置（pip 总量：基础/附加 6 格，技能 3 格）
+// 颜色与配置区 attr-control 保持一致：primary / teal / indigo
+const recSlots = [
+  { index: 0, label: '基础属性', color: 'primary', maxLevel: AFFIX_MAX_LEVEL[0] },
+  { index: 1, label: '附加属性', color: 'teal', maxLevel: AFFIX_MAX_LEVEL[1] },
+  { index: 2, label: '技能属性', color: 'indigo', maxLevel: AFFIX_MAX_LEVEL[2] },
+]
+
+// 目标属性卡片配置（attr-card 布局）
+const targetSlots = [
+  {
+    key: 'affix1',
+    label: '目标基础属性',
+    color: 'primary',
+    maxLevel: AFFIX_MAX_LEVEL[0],
+    levels: affixLevelItems,
+    get: () => targetAffix1.value,
+    set: (v: number) => { targetAffix1.value = v },
+  },
+  {
+    key: 'affix2',
+    label: '目标附加属性',
+    color: 'teal',
+    maxLevel: AFFIX_MAX_LEVEL[1],
+    levels: affixLevelItems,
+    get: () => targetAffix2.value,
+    set: (v: number) => { targetAffix2.value = v },
+  },
+  {
+    key: 'affix3',
+    label: '目标技能属性',
+    color: 'indigo',
+    maxLevel: AFFIX_MAX_LEVEL[2],
+    levels: skillLevelItems,
+    get: () => targetAffix3.value,
+    set: (v: number) => { targetAffix3.value = v },
+  },
+]
+
 function toggleUseGrease(weaponId: string, affixIndex: number, fromLevel: number) {
   const key = `${affixIndex}-${fromLevel}`
   if (!useGreaseForSteps.value[weaponId]) {
@@ -1106,9 +1063,9 @@ function onEntryChange() {
   // 检查是否有武器达到满级（6/6/3），自动取消勾选
   for (const entry of matrixEntries.value) {
     if (
-      entry.affix1_level === 6 &&
-      entry.affix2_level === 6 &&
-      entry.affix3_level === 3 &&
+      entry.affix1_level === AFFIX_MAX_LEVEL[0] &&
+      entry.affix2_level === AFFIX_MAX_LEVEL[1] &&
+      entry.affix3_level === AFFIX_MAX_LEVEL[2] &&
       entry.include_in_calculation !== false
     ) {
       entry.include_in_calculation = false
@@ -1213,6 +1170,9 @@ onMounted(() => {
 
 <style scoped lang="scss">
 $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
+// 附加/技能属性槽位的主题色（与 attr-control、pip、步骤列圆点、步骤 pip 共用）
+$attr-teal: #48a9a6;
+$attr-indigo: #5c6bc0;
 
 .treasure-matrix-page {
   .entry-card {
@@ -1455,13 +1415,13 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
     }
 
     .attr-control--teal .pip.active {
-      background: #48a9a6;
-      box-shadow: 0 2px 7px rgba(72, 169, 166, 0.34);
+      background: $attr-teal;
+      box-shadow: 0 2px 7px rgba($attr-teal, 0.34);
     }
 
     .attr-control--indigo .pip.active {
-      background: #5c6bc0;
-      box-shadow: 0 2px 7px rgba(92, 107, 192, 0.34);
+      background: $attr-indigo;
+      box-shadow: 0 2px 7px rgba($attr-indigo, 0.34);
     }
 
     .pip.pip--max.active {
@@ -1579,12 +1539,218 @@ $weapon-icon-size: clamp(2.5rem, 14vw, 5rem);
     }
   }
 
+  // 目标属性卡片（attr-card 布局）
+  .target-attr-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .attr-card {
+    padding: 16px;
+    border: 1px solid rgba(var(--v-border-color), 0.12);
+    border-radius: 12px;
+    background: rgba(var(--v-theme-on-surface), 0.0);
+    transition: border-color 0.18s ease;
+
+    &:hover {
+      border-color: rgba(var(--v-border-color), 0.3);
+    }
+  }
+
+  .attr-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .attr-card-label {
+    color: rgba(var(--v-theme-on-surface), 0.52);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  .attr-card-value {
+    color: rgba(var(--v-theme-on-surface), 0.68);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    font-weight: 800;
+
+    &.max {
+      color: rgb(var(--v-theme-success));
+    }
+  }
+
+  .max-badge {
+    margin-left: 4px;
+    color: rgb(var(--v-theme-success));
+    font-size: 0.6rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .attr-pip-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .attr-pip {
+    width: 28px;
+    height: 10px;
+    border-radius: 3px;
+    background: rgba(var(--v-theme-on-surface), 0.12);
+    cursor: pointer;
+    transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+
+    &:hover,
+    &:focus-visible {
+      outline: none;
+      transform: scaleY(1.25);
+    }
+  }
+
+  .attr-pip--primary.active {
+    background: rgb(var(--v-theme-primary));
+    box-shadow: 0 0 8px rgba(var(--v-theme-primary), 0.25);
+  }
+
+  .attr-pip--teal.active {
+    background: $attr-teal;
+    box-shadow: 0 0 8px rgba($attr-teal, 0.25);
+  }
+
+  .attr-pip--indigo.active {
+    background: $attr-indigo;
+    box-shadow: 0 0 8px rgba($attr-indigo, 0.25);
+  }
+
+  @media (max-width: 640px) {
+    .target-attr-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   .rec-card {
+    border-color: rgba(var(--v-border-color), 0.25);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     &:hover {
       transform: translateY(-2px);
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
     }
+  }
+
+  // 武器卡头部：当前等级灰 → 箭头主题色 → 目标等级亮绿
+  .rec-card-top {
+    padding: 20px;
+  }
+
+  // 刷取次数徽章（卡片式：大数字 + 小标签）
+  .farming-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+    border: 1px solid rgba(var(--v-theme-warning), 0.25);
+    border-radius: 10px;
+    background: rgba(var(--v-theme-warning), 0.12);
+    flex-shrink: 0;
+  }
+
+  .farming-badge-count {
+    color: rgb(var(--v-theme-warning));
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 1.2rem;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .farming-badge-label {
+    margin-top: 2px;
+    color: rgba(var(--v-theme-on-surface), 0.55);
+    font-size: 0.7rem;
+    white-space: nowrap;
+  }
+
+  .weapon-progress {
+    color: rgba(var(--v-theme-on-surface), 0.45);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-weight: 800;
+
+    .arrow {
+      margin: 0 4px;
+      color: rgb(var(--v-theme-primary));
+    }
+
+    .target {
+      color: rgb(var(--v-theme-success));
+    }
+  }
+
+  // 步骤列头圆点（颜色与 attr-control 一致：primary / teal / indigo）
+  .steps-col-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &--primary {
+      background: rgb(var(--v-theme-primary));
+    }
+
+    &--teal {
+      background: $attr-teal;
+    }
+
+    &--indigo {
+      background: $attr-indigo;
+    }
+  }
+
+  // 步骤行分隔线
+  .rec-step-row {
+    border-bottom: 1px solid rgba(var(--v-border-color), 0.08);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  // 刷取建议步骤的方形 pip 展示（仅展示，点击行只切换冷却脂，不改变 pip 亮暗）
+  .rec-step-pips {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .rec-step-pip {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: rgba(var(--v-theme-on-surface), 0.12);
+    transition: background 0.18s ease, box-shadow 0.18s ease;
+
+    &.active {
+      background: rgb(var(--v-theme-primary));
+      box-shadow: 0 0 6px rgba(var(--v-theme-primary), 0.3);
+    }
+  }
+
+  .rec-step-pips--teal .rec-step-pip.active {
+    background: $attr-teal;
+    box-shadow: 0 0 6px rgba($attr-teal, 0.3);
+  }
+
+  .rec-step-pips--indigo .rec-step-pip.active {
+    background: $attr-indigo;
+    box-shadow: 0 0 6px rgba($attr-indigo, 0.3);
   }
 }
 

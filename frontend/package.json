@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier . --write",
-    "format:check": "prettier . --check"
+    "format:check": "prettier . --check",
+    "test": "vitest run"
   },
   "dependencies": {
     "@mdi/font": "7.4.47",
@@ -37,6 +38,7 @@
     "vite": "^7.1.5",
     "vite-plugin-vue-devtools": "^8.0.5",
     "vite-plugin-vuetify": "^2.1.2",
+    "vitest": "^4.1.10",
     "vue-tsc": "^3.0.7"
   }
 }

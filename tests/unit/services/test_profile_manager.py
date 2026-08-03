@@ -1,5 +1,6 @@
 """账号管理器服务的测试。"""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -150,12 +151,158 @@ def test_delete_default_profile(profile_manager: ProfileManager):
         profile_manager.delete_profile("default")
 
 
-def test_delete_active_profile(profile_manager: ProfileManager):
-    """测试删除激活的账号是被禁止的。"""
+def test_delete_active_profile_falls_back_to_default(profile_manager: ProfileManager):
+    """测试删除当前激活的账号后自动切换回默认账号。"""
     profile_manager.load()
     profile_manager.switch_profile("active")
-    with pytest.raises(ValueError, match="不能删除当前正在使用的账号"):
-        profile_manager.delete_profile("active")
+    profile_manager.delete_profile("active")
+    collection = profile_manager.get_collection()
+    assert "active" not in collection.profiles
+    assert collection.active_profile == "default"
+
+
+def test_rename_default_profile(profile_manager: ProfileManager):
+    """测试重命名默认账号，default_profile 与 active_profile 同步更新。"""
+    profile_manager.load()
+    profile = profile_manager.rename_profile("default", "我的账号")
+    collection = profile_manager.get_collection()
+    assert profile.name == "我的账号"
+    assert "我的账号" in collection.profiles
+    assert "default" not in collection.profiles
+    assert collection.active_profile == "我的账号"
+    assert collection.default_profile == "我的账号"
+
+
+def test_delete_renamed_default_profile(profile_manager: ProfileManager):
+    """测试删除改名后的默认账号仍被禁止。"""
+    profile_manager.load()
+    profile_manager.rename_profile("default", "我的账号")
+    with pytest.raises(ValueError, match="不能删除默认账号"):
+        profile_manager.delete_profile("我的账号")
+
+
+def test_delete_active_profile_falls_back_to_renamed_default(
+    profile_manager: ProfileManager,
+):
+    """删除激活账号后回退到改名后的默认账号，且默认账号数据可用。"""
+    profile_manager.load()
+    profile_manager.rename_profile("default", "我的账号")
+    profile_manager.switch_profile("active")
+    profile_manager.delete_profile("active")
+    collection = profile_manager.get_collection()
+    assert "active" not in collection.profiles
+    assert collection.active_profile == "我的账号"
+    # 回退后默认账号可正常读取，不会出现 KeyError 或幽灵空账号
+    assert profile_manager.get_active_profile_name() == "我的账号"
+    assert profile_manager.get_active_profile().name == "我的账号"
+
+
+def test_rename_default_profile_keeps_other_active(profile_manager: ProfileManager):
+    """重命名默认账号时，若激活的是其它账号则只更新 default_profile。"""
+    profile_manager.load()
+    profile_manager.switch_profile("alt")
+    profile_manager.rename_profile("default", "我的账号")
+    collection = profile_manager.get_collection()
+    assert collection.default_profile == "我的账号"
+    assert collection.active_profile == "alt"
+
+
+def test_rename_default_profile_to_existing_name(profile_manager: ProfileManager):
+    """重命名默认账号为已占用名称会抛出 ValueError。"""
+    profile_manager.load()
+    profile_manager.switch_profile("other")
+    with pytest.raises(ValueError, match="已存在"):
+        profile_manager.rename_profile("default", "other")
+
+
+def test_rename_profile_to_same_name_is_noop(profile_manager: ProfileManager):
+    """同名重命名是无操作，不报错、不写盘。"""
+    profile_manager.load()
+    profile = profile_manager.rename_profile("default", "default")
+    assert profile.name == "default"
+    assert profile_manager.get_collection().default_profile == "default"
+
+
+def test_load_legacy_file_without_default_profile(temp_profiles_file: Path):
+    """旧版配置文件（无 default_profile 字段）加载后兼容为新默认账号。"""
+    temp_profiles_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "active_profile": "default",
+                "profiles": {
+                    "default": {
+                        "version": 1,
+                        "name": "default",
+                        "treasure_matrix": [],
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    manager = ProfileManager(temp_profiles_file)
+    manager.load()
+    collection = manager.get_collection()
+    assert collection.default_profile == "default"
+    assert "default" in collection.profiles
+
+
+def test_load_self_heals_missing_default_profile(temp_profiles_file: Path):
+    """default_profile 指向不存在的账号时，load 自动创建空账号。"""
+    temp_profiles_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "active_profile": "default",
+                "default_profile": "我的账号",
+                "profiles": {
+                    "default": {
+                        "version": 1,
+                        "name": "default",
+                        "treasure_matrix": [],
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    manager = ProfileManager(temp_profiles_file)
+    manager.load()
+    collection = manager.get_collection()
+    assert collection.default_profile == "我的账号"
+    assert "我的账号" in collection.profiles
+
+
+def test_switch_to_reserved_default_name_after_rename(
+    profile_manager: ProfileManager,
+):
+    """默认账号改名后，不能新建/切换到保留名称 'default'。"""
+    profile_manager.load()
+    profile_manager.rename_profile("default", "我的账号")
+    with pytest.raises(ValueError, match="保留名称"):
+        profile_manager.switch_profile("default")
+
+
+def test_rename_profile_to_reserved_default_name(profile_manager: ProfileManager):
+    """默认账号改名后，其它账号不能改名为保留名称 'default'。"""
+    profile_manager.load()
+    profile_manager.rename_profile("default", "我的账号")
+    profile_manager.switch_profile("other")
+    with pytest.raises(ValueError, match="保留名称"):
+        profile_manager.rename_profile("other", "default")
+
+
+def test_switch_default_name_allowed_when_default_not_renamed(
+    profile_manager: ProfileManager,
+):
+    """未改名的默认账号下，切换回 'default' 仍然允许。"""
+    profile_manager.load()
+    profile_manager.switch_profile("other")
+    profile_manager.switch_profile("default")
+    assert profile_manager.get_active_profile_name() == "default"
 
 
 def test_treasure_matrix_operations(profile_manager: ProfileManager):

@@ -20,29 +20,39 @@
         <v-list-item-title>{{ name }}</v-list-item-title>
         <template #append>
           <div class="d-flex ga-1">
-            <v-btn
-              v-if="name !== 'default'"
-              icon="mdi-pencil"
-              size="x-small"
-              variant="text"
-              @click.stop="startRename(name)"
-            />
-            <v-btn
-              v-if="name !== 'default' && name !== activeProfileName"
-              color="error"
-              icon="mdi-delete"
-              size="x-small"
-              variant="text"
-              @click.stop="startDelete(name)"
-            />
-            <v-tooltip v-if="name === 'default'" location="bottom" text="清空数据">
+            <v-tooltip location="bottom" text="重命名账号">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  icon="mdi-pencil"
+                  size="x-small"
+                  variant="text"
+                  @click.stop="startRename(name)"
+                />
+              </template>
+            </v-tooltip>
+            <v-tooltip location="bottom" :text="name === defaultProfileName ? '默认账号不可删除' : '删除账号'">
+              <template #activator="{ props }">
+                <span v-bind="props">
+                  <v-btn
+                    :color="name === defaultProfileName ? undefined : 'error'"
+                    :disabled="name === defaultProfileName"
+                    icon="mdi-delete"
+                    size="x-small"
+                    variant="text"
+                    @click.stop="startDelete(name)"
+                  />
+                </span>
+              </template>
+            </v-tooltip>
+            <v-tooltip location="bottom" text="清空数据">
               <template #activator="{ props }">
                 <v-btn
                   v-bind="props"
                   color="error"
-                  icon="mdi-delete"
+                  icon="mdi-delete-outline"
                   size="x-small"
-                  variant="text"
+                  variant="outlined"
                   @click.stop="startClearData(name)"
                 />
               </template>
@@ -112,6 +122,9 @@
       <v-card-title class="text-error">确认删除</v-card-title>
       <v-card-text>
         确定要删除账号「{{ deleteTargetName }}」吗？此操作不可撤销。
+        <template v-if="deleteIsActive">
+          <br />该账号正在使用中，删除后将自动切换回默认账号「{{ defaultProfileName }}」。
+        </template>
       </v-card-text>
       <v-card-actions>
         <v-spacer />
@@ -147,6 +160,7 @@ import { useProfiles } from '@/composables/useProfiles'
 
 const {
   activeProfileName,
+  defaultProfileName,
   profileNames,
   fetchProfiles,
   switchProfile,
@@ -168,6 +182,7 @@ const newProfileName = ref('')
 const renameNewName = ref('')
 const renameOldName = ref('')
 const deleteTargetName = ref('')
+const deleteIsActive = ref(false)
 const clearDataTargetName = ref('')
 const showError = ref(false)
 const errorMessage = ref('')
@@ -249,6 +264,11 @@ async function onRename() {
     notifyError(validationError)
     return
   }
+  // 名称未修改时直接关闭对话框，避免无意义的网络请求
+  if (newName === renameOldName.value) {
+    showRenameDialog.value = false
+    return
+  }
   try {
     await renameProfile(renameOldName.value, newName)
     showRenameDialog.value = false
@@ -261,7 +281,10 @@ async function onRename() {
  * 开始删除账号。
  */
 function startDelete(name: string) {
+  // 默认账号的删除按钮已置灰禁用，此处防御性拦截
+  if (name === defaultProfileName.value) return
   deleteTargetName.value = name
+  deleteIsActive.value = name === activeProfileName.value
   showDeleteConfirm.value = true
 }
 
@@ -278,7 +301,7 @@ async function onDelete() {
 }
 
 /**
- * 开始清空账号数据（default 账号不能删除，只能清空数据）。
+ * 开始清空账号数据（账号保留，宝藏基质与优先级设置被清空）。
  */
 function startClearData(name: string) {
   clearDataTargetName.value = name

@@ -77,6 +77,8 @@ const skillAltText = computed(() => {
   width: 100%;
   height: 100%;
   position: relative;
+  /* 隔离内部 z-index，避免 tier-bar/名称条压过外部兄弟覆盖元素（如武器稀有度徽章） */
+  isolation: isolate;
   overflow: hidden;
   border-radius: 6px;
   border-bottom-left-radius: 0;

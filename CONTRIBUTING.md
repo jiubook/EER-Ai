@@ -276,6 +276,14 @@ npm run lint
 npm run lint:fix
 ```
 
+6. **运行测试**
+
+```bash
+npm run test
+```
+
+前端单元测试使用 [Vitest](https://vitest.dev/)，测试文件位于 `frontend/src/**/__tests__/` 目录（目前覆盖 `useProfiles` 等组合式函数）。新增或修改前端状态逻辑时请同步补充对应测试。
+
 ### 完整开发流程
 
 **开发模式：**

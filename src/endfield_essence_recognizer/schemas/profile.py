@@ -6,9 +6,14 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal
+from typing import ClassVar, Final, Literal
 
 from pydantic import BaseModel, Field
+
+#: 各词条的最大等级（与游戏数值绑定，前端展示与后端校验共用同一来源）。
+AFFIX1_MAX_LEVEL: Final[int] = 6
+AFFIX2_MAX_LEVEL: Final[int] = 6
+AFFIX3_MAX_LEVEL: Final[int] = 3
 
 
 class TreasureMatrixEntry(BaseModel):
@@ -20,13 +25,13 @@ class TreasureMatrixEntry(BaseModel):
     weapon_name: str = ""
     """武器显示名称（缓存以便使用）。"""
 
-    affix1_level: int = Field(default=1, ge=1, le=6)
+    affix1_level: int = Field(default=1, ge=1, le=AFFIX1_MAX_LEVEL)
     """第一词条（属性）等级：1-6。"""
 
-    affix2_level: int = Field(default=1, ge=1, le=6)
+    affix2_level: int = Field(default=1, ge=1, le=AFFIX2_MAX_LEVEL)
     """第二词条（副属性）等级：1-6。"""
 
-    affix3_level: int = Field(default=1, ge=1, le=3)
+    affix3_level: int = Field(default=1, ge=1, le=AFFIX3_MAX_LEVEL)
     """第三词条（技能）等级：1-3。"""
 
     include_in_calculation: bool = True
@@ -80,6 +85,12 @@ class ProfileCollection(BaseModel):
     active_profile: str = "default"
     """当前激活的账号名称。"""
 
+    default_profile: str = "default"
+    """默认账号的当前名称。
+
+    默认账号可被重命名，重命名后该字段同步更新，用于删除保护与激活账号删除后的回退目标。
+    """
+
     profiles: dict[str, ProfileData] = Field(default_factory=dict)
     """账号名称 -> 账号数据的映射。"""
 
@@ -91,5 +102,7 @@ class ProfileCollection(BaseModel):
 
     def ensure_default(self) -> None:
         """确保默认账号存在。"""
-        if "default" not in self.profiles:
-            self.profiles["default"] = ProfileData(name="default")
+        if self.default_profile not in self.profiles:
+            self.profiles[self.default_profile] = ProfileData(
+                name=self.default_profile
+            )
