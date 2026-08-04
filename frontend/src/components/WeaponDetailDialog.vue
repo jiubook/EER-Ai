@@ -4,7 +4,13 @@
     <v-card v-if="weaponId">
       <v-card-item>
         <template #prepend>
-          <custom-stat-icon v-if="isCustomEntry(weaponId) || isNewCustom" class="weapon-icon-detail" hide-name :name="customEntryName || '新基质'" :skill-stat-id="customEditSkill" />
+          <custom-stat-icon
+            v-if="isCustomEntry(weaponId) || isNewCustom"
+            class="weapon-icon-detail"
+            hide-name
+            :name="customEntryName || '新基质'"
+            :skill-stat-id="customEditSkill"
+          />
           <item-icon v-else class="weapon-icon-detail" :item-id="weaponId" />
         </template>
         <v-card-title>
@@ -36,11 +42,19 @@
                 density="compact"
                 :disabled="!(isCustomEntry(weaponId) || isNewCustom)"
                 hide-details
-                :items="allAttributeStats.map(id => ({ title: getGemTagName(id), value: id }))"
+                :items="allAttributeStats.map((id) => ({ title: getGemTagName(id), value: id }))"
                 label="基础属性"
-                :model-value="isCustomEntry(weaponId) || isNewCustom ? customEditAttribute : weaponsMap.get(weaponId)?.attributeStatId ?? null"
+                :model-value="
+                  isCustomEntry(weaponId) || isNewCustom
+                    ? customEditAttribute
+                    : (weaponsMap.get(weaponId)?.attributeStatId ?? null)
+                "
                 variant="outlined"
-                @update:model-value="isCustomEntry(weaponId) || isNewCustom ? customEditAttribute = $event : undefined"
+                @update:model-value="
+                  isCustomEntry(weaponId) || isNewCustom
+                    ? (customEditAttribute = $event)
+                    : undefined
+                "
               />
             </v-col>
             <v-col cols="12" sm="4">
@@ -49,11 +63,19 @@
                 density="compact"
                 :disabled="!(isCustomEntry(weaponId) || isNewCustom)"
                 hide-details
-                :items="allSecondaryStats.map(id => ({ title: getGemTagName(id), value: id }))"
+                :items="allSecondaryStats.map((id) => ({ title: getGemTagName(id), value: id }))"
                 label="附加属性"
-                :model-value="isCustomEntry(weaponId) || isNewCustom ? customEditSecondary : weaponsMap.get(weaponId)?.secondaryStatId ?? null"
+                :model-value="
+                  isCustomEntry(weaponId) || isNewCustom
+                    ? customEditSecondary
+                    : (weaponsMap.get(weaponId)?.secondaryStatId ?? null)
+                "
                 variant="outlined"
-                @update:model-value="isCustomEntry(weaponId) || isNewCustom ? customEditSecondary = $event : undefined"
+                @update:model-value="
+                  isCustomEntry(weaponId) || isNewCustom
+                    ? (customEditSecondary = $event)
+                    : undefined
+                "
               />
             </v-col>
             <v-col cols="12" sm="4">
@@ -62,11 +84,17 @@
                 density="compact"
                 :disabled="!(isCustomEntry(weaponId) || isNewCustom)"
                 hide-details
-                :items="allSkillStats.map(id => ({ title: getGemTagName(id), value: id }))"
+                :items="allSkillStats.map((id) => ({ title: getGemTagName(id), value: id }))"
                 label="技能属性"
-                :model-value="isCustomEntry(weaponId) || isNewCustom ? customEditSkill : weaponsMap.get(weaponId)?.skillStatId ?? null"
+                :model-value="
+                  isCustomEntry(weaponId) || isNewCustom
+                    ? customEditSkill
+                    : (weaponsMap.get(weaponId)?.skillStatId ?? null)
+                "
                 variant="outlined"
-                @update:model-value="isCustomEntry(weaponId) || isNewCustom ? customEditSkill = $event : undefined"
+                @update:model-value="
+                  isCustomEntry(weaponId) || isNewCustom ? (customEditSkill = $event) : undefined
+                "
               />
             </v-col>
           </v-row>
@@ -91,7 +119,10 @@
                     @click="detailAffix1 = level"
                   />
                 </div>
-                <span class="detail-attr-value" :class="{ 'detail-attr-value--full': detailAffix1 === 6 }">
+                <span
+                  class="detail-attr-value"
+                  :class="{ 'detail-attr-value--full': detailAffix1 === 6 }"
+                >
                   +{{ detailAffix1 }} / 6
                 </span>
               </div>
@@ -110,7 +141,10 @@
                     @click="detailAffix2 = level"
                   />
                 </div>
-                <span class="detail-attr-value" :class="{ 'detail-attr-value--full': detailAffix2 === 6 }">
+                <span
+                  class="detail-attr-value"
+                  :class="{ 'detail-attr-value--full': detailAffix2 === 6 }"
+                >
                   +{{ detailAffix2 }} / 6
                 </span>
               </div>
@@ -129,7 +163,10 @@
                     @click="detailAffix3 = level"
                   />
                 </div>
-                <span class="detail-attr-value" :class="{ 'detail-attr-value--full': detailAffix3 === 3 }">
+                <span
+                  class="detail-attr-value"
+                  :class="{ 'detail-attr-value--full': detailAffix3 === 3 }"
+                >
                   +{{ detailAffix3 }} / 3
                 </span>
               </div>
@@ -142,13 +179,19 @@
                 class="not-owned-tape-detail"
                 @click="toggleDetailOwnership"
               >
-                <span class="not-owned-tape-detail-text">» 未拥有 » NOT OWNED » 点击切换为拥有 » CLICK TO TOGGLE » </span>
+                <span class="not-owned-tape-detail-text"
+                  >» 未拥有 » NOT OWNED » 点击切换为拥有 » CLICK TO TOGGLE »
+                </span>
               </div>
             </transition>
           </div>
 
           <!-- 未拥有遮罩：覆盖等级区域，阻止交互 -->
-          <div v-if="!isDetailOwned" class="not-owned-block-overlay" @click="toggleDetailOwnership" />
+          <div
+            v-if="!isDetailOwned"
+            class="not-owned-block-overlay"
+            @click="toggleDetailOwnership"
+          />
 
           <!-- 拥有状态切换 -->
           <div class="mt-2">
@@ -188,7 +231,9 @@
         </div>
 
         <!-- 同类武器（仅非自定义且非新建时显示） -->
-        <div v-if="!isCustomEntry(weaponId) && !isNewCustom && getSameStatWeapons(weaponId).length > 0">
+        <div
+          v-if="!isCustomEntry(weaponId) && !isNewCustom && getSameStatWeapons(weaponId).length > 0"
+        >
           <div class="text-subtitle-2 mb-2">同类属性武器</div>
           <div class="d-flex flex-column ga-2">
             <v-card
@@ -222,7 +267,10 @@
             </v-card>
           </div>
         </div>
-        <div v-else-if="!isCustomEntry(weaponId) && !isNewCustom" class="text-medium-emphasis text-caption">
+        <div
+          v-else-if="!isCustomEntry(weaponId) && !isNewCustom"
+          class="text-medium-emphasis text-caption"
+        >
           没有其他武器与此武器共享相同属性组合。
         </div>
       </v-card-text>
@@ -274,7 +322,9 @@
     <v-card>
       <v-card-title class="text-error">删除自定义基质</v-card-title>
       <v-card-text>
-        确定要删除自定义基质「{{ deleteCustomName }}」吗？将从设置中移除该基质定义，并从当前账号的基质数据中移除对应条目，此操作不可撤销。
+        确定要删除自定义基质「{{
+          deleteCustomName
+        }}」吗？将从设置中移除该基质定义，并从当前账号的基质数据中移除对应条目，此操作不可撤销。
       </v-card-text>
       <v-card-actions>
         <v-spacer />
@@ -291,9 +341,10 @@ import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { useCustomStats } from '@/composables/useCustomStats'
 import { useProfiles } from '@/composables/useProfiles'
+import { useToast } from '@/composables/useToast'
 import { useWeaponStats } from '@/composables/useWeaponStats'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { getGemTagName } from '@/utils/gameData/weapon'
+import { fallbackCustomStatName, findCustomStat, getGemTagName } from '@/utils/gameData/weapon'
 
 // v-model:weapon-id：null 表示关闭，string 表示打开并编辑该武器
 const weaponId = defineModel<string | null>('weaponId', { default: null })
@@ -318,11 +369,12 @@ const {
   matrixEntryByWeaponId,
   isWeaponOwned,
   isCustomEntry,
+  getUserPriority,
   getWeaponPriority,
-  getEffectivePriorityForSwap,
   getSameStatWeapons,
   getMatrixLevelText,
 } = useWeaponStats()
+const toast = useToast()
 
 // --- 详情弹窗编辑状态 ---
 
@@ -379,7 +431,7 @@ const skillLevelItems = [1, 2, 3]
 
 // --- 删除自定义基质 ---
 const deleteCustomConfirm = ref(false)
-const deleteCustomIndex = ref<number | null>(null)
+const deleteCustomTargetId = ref<string | null>(null)
 const deleteCustomName = ref('')
 // 标记「正在发起删除」：删除按钮按下（mousedown）时置位，用于让名称输入框的
 // @blur 保存跳过本次写入，避免与删除流程交错写后端。
@@ -408,8 +460,7 @@ watch(weaponId, () => {
     detailOwnedOverride.value = false
   } else if (isCustomEntry(id)) {
     // 编辑自定义条目
-    const index = Number.parseInt(id.replace('custom_stat_', ''), 10)
-    const stat = customStats.value[index]
+    const stat = findCustomStat(id, customStats.value)?.stat
     customEntryName.value = stat?.name || ''
     customEditAttribute.value = stat?.attribute ?? null
     customEditSecondary.value = stat?.secondary ?? null
@@ -468,8 +519,7 @@ async function saveCustomEntry() {
     })
     dialogOpen.value = false
   } catch (error) {
-    console.error('保存自定义基质失败:', error)
-    // TODO: 显示 snackbar 错误提示
+    toast.reportError('保存自定义基质失败', error)
   }
 }
 
@@ -479,8 +529,7 @@ async function removeNonCustomEntry(weaponId: string) {
     await removeNonCustomEntryBase(weaponId)
     dialogOpen.value = false
   } catch (error) {
-    console.error('移除基质条目失败:', error)
-    // TODO: 显示 snackbar 错误提示
+    toast.reportError('移除基质条目失败', error)
   }
 }
 
@@ -495,18 +544,24 @@ watch([detailAffix1, detailAffix2, detailAffix3, detailPriority], async () => {
   if (detailSaveTimer) clearTimeout(detailSaveTimer)
   detailSaveTimer = setTimeout(async () => {
     try {
-      const entry = matrixEntryByWeaponId.value.get(id)
-      if (entry) {
-        entry.affix1_level = detailAffix1.value
-        entry.affix2_level = detailAffix2.value
-        entry.affix3_level = detailAffix3.value
-        entry.priority = detailPriority.value
-        await updateTreasureMatrix([...treasureMatrix.value])
-        await updateWeaponPriority(id, detailPriority.value)
-      }
+      if (!matrixEntryByWeaponId.value.has(id)) return
+      // 构造新数组提交，不就地改动响应式条目：写操作成功后本地快照会被
+      // 后端返回值整体替换，此时对旧对象做的任何回滚都落不到实处。
+      const nextMatrix = treasureMatrix.value.map((item) =>
+        item.weapon_id === id
+          ? {
+              ...item,
+              affix1_level: detailAffix1.value,
+              affix2_level: detailAffix2.value,
+              affix3_level: detailAffix3.value,
+              priority: detailPriority.value,
+            }
+          : item,
+      )
+      await updateTreasureMatrix(nextMatrix)
+      await updateWeaponPriority(id, detailPriority.value)
     } catch (error) {
-      console.error('自动保存等级/优先级失败:', error)
-      // TODO: 显示 snackbar 错误提示
+      toast.reportError('自动保存等级/优先级失败', error)
     } finally {
       detailSaveTimer = null
     }
@@ -523,11 +578,12 @@ onUnmounted(() => {
 
 /** 打开删除自定义基质的二次确认弹窗 */
 function promptDeleteCustomEntry() {
-  if (!isCustomEntry(weaponId.value)) return
-  const index = Number.parseInt(weaponId.value!.replace('custom_stat_', ''), 10)
-  if (Number.isNaN(index)) return
-  deleteCustomIndex.value = index
-  deleteCustomName.value = customStats.value[index]?.name || `自定义基质 ${index + 1}`
+  const id = weaponId.value
+  if (!isCustomEntry(id)) return
+  const found = findCustomStat(id, customStats.value)
+  if (!found) return
+  deleteCustomTargetId.value = id
+  deleteCustomName.value = found.stat.name || fallbackCustomStatName(found.index)
   deleteCustomConfirm.value = true
 }
 
@@ -539,35 +595,37 @@ function cancelDeleteCustomEntry() {
 
 /**
  * 确认删除自定义基质：
- * 1. 基于未修改的 treasureMatrix 计算新矩阵（删除目标条目 + 重索引后续自定义条目）
+ * 1. 从 profile 中移除该条目（稳定 ID 让其余条目的引用不受影响）
  * 2. 从 config 的自定义列表移除该项
- * 3. 先写 profile（后端据此重建 weapon_priorities），再回写 config，最后回读
  */
 async function confirmDeleteCustomEntry() {
-  const index = deleteCustomIndex.value
-  if (index === null) {
+  const targetId = deleteCustomTargetId.value
+  if (!targetId) {
     cancelDeleteCustomEntry()
     return
   }
 
   try {
     await confirmDeleteCustomEntryBase({
-      index,
+      id: targetId,
       treasureMatrix: treasureMatrix.value,
     })
     deleteCustomConfirm.value = false
     pendingCustomDelete.value = false
     dialogOpen.value = false
     weaponId.value = null
-    deleteCustomIndex.value = null
+    deleteCustomTargetId.value = null
   } catch (error) {
-    console.error('删除自定义基质失败:', error)
-    // TODO: 显示 snackbar 错误提示
+    toast.reportError('删除自定义基质失败', error)
   }
 }
 
 /**
  * 交换两把武器的基质数据
+ *
+ * 优先级只交换用户显式设置过的值（0 表示未设置）：把 `getEffectivePriority`
+ * 算出来的稀有度默认值写回去，等于替用户"手动"设定了一个他从没设过的优先级，
+ * 此后该武器就再也跟不上稀有度变化了。
  */
 async function swapMatrix(weaponAId: string, weaponBId: string) {
   const entries = treasureMatrix.value.map((entry) => ({ ...entry }))
@@ -582,12 +640,13 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
 
   if (!hasA && !hasB) return
 
-  const priorityA = getEffectivePriorityForSwap(weaponAId, entryA)
-  const priorityB = getEffectivePriorityForSwap(weaponBId, entryB)
+  const priorityA = getUserPriority(weaponAId)
+  const priorityB = getUserPriority(weaponBId)
 
+  let nextEntries: typeof entries
   if (hasA && !hasB) {
     // A有基质、B无基质 → A移除、B添加A的数据
-    const nextEntries = entries
+    nextEntries = entries
       .filter((entry) => entry.weapon_id !== weaponAId)
       .concat({
         ...entryA!,
@@ -595,12 +654,9 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
         weapon_name: weaponB?.name || weaponBId,
         priority: priorityA,
       })
-    await updateTreasureMatrix(nextEntries)
-    await updateWeaponPriority(weaponAId, priorityB)
-    await updateWeaponPriority(weaponBId, priorityA)
   } else if (!hasA && hasB) {
     // A无基质、B有基质 → A添加B的数据、B移除
-    const nextEntries = entries
+    nextEntries = entries
       .filter((entry) => entry.weapon_id !== weaponBId)
       .concat({
         ...entryB!,
@@ -608,11 +664,8 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
         weapon_name: weaponA?.name || weaponAId,
         priority: priorityB,
       })
-    await updateTreasureMatrix(nextEntries)
-    await updateWeaponPriority(weaponAId, priorityB)
-    await updateWeaponPriority(weaponBId, priorityA)
   } else {
-    // 两者都有基质，交换等级、计算开关和有效优先级
+    // 两者都有基质，交换等级、计算开关和用户优先级
     const matrixA = {
       affix1: entryA!.affix1_level,
       affix2: entryA!.affix2_level,
@@ -631,13 +684,17 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
     entryB!.include_in_calculation = matrixA.includeInCalculation
     entryB!.priority = priorityA
 
-    await updateTreasureMatrix(entries)
-    await updateWeaponPriority(weaponAId, priorityB)
-    await updateWeaponPriority(weaponBId, priorityA)
+    nextEntries = entries
   }
 
-  // 关闭弹窗
-  dialogOpen.value = false
+  try {
+    await updateTreasureMatrix(nextEntries)
+    await updateWeaponPriority(weaponAId, priorityB)
+    await updateWeaponPriority(weaponBId, priorityA)
+    dialogOpen.value = false
+  } catch (error) {
+    toast.reportError('交换基质数据失败', error)
+  }
 }
 </script>
 
@@ -687,7 +744,10 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   border-radius: 999px;
   background: rgba(var(--v-theme-on-surface), 0.12);
   cursor: pointer;
-  transition: background 0.18s, box-shadow 0.18s, transform 0.18s;
+  transition:
+    background 0.18s,
+    box-shadow 0.18s,
+    transform 0.18s;
 
   &:hover {
     transform: translateY(-1px) scaleY(1.08);
@@ -725,7 +785,8 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
 }
 
 @keyframes detailPipPulse {
-  0%, 100% {
+  0%,
+  100% {
     transform: scaleY(1);
     filter: brightness(1);
   }
@@ -750,7 +811,7 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
     135deg,
     rgba(255, 193, 7, 0.95) 0%,
     rgba(255, 193, 7, 0.88) 40%,
-    rgba(255, 193, 7, 0.80) 100%
+    rgba(255, 193, 7, 0.8) 100%
   );
   transform: translate(-50%, -50%) rotate(-8deg);
   display: flex;

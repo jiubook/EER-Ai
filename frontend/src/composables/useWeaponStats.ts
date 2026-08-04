@@ -8,6 +8,10 @@ import type { TreasureMatrixEntry } from '@/composables/useProfiles'
 import { computed } from 'vue'
 import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
+import { isCustomStatId } from '@/utils/gameData/weapon'
+
+/** 各词条的最大等级，与后端 schemas/profile.py 的 le 约束保持一致 */
+export const AFFIX_MAX_LEVEL = [6, 6, 3] as const
 
 export function useWeaponStats() {
   const { activeProfile, treasureMatrix } = useProfiles()
@@ -20,6 +24,26 @@ export function useWeaponStats() {
 
   // 已拥有的武器 ID 集合
   const ownedWeaponIds = computed(() => new Set(matrixEntryByWeaponId.value.keys()))
+
+  /**
+   * 属性组合 -> 武器 ID 列表的索引。
+   *
+   * 「查找同属性武器」会在每个武器格子的渲染里被调用多次，逐次线性扫描
+   * weaponsMap 会让总览页退化成 O(n²)；这里预先建索引，把查找降到 O(1)。
+   */
+  const weaponIdsByStatKey = computed(() => {
+    const index = new Map<string, string[]>()
+    for (const [id, weapon] of weaponsMap.value.entries()) {
+      const key = `${weapon.attributeStatId}|${weapon.secondaryStatId}|${weapon.skillStatId}`
+      const bucket = index.get(key)
+      if (bucket) {
+        bucket.push(id)
+      } else {
+        index.set(key, [id])
+      }
+    }
+    return index
+  })
 
   /**
    * 判断武器是否已拥有
@@ -35,17 +59,17 @@ export function useWeaponStats() {
     const entry = matrixEntryByWeaponId.value.get(weaponId)
     return (
       entry !== undefined &&
-      entry.affix1_level === 6 &&
-      entry.affix2_level === 6 &&
-      entry.affix3_level === 3
+      entry.affix1_level === AFFIX_MAX_LEVEL[0] &&
+      entry.affix2_level === AFFIX_MAX_LEVEL[1] &&
+      entry.affix3_level === AFFIX_MAX_LEVEL[2]
     )
   }
 
   /**
-   * 判断是否为自定义基质条目（weapon_id 以 custom_stat_ 开头）
+   * 判断是否为自定义基质条目
    */
   function isCustomEntry(weaponId: string | null): boolean {
-    return weaponId?.startsWith('custom_stat_') ?? false
+    return isCustomStatId(weaponId)
   }
 
   /**
@@ -77,6 +101,9 @@ export function useWeaponStats() {
   function getEffectivePriorityForSwap(weaponId: string, entry?: TreasureMatrixEntry): number {
     const userPriority = getUserPriority(weaponId) || entry?.priority || 0
     if (userPriority > 0) return userPriority
+    // 与 getWeaponPriority 保持一致：自定义条目按 6★ 处理，
+    // 否则交换时会被当成优先级 0，凭空低于任何一把普通武器。
+    if (isCustomEntry(weaponId)) return 6
     const weapon = weaponsMap.value.get(weaponId)
     return weapon ? weapon.rarity : 0
   }
@@ -89,43 +116,55 @@ export function useWeaponStats() {
     if (isCustomEntry(weaponId)) return []
     const weapon = weaponsMap.value.get(weaponId)
     if (!weapon) return []
-    const sameWeapons: string[] = []
-    for (const [id, w] of weaponsMap.value.entries()) {
-      if (
-        id !== weaponId &&
-        w.attributeStatId === weapon.attributeStatId &&
-        w.secondaryStatId === weapon.secondaryStatId &&
-        w.skillStatId === weapon.skillStatId
-      ) {
-        sameWeapons.push(id)
-      }
-    }
-    return sameWeapons
+    const key = `${weapon.attributeStatId}|${weapon.secondaryStatId}|${weapon.skillStatId}`
+    const bucket = weaponIdsByStatKey.value.get(key)
+    if (!bucket) return []
+    return bucket.filter((id) => id !== weaponId)
   }
 
   /**
-   * 判断武器是否"可切换"：存在同属性、更高优先级、且已拥有的武器
+   * 「可切换」及「切换目标已满级」的预计算集合。
+   *
+   * 总览页每个武器格子会重复判断这两个状态（v-if、样式类各一次），
+   * 而模板里的函数调用不会被 Vue 缓存。放进 computed 后整页只算一次，
+   * 依赖变化时才重算。
+   */
+  const switchableSets = computed(() => {
+    const switchable = new Set<string>()
+    const targetMaxed = new Set<string>()
+    for (const weaponId of weaponsMap.value.keys()) {
+      const myPriority = getWeaponPriority(weaponId)
+      let canSwitch = false
+      let hasMaxedTarget = false
+      for (const id of getSameStatWeapons(weaponId)) {
+        if (!isWeaponOwned(id) || getWeaponPriority(id) < myPriority) continue
+        canSwitch = true
+        if (isWeaponMaxed(id)) {
+          hasMaxedTarget = true
+          break
+        }
+      }
+      if (canSwitch) switchable.add(weaponId)
+      if (hasMaxedTarget) targetMaxed.add(weaponId)
+    }
+    return { switchable, targetMaxed }
+  })
+
+  /**
+   * 判断武器是否"可切换"：存在同属性、优先级不低于自己、且已拥有的武器。
+   *
+   * 用 >= 而非 >：两把同属性同稀有度的武器都拥有时互相提示，
+   * 正是需要让用户注意到的重复情况。
    */
   function isSwitchable(weaponId: string): boolean {
-    const myPriority = getWeaponPriority(weaponId)
-    const sameWeapons = getSameStatWeapons(weaponId)
-    return sameWeapons.some(
-      (id) => isWeaponOwned(id) && getWeaponPriority(id) >= myPriority,
-    )
+    return switchableSets.value.switchable.has(weaponId)
   }
 
   /**
    * 获取可切换的目标武器是否满级（用于灰色呼吸动画）
    */
   function isSwitchTargetMaxed(weaponId: string): boolean {
-    const myPriority = getWeaponPriority(weaponId)
-    const sameWeapons = getSameStatWeapons(weaponId)
-    return sameWeapons.some(
-      (id) =>
-        isWeaponOwned(id)
-        && getWeaponPriority(id) >= myPriority
-        && isWeaponMaxed(id),
-    )
+    return switchableSets.value.targetMaxed.has(weaponId)
   }
 
   /**

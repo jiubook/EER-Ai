@@ -41,6 +41,12 @@ export function getStatsForWeapon(weaponId: string): EssenceStat {
 
 /** 自定义基质配置类型 */
 export interface CustomStat {
+  /**
+   * 稳定标识符，创建时生成后不再变化。
+   *
+   * 后端会为缺失该字段的旧配置补齐，因此运行时读到的条目一定带 ID。
+   */
+  id: string
   name?: string
   attribute: string | null
   secondary: string | null
@@ -48,37 +54,94 @@ export interface CustomStat {
   no_prompt_switch?: boolean
 }
 
+/** 自定义基质在 treasure_matrix 中的 weapon_id 前缀。 */
+export const CUSTOM_ID_PREFIX = 'custom:'
+
 /**
- * 解析自定义基质的索引
- * @param weaponId 武器 ID（格式：custom_stat_N）
- * @returns 索引值，如果不是自定义基质则返回 null
+ * 旧格式前缀（`custom_stat_{下标}`）。
+ *
+ * 后端会在启动时把存量数据迁移为新格式，这里仅保留识别能力，
+ * 使迁移完成前渲染出的界面不至于把旧条目错认成普通武器。
  */
-export function parseCustomStatIndex(weaponId: string): number | null {
-  const match = weaponId.match(/^custom_stat_(\d+)$/)
-  if (!match) return null
-  return Number.parseInt(match[1]!, 10)
+const LEGACY_CUSTOM_ID_PREFIX = 'custom_stat_'
+
+/** 生成一个新的自定义基质 ID。 */
+export function createCustomStatId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID().replaceAll('-', '')
+  }
+  // 退化路径：仅用于不支持 crypto.randomUUID 的老环境
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** 判断 weapon_id 是否指向自定义基质（兼容迁移前的旧格式）。 */
+export function isCustomStatId(weaponId: string | null | undefined): boolean {
+  if (!weaponId) return false
+  return weaponId.startsWith(CUSTOM_ID_PREFIX) || weaponId.startsWith(LEGACY_CUSTOM_ID_PREFIX)
+}
+
+/** 由自定义基质构造其在 treasure_matrix 中的 weapon_id。 */
+export function toCustomStatId(stat: Pick<CustomStat, 'id'>): string {
+  return `${CUSTOM_ID_PREFIX}${stat.id}`
+}
+
+/**
+ * 按 weapon_id 查找对应的自定义基质。
+ *
+ * 这是全前端唯一解析自定义基质 ID 的入口：新格式按 ID 查表，旧格式按下标
+ * 兜底（仅在后端迁移生效前的极短窗口内可能出现）。
+ *
+ * @returns 命中的条目及其当前下标；未命中返回 null。
+ */
+export function findCustomStat(
+  weaponId: string | null | undefined,
+  customStats: readonly CustomStat[],
+): { stat: CustomStat; index: number } | null {
+  if (!weaponId) return null
+
+  if (weaponId.startsWith(CUSTOM_ID_PREFIX)) {
+    const id = weaponId.slice(CUSTOM_ID_PREFIX.length)
+    const index = customStats.findIndex((stat) => stat.id === id)
+    return index === -1 ? null : { stat: customStats[index]!, index }
+  }
+
+  if (weaponId.startsWith(LEGACY_CUSTOM_ID_PREFIX)) {
+    const raw = weaponId.slice(LEGACY_CUSTOM_ID_PREFIX.length)
+    if (!/^\d+$/.test(raw)) return null
+    const index = Number.parseInt(raw, 10)
+    const stat = customStats[index]
+    return stat ? { stat, index } : null
+  }
+
+  return null
+}
+
+/** 自定义基质的兜底显示名（配置里没填名称时使用）。 */
+export function fallbackCustomStatName(index: number): string {
+  return `自定义基质 ${index + 1}`
 }
 
 /**
  * 获取自定义基质的技能属性 ID
- * @param weaponId 武器 ID（格式：custom_stat_N）
+ * @param weaponId 自定义基质的 weapon_id
  * @param customStats 自定义基质配置列表
  * @returns 技能属性 ID，如果不存在则返回 null
  */
-export function getCustomStatSkillId(weaponId: string, customStats: CustomStat[]): string | null {
-  const index = parseCustomStatIndex(weaponId)
-  if (index === null) return null
-  return customStats[index]?.skill || null
+export function getCustomStatSkillId(
+  weaponId: string,
+  customStats: readonly CustomStat[],
+): string | null {
+  return findCustomStat(weaponId, customStats)?.stat.skill || null
 }
 
 /**
  * 获取自定义基质的名称
- * @param weaponId 武器 ID（格式：custom_stat_N）
+ * @param weaponId 自定义基质的 weapon_id
  * @param customStats 自定义基质配置列表
  * @returns 基质名称
  */
-export function getCustomStatName(weaponId: string, customStats: CustomStat[]): string {
-  const index = parseCustomStatIndex(weaponId)
-  if (index === null) return '自定义基质'
-  return customStats[index]?.name || `自定义基质 ${index + 1}`
+export function getCustomStatName(weaponId: string, customStats: readonly CustomStat[]): string {
+  const found = findCustomStat(weaponId, customStats)
+  if (!found) return '自定义基质'
+  return found.stat.name || fallbackCustomStatName(found.index)
 }

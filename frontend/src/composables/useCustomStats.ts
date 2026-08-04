@@ -10,6 +10,12 @@ import { computed, ref } from 'vue'
 import { useProfiles } from '@/composables/useProfiles'
 import { useWeaponStats } from '@/composables/useWeaponStats'
 import { useStaticData } from '@/utils/gameData/staticData'
+import {
+  createCustomStatId,
+  fallbackCustomStatName,
+  findCustomStat,
+  toCustomStatId,
+} from '@/utils/gameData/weapon'
 
 /** 自定义宝藏基质属性配置列表（模块级单例，所有调用方共享同一份状态） */
 const customStats = ref<CustomStat[]>([])
@@ -26,13 +32,12 @@ export function useCustomStats() {
 
   /** 自定义基质条目列表，用于武器总览展示 */
   const customMatrixEntries = computed(() => {
-    return customStats.value
-      .map((stat, index) => ({
-        syntheticId: `custom_stat_${index}`,
-        displayName: stat.name || `自定义基质 ${index + 1}`,
-        index,
-        skillStatId: stat.skill,
-      }))
+    return customStats.value.map((stat, index) => ({
+      syntheticId: toCustomStatId(stat),
+      displayName: stat.name || fallbackCustomStatName(index),
+      index,
+      skillStatId: stat.skill,
+    }))
   })
 
   /**
@@ -73,6 +78,9 @@ export function useCustomStats() {
 
   /**
    * 保存自定义基质（新建或编辑）
+   *
+   * 一律"先请求成功、再更新本地状态"：本地状态是后端返回值的投影，
+   * 中途失败时界面保持修改前的样子，不需要回滚。
    */
   async function saveCustomEntry(params: {
     weaponId: string
@@ -85,34 +93,40 @@ export function useCustomStats() {
     affix3: number
     priority: number
     isOwned: boolean
-    matrixEntryByWeaponId: Map<string, TreasureMatrixEntry>
-    treasureMatrix: TreasureMatrixEntry[]
+    matrixEntryByWeaponId: ReadonlyMap<string, TreasureMatrixEntry>
+    treasureMatrix: readonly TreasureMatrixEntry[]
   }) {
-    const { weaponId, name, attribute, secondary, skill, affix1, affix2, affix3, priority, isOwned, matrixEntryByWeaponId, treasureMatrix } = params
+    const {
+      weaponId,
+      name,
+      attribute,
+      secondary,
+      skill,
+      affix1,
+      affix2,
+      affix3,
+      priority,
+      isOwned,
+      matrixEntryByWeaponId,
+      treasureMatrix,
+    } = params
 
     if (weaponId === '__new_custom__') {
-      // 新建模式：准备新条目数据
       const newEntry: CustomStat = {
-        name: name || `自定义基质 ${customStats.value.length + 1}`,
+        id: createCustomStatId(),
+        name: name || fallbackCustomStatName(customStats.value.length),
         attribute,
         secondary,
         skill,
       }
 
-      // 先发送请求，成功后再更新本地状态
-      const tempStats = [...customStats.value, newEntry]
-      await postCustomStatsUpdate(tempStats)
-
-      // 请求成功，更新本地状态
-      customStats.value.push(newEntry)
+      await postCustomStatsUpdate([...customStats.value, newEntry])
 
       // 只有标记为"已拥有"时才写入 profile
       if (isOwned) {
-        const newIndex = customStats.value.length - 1
-        const syntheticId = `custom_stat_${newIndex}`
         await addTreasureMatrixEntry({
-          weapon_id: syntheticId,
-          weapon_name: name || `自定义基质 ${newIndex + 1}`,
+          weapon_id: toCustomStatId(newEntry),
+          weapon_name: newEntry.name!,
           affix1_level: affix1,
           affix2_level: affix2,
           affix3_level: affix3,
@@ -120,46 +134,31 @@ export function useCustomStats() {
           include_in_calculation: true,
         })
       }
-    } else if (weaponId.startsWith('custom_stat_')) {
-      // 编辑模式：准备更新数据
-      const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
-      if (customStats.value[index]) {
-        const originalEntry = { ...customStats.value[index] }
-        const updatedEntry: CustomStat = {
-          ...originalEntry,
-          name,
-          attribute,
-          secondary,
-          skill,
-        }
-
-        // 先发送请求，成功后再更新本地状态
+    } else if (isCustomEntry(weaponId)) {
+      const found = findCustomStat(weaponId, customStats.value)
+      if (found) {
         const tempStats = [...customStats.value]
-        tempStats[index] = updatedEntry
+        tempStats[found.index] = { ...found.stat, name, attribute, secondary, skill }
         await postCustomStatsUpdate(tempStats)
-
-        // 请求成功，更新本地状态
-        customStats.value[index] = updatedEntry
       }
 
-      // 更新 profile 中的等级和优先级
+      // 更新 profile 中的等级和优先级：先构造新数组再提交，不改动本地对象
       const entry = matrixEntryByWeaponId.get(weaponId)
       if (entry) {
-        const originalEntry = { ...entry }
-        entry.weapon_name = name
-        entry.affix1_level = affix1
-        entry.affix2_level = affix2
-        entry.affix3_level = affix3
-        entry.priority = priority
-
-        try {
-          await updateTreasureMatrix([...treasureMatrix])
-          await updateWeaponPriority(weaponId, priority)
-        } catch (profileError) {
-          // 回滚本地状态
-          Object.assign(entry, originalEntry)
-          throw profileError
-        }
+        const nextMatrix = treasureMatrix.map((item) =>
+          item.weapon_id === weaponId
+            ? {
+                ...item,
+                weapon_name: name,
+                affix1_level: affix1,
+                affix2_level: affix2,
+                affix3_level: affix3,
+                priority,
+              }
+            : item,
+        )
+        await updateTreasureMatrix(nextMatrix)
+        await updateWeaponPriority(weaponId, priority)
       }
     }
 
@@ -168,34 +167,24 @@ export function useCustomStats() {
 
   /**
    * 确认删除自定义基质
+   *
+   * 稳定 ID 让删除退化为一次普通的过滤：其余条目的标识不受影响，
+   * 无需重写 profile 中的任何引用。
    */
   async function confirmDeleteCustomEntry(params: {
-    index: number
-    treasureMatrix: TreasureMatrixEntry[]
+    id: string
+    treasureMatrix: readonly TreasureMatrixEntry[]
   }) {
-    const { index, treasureMatrix } = params
-    const targetId = `custom_stat_${index}`
+    const { id, treasureMatrix } = params
+    const found = findCustomStat(id, customStats.value)
+    if (!found) return
 
-    // 1) 删除目标条目，并将所有索引 > index 的自定义条目前移一位
-    const newMatrix = treasureMatrix
-      .filter((e) => e.weapon_id !== targetId)
-      .map((e) => {
-        if (e.weapon_id.startsWith('custom_stat_')) {
-          const cur = Number.parseInt(e.weapon_id.replace('custom_stat_', ''), 10)
-          if (cur > index) return { ...e, weapon_id: `custom_stat_${cur - 1}` }
-        }
-        return e
-      })
+    const targetId = toCustomStatId(found.stat)
+    const newMatrix = treasureMatrix.filter((e) => e.weapon_id !== targetId && e.weapon_id !== id)
+    const tempStats = customStats.value.filter((_, i) => i !== found.index)
 
-    // 2) 准备新的 config 数据（不修改本地状态）
-    const tempStats = customStats.value.filter((_, i) => i !== index)
-
-    // 3) 持久化：先 profile，再 config，最后回读配置
     await updateTreasureMatrix(newMatrix)
     await postCustomStatsUpdate(tempStats)
-
-    // 4) 请求成功，更新本地状态
-    customStats.value.splice(index, 1)
     await fetchCustomStats()
   }
 
@@ -216,8 +205,8 @@ export function useCustomStats() {
       // 自定义条目使用配置中的名称，普通武器使用 weaponsMap 中的名称
       let weaponName: string
       if (isCustomEntry(weaponId)) {
-        const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
-        weaponName = customStats.value[index]?.name || `自定义基质 ${index + 1}`
+        const found = findCustomStat(weaponId, customStats.value)
+        weaponName = found ? found.stat.name || fallbackCustomStatName(found.index) : '自定义基质'
       } else {
         const weapon = weaponsMap.value.get(weaponId)
         weaponName = weapon?.name || weaponId
