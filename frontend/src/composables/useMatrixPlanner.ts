@@ -67,15 +67,36 @@ const allAttributeCombinations = combinations(allAttributeStats, 3)
 
 // 所有副属性词条
 const allSecondaryStats = [
-  '攻击提升', '生命提升', '物理伤害提升', '灼热伤害提升', '电磁伤害提升',
-  '寒冷伤害提升', '自然伤害提升', '暴击率提升', '源石技艺提升',
-  '终结技充能效率提升', '法术伤害提升', '治疗效率提升',
+  '攻击提升',
+  '生命提升',
+  '物理伤害提升',
+  '灼热伤害提升',
+  '电磁伤害提升',
+  '寒冷伤害提升',
+  '自然伤害提升',
+  '暴击率提升',
+  '源石技艺提升',
+  '终结技充能效率提升',
+  '法术伤害提升',
+  '治疗效率提升',
 ]
 
 // 所有技能词条
 const allSkillStats = [
-  '强攻', '压制', '追袭', '粉碎', '昂扬', '巧技', '残暴',
-  '附术', '医疗', '切骨', '迸发', '夜幕', '流转', '效益',
+  '强攻',
+  '压制',
+  '追袭',
+  '粉碎',
+  '昂扬',
+  '巧技',
+  '残暴',
+  '附术',
+  '医疗',
+  '切骨',
+  '迸发',
+  '夜幕',
+  '流转',
+  '效益',
 ]
 
 function combinations<T>(arr: T[], size: number): T[][] {
@@ -99,7 +120,10 @@ function getStatDisplayName(statId: string | null): string {
 /** 自定义基质名称缓存，由页面层注入 */
 const _customStatNames = ref<string[]>([])
 
-function clearAllStats(requiredEssenceStats: Ref<PlannerEssenceStat[]>, lastSelectedWeaponId: Ref<string | null>) {
+function clearAllStats(
+  requiredEssenceStats: Ref<PlannerEssenceStat[]>,
+  lastSelectedWeaponId: Ref<string | null>,
+) {
   requiredEssenceStats.value = []
   lastSelectedWeaponId.value = null
 }
@@ -136,12 +160,14 @@ function findMatchingWeapons(
   const matched: string[] = []
   for (const weapon of weaponStats) {
     if (!selectedAttributes.includes(weapon.attribute)) continue
-    const secOk = selectedSecondary !== null
-      ? weapon.secondary === selectedSecondary
-      : battleSecondaryStats.includes(weapon.secondary)
-    const skillOk = selectedSkill !== null
-      ? weapon.skill === selectedSkill
-      : battleSkillStats.includes(weapon.skill)
+    const secOk =
+      selectedSecondary !== null
+        ? weapon.secondary === selectedSecondary
+        : battleSecondaryStats.includes(weapon.secondary)
+    const skillOk =
+      selectedSkill !== null
+        ? weapon.skill === selectedSkill
+        : battleSkillStats.includes(weapon.skill)
     if (secOk && skillOk) matched.push(weapon.weaponId)
   }
   return matched
@@ -176,8 +202,8 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
           battleId: item.battleId,
           battleName: item.battleName,
           imageUrl: item.imageUrl,
-          secondaryStats: item.secondaryStats.map(key => resolveStatKeyToDisplayName(key)),
-          skillStats: item.skillStats.map(key => resolveStatKeyToDisplayName(key)),
+          secondaryStats: item.secondaryStats.map((key) => resolveStatKeyToDisplayName(key)),
+          skillStats: item.skillStats.map((key) => resolveStatKeyToDisplayName(key)),
         }
         return [converted.battleName, converted]
       }),
@@ -351,7 +377,16 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
   ) {
     for (const stat of requiredEssenceStats.value) {
       if (!stat.weaponId || !stat.weaponId.startsWith('custom_stat_')) continue
-      if (requirementMatchesBattle(stat, selectedAttribute, selectedSecondary, selectedSkill, battleSecondaryStats, battleSkillStats)) {
+      if (
+        requirementMatchesBattle(
+          stat,
+          selectedAttribute,
+          selectedSecondary,
+          selectedSkill,
+          battleSecondaryStats,
+          battleSkillStats,
+        )
+      ) {
         matchedWeaponIds.push(stat.weaponId)
       }
     }
@@ -366,7 +401,16 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
   ): BattleChoice | undefined {
     const matchedSelectedIndices: number[] = []
     for (const [index, stat] of requiredEssenceStats.value.entries()) {
-      if (requirementMatchesBattle(stat, selectedAttribute, selectedSecondary, null, [], battleSkillStats)) {
+      if (
+        requirementMatchesBattle(
+          stat,
+          selectedAttribute,
+          selectedSecondary,
+          null,
+          [],
+          battleSkillStats,
+        )
+      ) {
         matchedSelectedIndices.push(index)
       }
     }
@@ -379,8 +423,23 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
       selectedSecondary,
       null,
     )
-    _appendCustomStatMatches(matchedWeaponIds, selectedAttribute, selectedSecondary, null, [], battleSkillStats)
-    return { battleId, battleName, selectedAttribute, selectedSecondary, selectedSkill: null, matchedSelectedIndices, matchedWeaponIds }
+    _appendCustomStatMatches(
+      matchedWeaponIds,
+      selectedAttribute,
+      selectedSecondary,
+      null,
+      [],
+      battleSkillStats,
+    )
+    return {
+      battleId,
+      battleName,
+      selectedAttribute,
+      selectedSecondary,
+      selectedSkill: null,
+      matchedSelectedIndices,
+      matchedWeaponIds,
+    }
   }
 
   function buildChoiceForSkill(
@@ -392,7 +451,16 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
   ): BattleChoice | undefined {
     const matchedSelectedIndices: number[] = []
     for (const [index, stat] of requiredEssenceStats.value.entries()) {
-      if (requirementMatchesBattle(stat, selectedAttribute, null, selectedSkill, battleSecondaryStats, [])) {
+      if (
+        requirementMatchesBattle(
+          stat,
+          selectedAttribute,
+          null,
+          selectedSkill,
+          battleSecondaryStats,
+          [],
+        )
+      ) {
         matchedSelectedIndices.push(index)
       }
     }
@@ -405,8 +473,23 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
       null,
       selectedSkill,
     )
-    _appendCustomStatMatches(matchedWeaponIds, selectedAttribute, null, selectedSkill, battleSecondaryStats, [])
-    return { battleId, battleName, selectedAttribute, selectedSecondary: null, selectedSkill, matchedSelectedIndices, matchedWeaponIds }
+    _appendCustomStatMatches(
+      matchedWeaponIds,
+      selectedAttribute,
+      null,
+      selectedSkill,
+      battleSecondaryStats,
+      [],
+    )
+    return {
+      battleId,
+      battleName,
+      selectedAttribute,
+      selectedSecondary: null,
+      selectedSkill,
+      matchedSelectedIndices,
+      matchedWeaponIds,
+    }
   }
 
   const battleChoices = ref<BattleChoice[]>([])
@@ -418,14 +501,28 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
    */
   function _recomputeChoices() {
     const result: BattleChoice[] = []
-    for (const { battleId, battleName, secondaryStats, skillStats } of Object.values(energyAlluviums.value)) {
+    for (const { battleId, battleName, secondaryStats, skillStats } of Object.values(
+      energyAlluviums.value,
+    )) {
       for (const selectedAttribute of allAttributeCombinations) {
         for (const selectedSecondary of secondaryStats) {
-          const choice = buildChoiceForSecondary(battleId, battleName, selectedAttribute, selectedSecondary, skillStats)
+          const choice = buildChoiceForSecondary(
+            battleId,
+            battleName,
+            selectedAttribute,
+            selectedSecondary,
+            skillStats,
+          )
           if (choice) result.push(choice)
         }
         for (const selectedSkill of skillStats) {
-          const choice = buildChoiceForSkill(battleId, battleName, selectedAttribute, selectedSkill, secondaryStats)
+          const choice = buildChoiceForSkill(
+            battleId,
+            battleName,
+            selectedAttribute,
+            selectedSkill,
+            secondaryStats,
+          )
           if (choice) result.push(choice)
         }
       }
@@ -433,11 +530,7 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
     battleChoices.value = result
   }
 
-  watch(
-    requiredEssenceStats,
-    () => _recomputeChoices(),
-    { deep: true, immediate: true },
-  )
+  watch(requiredEssenceStats, () => _recomputeChoices(), { deep: true, immediate: true })
 
   /** 按优先级排序后的所有有效方案：满足需求数 > 匹配已选武器数 > 未获得武器数 > 匹配武器总数 */
   const _sortedChoices = computed(() => {
@@ -447,8 +540,8 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
 
     const selectedWeaponIds = new Set(
       requiredEssenceStats.value
-        .filter(stat => !stat.isCustom && stat.weaponId)
-        .map(stat => stat.weaponId!)
+        .filter((stat) => !stat.isCustom && stat.weaponId)
+        .map((stat) => stat.weaponId!),
     )
 
     const obtainedIds = obtainedWeaponIds?.value ?? new Set<string>()
@@ -460,15 +553,15 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
       }
 
       // 其次：匹配更多已选择的武器
-      const aMatchedSelected = a.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
-      const bMatchedSelected = b.matchedWeaponIds.filter(id => selectedWeaponIds.has(id)).length
+      const aMatchedSelected = a.matchedWeaponIds.filter((id) => selectedWeaponIds.has(id)).length
+      const bMatchedSelected = b.matchedWeaponIds.filter((id) => selectedWeaponIds.has(id)).length
       if (aMatchedSelected !== bMatchedSelected) {
         return bMatchedSelected - aMatchedSelected
       }
 
       // 再次：匹配武器中未获得的数量更多
-      const aUnobtained = a.matchedWeaponIds.filter(id => !obtainedIds.has(id)).length
-      const bUnobtained = b.matchedWeaponIds.filter(id => !obtainedIds.has(id)).length
+      const aUnobtained = a.matchedWeaponIds.filter((id) => !obtainedIds.has(id)).length
+      const bUnobtained = b.matchedWeaponIds.filter((id) => !obtainedIds.has(id)).length
       if (aUnobtained !== bUnobtained) {
         return bUnobtained - aUnobtained
       }
@@ -503,6 +596,8 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
     bestChoices,
     allChoices,
     clearAllStats: () => clearAllStats(requiredEssenceStats, lastSelectedWeaponId),
-    updateCustomStatNames: (names: string[]) => { _customStatNames.value = names },
+    updateCustomStatNames: (names: string[]) => {
+      _customStatNames.value = names
+    },
   }
 }
