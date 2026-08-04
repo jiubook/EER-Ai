@@ -53,6 +53,10 @@ def init_load_profiles():
     profiles_file = get_root_dir() / "profiles.json"
     profile_manager = ProfileManager(profiles_file)
     profile_manager.load()
+    # 必须在用户配置加载之后执行：迁移依赖配置中自定义基质的顺序来解析旧下标。
+    profile_manager.migrate_custom_stat_ids(
+        default_user_setting_manager().get_custom_stat_ids()
+    )
     set_profile_manager(profile_manager)
 
 

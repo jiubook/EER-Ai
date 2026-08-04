@@ -15,6 +15,17 @@ AFFIX1_MAX_LEVEL: Final[int] = 6
 AFFIX2_MAX_LEVEL: Final[int] = 6
 AFFIX3_MAX_LEVEL: Final[int] = 3
 
+#: 默认账号的初始名称。默认账号可被重命名，改名后该字面量成为保留名，
+#: 不允许其它账号占用（否则会与回退逻辑产生歧义）。
+DEFAULT_PROFILE_NAME: Final[str] = "default"
+
+#: 自定义基质在 treasure_matrix 中的 weapon_id 前缀，其后拼接稳定 ID。
+CUSTOM_ID_PREFIX: Final[str] = "custom:"
+
+#: 旧格式前缀（`custom_stat_{下标}`）。仅用于启动时的一次性迁移与识别，
+#: 新写入一律使用 CUSTOM_ID_PREFIX。
+LEGACY_CUSTOM_ID_PREFIX: Final[str] = "custom_stat_"
+
 
 class TreasureMatrixEntry(BaseModel):
     """单个武器的宝藏基质配置及词条等级。"""
@@ -82,10 +93,10 @@ class ProfileCollection(BaseModel):
 
     version: int = _VERSION
 
-    active_profile: str = "default"
+    active_profile: str = DEFAULT_PROFILE_NAME
     """当前激活的账号名称。"""
 
-    default_profile: str = "default"
+    default_profile: str = DEFAULT_PROFILE_NAME
     """默认账号的当前名称。
 
     默认账号可被重命名，重命名后该字段同步更新，用于删除保护与激活账号删除后的回退目标。

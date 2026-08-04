@@ -250,7 +250,11 @@ def test_load_legacy_file_without_default_profile(temp_profiles_file: Path):
 
 
 def test_load_self_heals_missing_default_profile(temp_profiles_file: Path):
-    """default_profile 指向不存在的账号时，load 自动创建空账号。"""
+    """default_profile 悬空但存在 'default' 账号时，回退复用它。
+
+    不能凭空造一个空账号：那个账号既没有数据，又会因保留名校验而无法切换，
+    同时把真正有数据的 'default' 变成永远访问不到的僵尸条目。
+    """
     temp_profiles_file.write_text(
         json.dumps(
             {
@@ -263,6 +267,32 @@ def test_load_self_heals_missing_default_profile(temp_profiles_file: Path):
                         "name": "default",
                         "treasure_matrix": [],
                     }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    manager = ProfileManager(temp_profiles_file)
+    manager.load()
+    collection = manager.get_collection()
+    assert collection.default_profile == "default"
+    assert "我的账号" not in collection.profiles
+    # 回退后默认账号可正常切换，不会被保留名校验挡住
+    manager.switch_profile("default")
+    assert manager.get_active_profile_name() == "default"
+
+
+def test_load_creates_default_when_no_candidate(temp_profiles_file: Path):
+    """default_profile 悬空且没有 'default' 账号时，才创建空账号。"""
+    temp_profiles_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "active_profile": "alt",
+                "default_profile": "我的账号",
+                "profiles": {
+                    "alt": {"version": 1, "name": "alt", "treasure_matrix": []}
                 },
             },
             ensure_ascii=False,
@@ -293,6 +323,20 @@ def test_rename_profile_to_reserved_default_name(profile_manager: ProfileManager
     profile_manager.switch_profile("other")
     with pytest.raises(ValueError, match="保留名称"):
         profile_manager.rename_profile("other", "default")
+
+
+def test_rename_default_profile_back_to_default(profile_manager: ProfileManager):
+    """回归：默认账号可以改回 'default'，否则改名操作无法撤销。"""
+    profile_manager.load()
+    profile_manager.rename_profile("default", "我的账号")
+
+    profile = profile_manager.rename_profile("我的账号", "default")
+
+    collection = profile_manager.get_collection()
+    assert profile.name == "default"
+    assert collection.default_profile == "default"
+    assert collection.active_profile == "default"
+    assert "我的账号" not in collection.profiles
 
 
 def test_switch_default_name_allowed_when_default_not_renamed(
@@ -360,6 +404,101 @@ def test_update_weapon_priority_without_matrix(profile_manager: ProfileManager):
 
     profile = profile_manager.update_weapon_priority("wpn_003", 0)
     assert "wpn_003" not in profile.weapon_priorities
+
+
+def test_update_treasure_matrix_keeps_unowned_priorities(
+    profile_manager: ProfileManager,
+):
+    """回归：更新矩阵不得清空未拥有武器的优先级。
+
+    `update_weapon_priority` 明确支持给未拥有基质的武器设优先级，而调整任意
+    一把已拥有武器的等级都会触发 `update_treasure_matrix` 全量提交；两者的
+    契约必须自洽，否则用户的优先级设置会在日常操作中静默丢失。
+    """
+    profile_manager.load()
+    profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(weapon_id="owned", weapon_name="O", affix1_level=1)
+    )
+    profile_manager.update_weapon_priority("owned", 9)
+    profile_manager.update_weapon_priority("unowned", 7)
+
+    entries = profile_manager.get_active_profile().treasure_matrix
+    entries[0].affix1_level = 3
+    profile = profile_manager.update_treasure_matrix(entries)
+
+    assert profile.weapon_priorities["unowned"] == 7
+    assert profile.weapon_priorities["owned"] == 9
+
+
+def test_update_treasure_matrix_clears_zeroed_priority(profile_manager: ProfileManager):
+    """矩阵内条目 priority 归零时，应从 weapon_priorities 中移除。"""
+    profile_manager.load()
+    profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="W1", affix1_level=1)
+    )
+    profile_manager.update_weapon_priority("wpn_001", 5)
+
+    entries = profile_manager.get_active_profile().treasure_matrix
+    entries[0].priority = 0
+    profile = profile_manager.update_treasure_matrix(entries)
+
+    assert "wpn_001" not in profile.weapon_priorities
+
+
+def test_update_treasure_matrix_drops_removed_entry_priority(
+    profile_manager: ProfileManager,
+):
+    """条目移出矩阵后优先级仍保留：优先级是独立于"是否拥有基质"的用户偏好。
+
+    与 `remove_treasure_matrix_entry` 的既有行为保持一致。
+    """
+    profile_manager.load()
+    profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="W1", affix1_level=1)
+    )
+    profile_manager.update_weapon_priority("wpn_001", 5)
+
+    profile = profile_manager.update_treasure_matrix([])
+    assert profile.weapon_priorities["wpn_001"] == 5
+
+
+def test_entry_priority_is_projection_of_weapon_priorities(
+    profile_manager: ProfileManager,
+):
+    """entry.priority 始终是 weapon_priorities 的投影，两者不会各说各话。
+
+    优先级只有 weapon_priorities 一个权威来源；条目上的 priority 只为方便
+    前端就近读取而存在，任何写路径之后都必须与权威源一致。
+    """
+    profile_manager.load()
+    profile_manager.update_weapon_priority("wpn_001", 8)
+    # 后设置优先级，再加入矩阵：条目应当继承既有的手动优先级
+    profile = profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="W1", affix1_level=1)
+    )
+    assert profile.treasure_matrix[0].priority == 8
+
+    # 清除手动优先级后，投影同步归零
+    profile = profile_manager.update_weapon_priority("wpn_001", 0)
+    assert profile.weapon_priorities == {}
+    assert profile.treasure_matrix[0].priority == 0
+
+
+def test_add_entry_does_not_override_existing_manual_priority(
+    profile_manager: ProfileManager,
+):
+    """新增条目自带的 priority 不得覆盖用户已设置的手动优先级。"""
+    profile_manager.load()
+    profile_manager.update_weapon_priority("wpn_001", 8)
+
+    profile = profile_manager.add_treasure_matrix_entry(
+        TreasureMatrixEntry(
+            weapon_id="wpn_001", weapon_name="W1", affix1_level=1, priority=2
+        )
+    )
+
+    assert profile.weapon_priorities["wpn_001"] == 8
+    assert profile.treasure_matrix[0].priority == 8
 
 
 def test_persistence(temp_profiles_file: Path):
@@ -539,3 +678,97 @@ def test_clear_profile_data_save_failure_keeps_memory(
 
     entries = profile_manager.get_active_profile().treasure_matrix
     assert [e.weapon_id for e in entries] == ["wpn_001"]
+
+
+# --- 自定义基质稳定 ID 迁移 ---
+
+
+def _seed_legacy_custom_refs(manager: ProfileManager) -> None:
+    """写入一份使用旧格式 custom_stat_{下标} 的账号数据。"""
+    manager.update_treasure_matrix(
+        [
+            TreasureMatrixEntry(
+                weapon_id="custom_stat_0", weapon_name="C0", affix1_level=3, priority=5
+            ),
+            TreasureMatrixEntry(
+                weapon_id="custom_stat_2", weapon_name="C2", affix1_level=2
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_normal", weapon_name="N", affix1_level=1, priority=4
+            ),
+        ]
+    )
+
+
+def test_migrate_custom_stat_ids_rewrites_refs(profile_manager: ProfileManager):
+    """旧格式引用按下标改写为 custom:{id}，普通武器不受影响。"""
+    profile_manager.load()
+    _seed_legacy_custom_refs(profile_manager)
+
+    changed = profile_manager.migrate_custom_stat_ids(["aaa", "bbb", "ccc"])
+
+    profile = profile_manager.get_active_profile()
+    assert changed is True
+    assert [e.weapon_id for e in profile.treasure_matrix] == [
+        "custom:aaa",
+        "custom:ccc",
+        "wpn_normal",
+    ]
+    # 优先级映射的 key 同步改写，值不变
+    assert profile.weapon_priorities == {"custom:aaa": 5, "wpn_normal": 4}
+
+
+def test_migrate_custom_stat_ids_drops_orphans(profile_manager: ProfileManager):
+    """下标越界的孤儿引用被丢弃，不留成幽灵条目。"""
+    profile_manager.load()
+    _seed_legacy_custom_refs(profile_manager)
+
+    # 配置里只剩一个自定义基质：custom_stat_2 已无对应项
+    profile_manager.migrate_custom_stat_ids(["only"])
+
+    profile = profile_manager.get_active_profile()
+    assert [e.weapon_id for e in profile.treasure_matrix] == [
+        "custom:only",
+        "wpn_normal",
+    ]
+    assert "custom:only" in profile.weapon_priorities
+
+
+def test_migrate_custom_stat_ids_is_idempotent(profile_manager: ProfileManager):
+    """迁移可重复执行：第二次不再产生变更（每次启动都会调用）。"""
+    profile_manager.load()
+    _seed_legacy_custom_refs(profile_manager)
+
+    assert profile_manager.migrate_custom_stat_ids(["aaa", "bbb", "ccc"]) is True
+    before = profile_manager.get_active_profile().model_dump()
+
+    assert profile_manager.migrate_custom_stat_ids(["aaa", "bbb", "ccc"]) is False
+    assert profile_manager.get_active_profile().model_dump() == before
+
+
+def test_migrate_custom_stat_ids_covers_all_profiles(profile_manager: ProfileManager):
+    """迁移覆盖全部账号，而不只是当前激活账号。"""
+    profile_manager.load()
+    profile_manager.switch_profile("alt")
+    _seed_legacy_custom_refs(profile_manager)
+    profile_manager.switch_profile("default")
+    _seed_legacy_custom_refs(profile_manager)
+
+    profile_manager.migrate_custom_stat_ids(["aaa", "bbb", "ccc"])
+
+    for name in ("default", "alt"):
+        ids = [
+            e.weapon_id
+            for e in profile_manager.get_collection().profiles[name].treasure_matrix
+        ]
+        assert ids == ["custom:aaa", "custom:ccc", "wpn_normal"]
+
+
+def test_migrate_custom_stat_ids_no_custom_refs(profile_manager: ProfileManager):
+    """没有旧格式引用时不写盘。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="W", affix1_level=1)]
+    )
+
+    assert profile_manager.migrate_custom_stat_ids(["aaa"]) is False

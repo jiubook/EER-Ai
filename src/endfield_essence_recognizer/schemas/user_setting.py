@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from typing import Any, ClassVar
+from uuid import uuid4
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
@@ -89,6 +90,13 @@ class KeepBestMode(StrEnum):
 class EssenceStats(BaseModel):
     """自定义宝藏基质属性组合，支持可选的显示名称。"""
 
+    id: str = ""
+    """稳定标识符，创建时生成后不再变化。
+
+    宝藏基质在 profile 中以 `custom:{id}` 的形式被引用。用列表下标做标识会
+    让每次删除都必须重写所有下游引用，稍有遗漏就造成数据错位；空字符串表示
+    尚未分配（旧配置），由 `UserSettingManager` 在加载时补齐。
+    """
     name: str = ""
     """自定义显示名称，用于武器总览页面展示。"""
     attribute: str | None = None
@@ -102,7 +110,7 @@ class EssenceStats(BaseModel):
 
 
 class UserSetting(BaseModel):
-    _VERSION: ClassVar[int] = 7
+    _VERSION: ClassVar[int] = 8
     _same_type_treasure_counts: dict[tuple[str | None, ...], int] = PrivateAttr(
         default_factory=dict
     )
@@ -310,6 +318,22 @@ class UserSetting(BaseModel):
         data.setdefault("same_type_keep_best_mode", "sum")
         data.setdefault("same_type_non_downgrade_filter", True)
 
+    @staticmethod
+    def _migrate_v7_to_v8(data: dict) -> None:
+        """v7 → v8: 为自定义宝藏基质补齐稳定 ID。
+
+        补齐顺序即列表顺序，与 profile 中旧格式 `custom_stat_{下标}` 的编号
+        一一对应，启动时的 profile 迁移据此把引用改写为 `custom:{id}`。
+        """
+        seen: set[str] = set()
+        for entry in data.get("treasure_essence_stats", []):
+            if not isinstance(entry, dict):
+                continue
+            existing = entry.get("id")
+            if not existing or existing in seen:
+                entry["id"] = uuid4().hex
+            seen.add(entry["id"])
+
     # 迁移函数映射表：版本号 -> 迁移函数
     # 使用 __func__ 提取底层函数，避免存储 staticmethod 对象（兼容性更好）
     _MIGRATIONS: ClassVar[dict[int, Any]] = {
@@ -318,6 +342,7 @@ class UserSetting(BaseModel):
         4: _migrate_v4_to_v5.__func__,
         5: _migrate_v5_to_v6.__func__,
         6: _migrate_v6_to_v7.__func__,
+        7: _migrate_v7_to_v8.__func__,
     }
 
     @classmethod

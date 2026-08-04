@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from endfield_essence_recognizer.exceptions import ConfigVersionMismatchError
 from endfield_essence_recognizer.schemas.user_setting import UserSetting
@@ -125,8 +126,9 @@ class UserSettingManager:
         result, migrated = _load_user_setting_from_file(UserSetting, target_path)
         if result is not None:
             self._user_setting = result
+            ids_assigned = self.ensure_custom_stat_ids()
             # 仅在发生迁移时保存新版本
-            if migrated:
+            if migrated or ids_assigned:
                 self.save_user_setting(target_path)
                 logger.info("配置已从旧版本迁移并保存。")
             else:
@@ -173,6 +175,7 @@ class UserSettingManager:
         if "version" in data and data["version"] != UserSetting._VERSION:
             raise ConfigVersionMismatchError(UserSetting._VERSION, data["version"])
         self._user_setting.update_from_dict(data)
+        self.ensure_custom_stat_ids()
         self.save_user_setting()
 
     def update_from_user_setting(self, other: UserSetting) -> None:
@@ -183,7 +186,34 @@ class UserSettingManager:
         if other.version != UserSetting._VERSION:
             raise ConfigVersionMismatchError(UserSetting._VERSION, other.version)
         self._user_setting.update_from_model(other)
+        self.ensure_custom_stat_ids()
         self.save_user_setting()
+
+    def ensure_custom_stat_ids(self) -> bool:
+        """为缺少稳定 ID 的自定义基质补齐 ID（就地修改，不写盘）。
+
+        兼容三种情况：旧配置全部缺 ID、客户端新增条目未带 ID、以及手工编辑
+        配置导致的 ID 重复。补齐顺序即列表顺序，因此补齐后的 `id` 列表可以
+        直接当作"旧下标 → 新 ID"的迁移映射。
+
+        Returns:
+            是否发生了变更（调用方据此决定是否需要写盘）。
+        """
+        changed = False
+        seen: set[str] = set()
+        for stat in self._user_setting.treasure_essence_stats:
+            if not stat.id or stat.id in seen:
+                stat.id = uuid4().hex
+                changed = True
+            seen.add(stat.id)
+        return changed
+
+    def get_custom_stat_ids(self) -> list[str]:
+        """按当前顺序返回自定义基质的稳定 ID 列表。
+
+        下标即该条目在旧格式 `custom_stat_{index}` 中的编号，供 profile 迁移使用。
+        """
+        return [stat.id for stat in self._user_setting.treasure_essence_stats]
 
     def reset_to_default(self) -> UserSetting:
         """
