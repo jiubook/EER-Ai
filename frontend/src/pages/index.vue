@@ -46,7 +46,9 @@
           <!-- 方案一 -->
           <h3 class="text-subtitle-1 font-weight-bold mb-1">方案一：清空数据后全量重扫</h3>
           <p class="text-body-2 text-medium-emphasis mb-2">
-            可能是历史数据有误。仅清空当前账号「{{ activeProfileName }}」的宝藏基质数据（<strong>不会删除账号</strong>），随后完整扫描一次即可全量重建。
+            可能是历史数据有误。仅清空当前账号「{{
+              activeProfileName
+            }}」的宝藏基质数据（<strong>不会删除账号</strong>），随后完整扫描一次即可全量重建。
           </p>
           <v-btn
             color="warning"
@@ -73,7 +75,12 @@
             >
               重置所有设置到默认值
             </v-btn>
-            <v-btn prepend-icon="mdi-cog" to="/settings" variant="text" @click="showFeedbackDialog = false">
+            <v-btn
+              prepend-icon="mdi-cog"
+              to="/settings"
+              variant="text"
+              @click="showFeedbackDialog = false"
+            >
               前往设置页
             </v-btn>
           </div>
@@ -102,7 +109,7 @@
                   v-bind="props"
                   append-icon="mdi-dots-vertical"
                   prepend-icon="mdi-qqchat"
-                  style="background-color: rgb(24, 166, 189); color: rgb(255, 255, 255);"
+                  style="background-color: rgb(24, 166, 189); color: rgb(255, 255, 255)"
                 >
                   反馈交流群
                 </v-btn>
@@ -135,7 +142,9 @@
       <v-card>
         <v-card-title class="text-warning">确认清空数据</v-card-title>
         <v-card-text>
-          确定要清空当前账号「{{ activeProfileName }}」的宝藏基质数据吗？仅清空当前账号数据，不会删除账号，此操作不可撤销。
+          确定要清空当前账号「{{
+            activeProfileName
+          }}」的宝藏基质数据吗？仅清空当前账号数据，不会删除账号，此操作不可撤销。
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -149,9 +158,7 @@
     <v-dialog v-model="resetConfigConfirm" max-width="440">
       <v-card>
         <v-card-title class="text-error">确认重置设置</v-card-title>
-        <v-card-text>
-          确定要把所有设置重置为默认值吗？此操作不可撤销。
-        </v-card-text>
+        <v-card-text> 确定要把所有设置重置为默认值吗？此操作不可撤销。 </v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn @click="resetConfigConfirm = false">取消</v-btn>
@@ -159,38 +166,32 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-
-    <v-snackbar v-model="showActionMsg" timeout="3500">{{ actionMsg }}</v-snackbar>
   </v-container>
 </template>
 
 <script lang="ts" setup>
 import { nextTick, onMounted, ref, watch } from 'vue'
+import { useCustomStats } from '@/composables/useCustomStats'
 import { clearLogs, logs } from '@/composables/useLogs'
 import { useProfiles } from '@/composables/useProfiles'
 import { useScanningStatus } from '@/composables/useScanningStatus'
+import { useToast } from '@/composables/useToast'
+import { useWeaponStats } from '@/composables/useWeaponStats'
+import { QQ_FEEDBACK_GROUPS } from '@/utils/feedbackGroups'
 
 const autoScroll = ref(true)
 const { isScanning } = useScanningStatus()
-const { activeProfileName, clearProfileData } = useProfiles()
+const { activeProfileName, clearProfileData, treasureMatrix, updateTreasureMatrix } = useProfiles()
+const { fetchCustomStats } = useCustomStats()
+const { isCustomEntry } = useWeaponStats()
+const toast = useToast()
 
 // --- 反馈 / 排查 ---
 const showFeedbackDialog = ref(false)
 const clearActiveConfirm = ref(false)
 const resetConfigConfirm = ref(false)
-const showActionMsg = ref(false)
-const actionMsg = ref('')
 
-const qqGroups = [
-  { name: '①群：486622964', link: 'https://qm.qq.com/cgi-bin/qm/qr?k=1xqRp7JwQHwGswa-8_SMFuAsRYYRnF8J' },
-  { name: '②群：1082880855', link: 'https://qm.qq.com/cgi-bin/qm/qr?k=qAmvmHCc3HuESiJhZVe6Ytgj7foOxXx9' },
-  { name: '③群：1042417974', link: 'https://qm.qq.com/cgi-bin/qm/qr?k=-GykJWhnZEN5F2aZ1nrVd3xs9RGkMBI2' },
-]
-
-function notify(message: string) {
-  actionMsg.value = message
-  showActionMsg.value = true
-}
+const qqGroups = QQ_FEEDBACK_GROUPS
 
 /** 方案一：清空当前激活账号的宝藏基质数据（不传 name，由后端取激活账号）。 */
 async function onClearActiveData() {
@@ -198,22 +199,44 @@ async function onClearActiveData() {
     await clearProfileData()
     clearActiveConfirm.value = false
     showFeedbackDialog.value = false
-    notify('已清空当前账号的宝藏基质数据，可重新扫描。')
+    toast.success('已清空当前账号的宝藏基质数据，可重新扫描。')
   } catch (error: unknown) {
-    notify(`清空失败：${error instanceof Error ? error.message : String(error)}`)
+    toast.reportError('清空失败', error)
   }
 }
 
-/** 方案二：重置所有设置到默认值。 */
+/**
+ * 方案二：重置所有设置到默认值。
+ *
+ * 重置会清空自定义基质列表，因此必须同步刷新前端缓存并清理 profile 中
+ * 指向它们的条目——否则界面上会继续显示一批已经不存在的"幽灵基质"。
+ */
 async function onResetConfig() {
   try {
     const res = await fetch('/api/config/reset', { method: 'POST' })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const body = await res.json()
+        detail = body?.detail ?? detail
+      } catch {
+        // 响应体不是 JSON 时保留状态码
+      }
+      throw new Error(detail)
+    }
+
+    await fetchCustomStats()
+    // 自定义基质已随配置清空，profile 里对它们的引用一并移除
+    const remaining = treasureMatrix.value.filter((e) => !isCustomEntry(e.weapon_id))
+    if (remaining.length !== treasureMatrix.value.length) {
+      await updateTreasureMatrix(remaining)
+    }
+
     resetConfigConfirm.value = false
     showFeedbackDialog.value = false
-    notify('已重置所有设置到默认值。')
+    toast.success('已重置所有设置到默认值。')
   } catch (error: unknown) {
-    notify(`重置失败：${error instanceof Error ? error.message : String(error)}`)
+    toast.reportError('重置失败', error)
   }
 }
 

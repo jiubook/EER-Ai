@@ -6,7 +6,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useProfiles } from '../useProfiles'
+import { __resetProfilesStateForTests, useProfiles } from '../useProfiles'
+import { useToast } from '../useToast'
 
 function mockResponse(body: unknown, ok = true, status = 200): Response {
   return {
@@ -35,6 +36,10 @@ describe('useProfiles', () => {
   beforeEach(() => {
     fetchMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
+    // collection 是模块级单例，跨用例共享；不重置会让用例之间产生
+    // 顺序依赖，新增测试时极易踩到。
+    __resetProfilesStateForTests()
+    useToast().clear()
   })
 
   afterEach(() => {

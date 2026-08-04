@@ -22,49 +22,11 @@
           <div class="d-flex align-center gap-2 mb-3">
             <span class="text-body-2 text-medium-emphasis">显示星级：</span>
             <v-chip-group v-model="selectedRarities" column multiple>
-              <v-chip
-                color="primary"
-                filter
-                size="small"
-                value="3"
-                variant="outlined"
-              >
-                3★
-              </v-chip>
-              <v-chip
-                color="primary"
-                filter
-                size="small"
-                value="4"
-                variant="outlined"
-              >
-                4★
-              </v-chip>
-              <v-chip
-                color="primary"
-                filter
-                size="small"
-                value="5"
-                variant="outlined"
-              >
-                5★
-              </v-chip>
-              <v-chip
-                color="primary"
-                filter
-                size="small"
-                value="6"
-                variant="outlined"
-              >
-                6★
-              </v-chip>
-              <v-chip
-                color="primary"
-                filter
-                size="small"
-                value="custom"
-                variant="outlined"
-              >
+              <v-chip color="primary" filter size="small" value="3" variant="outlined"> 3★ </v-chip>
+              <v-chip color="primary" filter size="small" value="4" variant="outlined"> 4★ </v-chip>
+              <v-chip color="primary" filter size="small" value="5" variant="outlined"> 5★ </v-chip>
+              <v-chip color="primary" filter size="small" value="6" variant="outlined"> 6★ </v-chip>
+              <v-chip color="primary" filter size="small" value="custom" variant="outlined">
                 自定义
               </v-chip>
             </v-chip-group>
@@ -95,7 +57,13 @@
               <div class="matrix-card-body">
                 <section class="weapon-identity">
                   <div class="weapon-icon-wrap" :class="getWeaponTierClass(entry.weapon_id)">
-                    <custom-stat-icon v-if="isCustomEntry(entry.weapon_id)" hide-name :name="entry.weapon_name || entry.weapon_id" :skill-stat-id="getCustomStatSkillId(entry.weapon_id, customStats)" small />
+                    <custom-stat-icon
+                      v-if="isCustomEntry(entry.weapon_id)"
+                      hide-name
+                      :name="entry.weapon_name || entry.weapon_id"
+                      :skill-stat-id="getCustomStatSkillId(entry.weapon_id, customStats)"
+                      small
+                    />
                     <item-icon v-else class="weapon-icon-small" :item-id="entry.weapon_id" />
                     <span class="weapon-tier">{{ getWeaponRarityText(entry.weapon_id) }}</span>
                   </div>
@@ -147,7 +115,9 @@
                     >
                       +{{ entry.affix1_level }} / {{ AFFIX_MAX_LEVEL[0] }}
                     </span>
-                    <span v-if="entry.affix1_level === AFFIX_MAX_LEVEL[0]" class="max-label">MAX</span>
+                    <span v-if="entry.affix1_level === AFFIX_MAX_LEVEL[0]" class="max-label"
+                      >MAX</span
+                    >
                   </div>
 
                   <div class="attr-control attr-control--teal" @click.stop>
@@ -175,7 +145,9 @@
                     >
                       +{{ entry.affix2_level }} / {{ AFFIX_MAX_LEVEL[1] }}
                     </span>
-                    <span v-if="entry.affix2_level === AFFIX_MAX_LEVEL[1]" class="max-label">MAX</span>
+                    <span v-if="entry.affix2_level === AFFIX_MAX_LEVEL[1]" class="max-label"
+                      >MAX</span
+                    >
                   </div>
 
                   <div class="attr-control attr-control--indigo" @click.stop>
@@ -203,7 +175,9 @@
                     >
                       +{{ entry.affix3_level }} / {{ AFFIX_MAX_LEVEL[2] }}
                     </span>
-                    <span v-if="entry.affix3_level === AFFIX_MAX_LEVEL[2]" class="max-label">MAX</span>
+                    <span v-if="entry.affix3_level === AFFIX_MAX_LEVEL[2]" class="max-label"
+                      >MAX</span
+                    >
                   </div>
                 </section>
 
@@ -265,11 +239,7 @@
         <v-expansion-panel-text>
           <!-- 目标属性：卡片式布局，横条 pip 选择 -->
           <section class="attr-grid target-attr-grid mb-4">
-            <div
-              v-for="slot in targetSlots"
-              :key="slot.key"
-              class="attr-card"
-            >
+            <div v-for="slot in targetSlots" :key="slot.key" class="attr-card">
               <div class="attr-card-header">
                 <span class="attr-card-label">{{ slot.label }}</span>
                 <span class="attr-card-value" :class="{ max: slot.get() === slot.maxLevel }">
@@ -324,24 +294,22 @@
           <div v-if="recommendations.length > 0" class="d-flex align-center flex-wrap gap-2 mb-4">
             <span class="text-body-2 text-medium-emphasis">筛选：</span>
             <v-chip-group v-model="recSelectedRarities" column multiple>
-              <v-chip color="primary" filter size="small" value="3" variant="outlined">
-                3★
-              </v-chip>
-              <v-chip color="primary" filter size="small" value="4" variant="outlined">
-                4★
-              </v-chip>
-              <v-chip color="primary" filter size="small" value="5" variant="outlined">
-                5★
-              </v-chip>
-              <v-chip color="primary" filter size="small" value="6" variant="outlined">
-                6★
-              </v-chip>
+              <v-chip color="primary" filter size="small" value="3" variant="outlined"> 3★ </v-chip>
+              <v-chip color="primary" filter size="small" value="4" variant="outlined"> 4★ </v-chip>
+              <v-chip color="primary" filter size="small" value="5" variant="outlined"> 5★ </v-chip>
+              <v-chip color="primary" filter size="small" value="6" variant="outlined"> 6★ </v-chip>
               <v-chip color="primary" filter size="small" value="custom" variant="outlined">
                 自定义
               </v-chip>
             </v-chip-group>
             <v-btn
-              :prepend-icon="recSortMode === 'runs' ? 'mdi-sort-numeric-ascending' : (recSortAsc ? 'mdi-sort-descending' : 'mdi-sort-ascending')"
+              :prepend-icon="
+                recSortMode === 'runs'
+                  ? 'mdi-sort-numeric-ascending'
+                  : recRarityDesc
+                    ? 'mdi-sort-descending'
+                    : 'mdi-sort-ascending'
+              "
               size="small"
               variant="tonal"
               @click="toggleRecSort"
@@ -358,18 +326,37 @@
           >
             <v-card-item class="rec-card-top">
               <template #prepend>
-                <custom-stat-icon v-if="isCustomEntry(rec.weapon_id)" hide-name :name="getCustomStatName(rec.weapon_id, customStats)" :skill-stat-id="getCustomStatSkillId(rec.weapon_id, customStats)" small />
+                <custom-stat-icon
+                  v-if="isCustomEntry(rec.weapon_id)"
+                  hide-name
+                  :name="getCustomStatName(rec.weapon_id, customStats)"
+                  :skill-stat-id="getCustomStatSkillId(rec.weapon_id, customStats)"
+                  small
+                />
                 <item-icon v-else class="weapon-icon-small" :item-id="rec.weapon_id" />
               </template>
-              <v-card-title>{{ isCustomEntry(rec.weapon_id) ? getCustomStatName(rec.weapon_id, customStats) : rec.weapon_name }}</v-card-title>
+              <v-card-title>{{
+                isCustomEntry(rec.weapon_id)
+                  ? getCustomStatName(rec.weapon_id, customStats)
+                  : rec.weapon_name
+              }}</v-card-title>
               <v-card-subtitle class="weapon-progress">
-                当前: +{{ rec.current_levels[0] }} / +{{ rec.current_levels[1] }} / +{{ rec.current_levels[2] }}
+                当前: +{{ rec.current_levels[0] }} / +{{ rec.current_levels[1] }} / +{{
+                  rec.current_levels[2]
+                }}
                 <span class="arrow">→</span>
-                目标: <span class="target">+{{ rec.target_levels[0] }} / +{{ rec.target_levels[1] }} / +{{ rec.target_levels[2] }}</span>
+                目标:
+                <span class="target"
+                  >+{{ rec.target_levels[0] }} / +{{ rec.target_levels[1] }} / +{{
+                    rec.target_levels[2]
+                  }}</span
+                >
               </v-card-subtitle>
               <template #append>
                 <div class="farming-badge">
-                  <span class="farming-badge-count">{{ Math.ceil(getAdjustedStats(rec).totalRuns) }}</span>
+                  <span class="farming-badge-count">{{
+                    Math.ceil(getAdjustedStats(rec).totalRuns)
+                  }}</span>
                   <span class="farming-badge-label">刷取次数</span>
                 </div>
               </template>
@@ -377,12 +364,7 @@
             <v-divider />
             <v-card-text>
               <v-row>
-                <v-col
-                  v-for="slot in recSlots"
-                  :key="slot.index"
-                  cols="12"
-                  md="4"
-                >
+                <v-col v-for="slot in recSlots" :key="slot.index" cols="12" md="4">
                   <v-list density="compact">
                     <v-list-subheader>
                       <span class="steps-col-dot" :class="`steps-col-dot--${slot.color}`" />
@@ -392,7 +374,13 @@
                       v-for="step in rec.affix_results[slot.index]?.steps"
                       :key="`a${slot.index}-` + step.from_level"
                       class="rec-step-row"
-                      :class="{ 'bg-success-lighten-5': isUsingGrease(rec.weapon_id, slot.index, step.from_level) }"
+                      :class="{
+                        'bg-success-lighten-5': isUsingGrease(
+                          rec.weapon_id,
+                          slot.index,
+                          step.from_level,
+                        ),
+                      }"
                       density="compact"
                       style="cursor: pointer"
                       @click="toggleUseGrease(rec.weapon_id, slot.index, step.from_level)"
@@ -411,23 +399,44 @@
                               :class="{ active: p <= step.to_level }"
                             />
                           </span>
-                          <span class="text-body-2">+{{ step.from_level }} → +{{ step.to_level }}</span>
+                          <span class="text-body-2"
+                            >+{{ step.from_level }} → +{{ step.to_level }}</span
+                          >
                         </div>
                       </v-list-item-title>
                       <template #append>
                         <v-chip
-                          :color="isUsingGrease(rec.weapon_id, slot.index, step.from_level) ? 'success' : undefined"
+                          :color="
+                            isUsingGrease(rec.weapon_id, slot.index, step.from_level)
+                              ? 'success'
+                              : undefined
+                          "
                           size="x-small"
-                          :variant="isUsingGrease(rec.weapon_id, slot.index, step.from_level) ? 'flat' : 'tonal'"
+                          :variant="
+                            isUsingGrease(rec.weapon_id, slot.index, step.from_level)
+                              ? 'flat'
+                              : 'tonal'
+                          "
                         >
-                          {{ isUsingGrease(rec.weapon_id, slot.index, step.from_level) ? '100%' : (step.success_prob * 100).toFixed(1) + '%' }}
+                          {{
+                            isUsingGrease(rec.weapon_id, slot.index, step.from_level)
+                              ? '100%'
+                              : (step.success_prob * 100).toFixed(1) + '%'
+                          }}
                         </v-chip>
                         <span class="text-caption ml-2">
-                          {{ isUsingGrease(rec.weapon_id, slot.index, step.from_level) ? `冷却脂 ${step.grease_threshold}` : `期望 ${step.expected_attempts.toFixed(1)} 次` }}
+                          {{
+                            isUsingGrease(rec.weapon_id, slot.index, step.from_level)
+                              ? `冷却脂 ${step.grease_threshold}`
+                              : `期望 ${step.expected_attempts.toFixed(1)} 次`
+                          }}
                         </span>
                       </template>
                     </v-list-item>
-                    <v-list-item v-if="rec.affix_results[slot.index]?.steps.length === 0" density="compact">
+                    <v-list-item
+                      v-if="rec.affix_results[slot.index]?.steps.length === 0"
+                      density="compact"
+                    >
                       <v-list-item-title class="text-medium-emphasis">
                         <v-icon class="mr-1" color="success" size="small">mdi-check</v-icon>
                         已达标
@@ -441,7 +450,10 @@
                 <div class="d-flex flex-wrap ga-4 text-caption">
                   <div class="d-flex align-center">
                     <v-icon class="mr-1" color="primary" size="small">mdi-diamond-stone</v-icon>
-                    <strong>期望消耗无暇基质:</strong>&nbsp;{{ getAdjustedStats(rec).totalEssences }} 个
+                    <strong>期望消耗无暇基质:</strong>&nbsp;{{
+                      getAdjustedStats(rec).totalEssences
+                    }}
+                    个
                   </div>
                   <div class="d-flex align-center">
                     <v-icon class="mr-1" color="success" size="small">mdi-arrow-up-bold</v-icon>
@@ -493,7 +505,7 @@
           <!-- 自定义基质区段 -->
           <template v-if="customMatrixEntries.length > 0">
             <h4 class="mt-4 mb-2 d-flex align-center">
-              <img alt="基质底板" class="essence-icon-small me-2" :src="essenceBgSrc" />
+              <img v-if="essenceBgSrc" alt="" class="essence-icon-small me-2" :src="essenceBgSrc" />
               自定义基质
             </h4>
             <div class="weapon-grid">
@@ -509,11 +521,7 @@
           </template>
           <template v-for="wType in weaponTypes" :key="wType.id">
             <h4 class="mt-4 mb-2 d-flex align-center">
-              <img
-                :alt="wType.name"
-                class="group-icon me-2"
-                :src="wType.iconUrl"
-              />
+              <img :alt="wType.name" class="group-icon me-2" :src="wType.iconUrl" />
               {{ wType.name }}
             </h4>
             <div class="weapon-grid">
@@ -547,10 +555,20 @@ import BackToTop from '@/components/BackToTop.vue'
 import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import WeaponOverview from '@/components/WeaponOverview.vue'
+import { useCustomStats } from '@/composables/useCustomStats'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
+import { useToast } from '@/composables/useToast'
+import { AFFIX_MAX_LEVEL, useWeaponStats } from '@/composables/useWeaponStats'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { getCustomStatName, getCustomStatSkillId, getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
+import {
+  fallbackCustomStatName,
+  getCustomStatName,
+  getCustomStatSkillId,
+  getGemTagName,
+  getStatsForWeapon,
+  toCustomStatId,
+} from '@/utils/gameData/weapon'
 import { safeLoadJson, safeRemoveJson, safeSetJson } from '@/utils/safeStorage'
 
 const router = useRouter()
@@ -565,6 +583,9 @@ const {
   getBatchFarmingRecommendations,
 } = useProfiles()
 const { selectedRarities } = useRarityFilters()
+const { customStats, customMatrixEntries, fetchCustomStats } = useCustomStats()
+const { isCustomEntry } = useWeaponStats()
+const toast = useToast()
 
 const { weaponsMap, weaponTypes, matrixIcons } = useStaticData()
 
@@ -576,62 +597,35 @@ const weaponSearch = ref('')
 const computing = ref(false)
 
 // --- 自定义基质相关 ---
-
-/** 判断是否为自定义基质条目（weapon_id 以 custom_stat_ 开头） */
-function isCustomEntry(weaponId: string): boolean {
-  return weaponId.startsWith('custom_stat_')
-}
-
-
-/** 自定义宝藏基质属性配置列表，用于读取自定义条目的属性名 */
-const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null }>>([])
-
-/** 从后端获取配置中的自定义宝藏基质属性列表 */
-async function fetchCustomStats() {
-  try {
-    const res = await fetch('/api/config')
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
-    }
-    const config = await res.json()
-    customStats.value = config.treasure_essence_stats || []
-  } catch (error) {
-    console.error('获取自定义宝藏基质配置失败:', error)
-  }
-}
-
-/** 自定义基质条目列表，用于添加武器对话框展示 */
-const customMatrixEntries = computed(() => {
-  return customStats.value.map((stat, index) => ({
-    syntheticId: `custom_stat_${index}`,
-    displayName: stat.name || `自定义基质 ${index + 1}`,
-    index,
-    skillStatId: stat.skill,
-  }))
-})
+// customStats / customMatrixEntries / fetchCustomStats 统一走 useCustomStats 的
+// 模块级单例：此前这里另存了一份副本，在别处增删自定义基质后本页不会同步。
 
 /** 添加自定义基质条目到宝藏基质配置 */
 async function onAddCustomStat(index: number) {
-  const syntheticId = `custom_stat_${index}`
+  const stat = customStats.value[index]
+  if (!stat) return
+  const syntheticId = toCustomStatId(stat)
   // 检查是否已添加
   if (matrixEntries.value.some((e) => e.weapon_id === syntheticId)) return
-  const stat = customStats.value[index]
-  await addTreasureMatrixEntry({
-    weapon_id: syntheticId,
-    weapon_name: stat?.name || `自定义基质 ${index + 1}`,
-    affix1_level: 1,
-    affix2_level: 1,
-    affix3_level: 1,
-  })
-  showAddWeaponDialog.value = false
+  try {
+    await addTreasureMatrixEntry({
+      weapon_id: syntheticId,
+      weapon_name: stat.name || fallbackCustomStatName(index),
+      affix1_level: 1,
+      affix2_level: 1,
+      affix3_level: 1,
+    })
+    showAddWeaponDialog.value = false
+  } catch (error) {
+    toast.reportError('添加自定义基质失败', error)
+  }
 }
 
 const targetAffix1 = ref(6)
 const targetAffix2 = ref(6)
 const targetAffix3 = ref(3)
 
-// 各词条最大等级（与后端 schema 的 le 约束保持一致）
-const AFFIX_MAX_LEVEL = [6, 6, 3] as const
+// AFFIX_MAX_LEVEL 由 useWeaponStats 统一导出，避免同一常量在多处各写一份
 const affixLevelItems = [1, 2, 3, 4, 5, 6]
 const skillLevelItems = [1, 2, 3]
 
@@ -667,9 +661,7 @@ interface Recommendation {
 const recommendationsKey = computed(
   () => `treasureMatrixRecommendations:${activeProfileName.value}`,
 )
-const frozenOrderKey = computed(
-  () => `treasureMatrixFrozenOrder:${activeProfileName.value}`,
-)
+const frozenOrderKey = computed(() => `treasureMatrixFrozenOrder:${activeProfileName.value}`)
 
 const recommendations = ref<Recommendation[]>([])
 let saveRecommendationsTimer: number | undefined
@@ -684,17 +676,18 @@ const frozenSortOrder = ref<string[] | null>(null)
 
 // 刷取建议区域的星级筛选（独立于宝藏基质配置的筛选）
 const recSelectedRarities = ref<string[]>(['custom', '6', '5', '4', '3'])
-// 刷取建议排序模式：'runs' = 按刷取次数(默认), 'level' = 按等级
+// 刷取建议排序模式：'runs' = 按刷取次数(默认), 'level' = 按稀有度
 const recSortMode = ref<'runs' | 'level'>('runs')
-// 等级排序方向：true = 升序, false = 降序
-const recSortAsc = ref(true)
+// 稀有度排序方向：true = 高稀有度在前（6★ → 3★），false = 反向。
+// 原名 recSortAsc 与实际行为相反（true 走的是降序分支），已按实际语义更名。
+const recRarityDesc = ref(true)
 
 function toggleRecSort() {
   if (recSortMode.value === 'runs') {
     recSortMode.value = 'level'
-    recSortAsc.value = true
-  } else if (recSortAsc.value) {
-    recSortAsc.value = false
+    recRarityDesc.value = true
+  } else if (recRarityDesc.value) {
+    recRarityDesc.value = false
   } else {
     recSortMode.value = 'runs'
   }
@@ -727,7 +720,7 @@ watch(
       }
     }, 300)
   },
-  { deep: true }
+  { deep: true },
 )
 
 // 保存冻结的排序顺序到 localStorage
@@ -743,7 +736,7 @@ watch(
       }
     }, 300)
   },
-  { deep: true }
+  { deep: true },
 )
 
 onUnmounted(() => {
@@ -756,26 +749,30 @@ onUnmounted(() => {
 })
 
 // 监听 recommendations 变化，更新冻结顺序
-watch(recommendations, (newRecommendations: Recommendation[]) => {
-  const sorted = newRecommendations.toSorted((a: Recommendation, b: Recommendation) => {
-    const aRuns = Math.ceil(a.total_expected_runs)
-    const bRuns = Math.ceil(b.total_expected_runs)
+watch(
+  recommendations,
+  (newRecommendations: Recommendation[]) => {
+    const sorted = newRecommendations.toSorted((a: Recommendation, b: Recommendation) => {
+      const aRuns = Math.ceil(a.total_expected_runs)
+      const bRuns = Math.ceil(b.total_expected_runs)
 
-    // 本身不需要刷取的武器置底
-    if (aRuns === 0 && bRuns !== 0) return 1
-    if (aRuns !== 0 && bRuns === 0) return -1
+      // 本身不需要刷取的武器置底
+      if (aRuns === 0 && bRuns !== 0) return 1
+      if (aRuns !== 0 && bRuns === 0) return -1
 
-    // 按原始刷取次数升序排序
-    return aRuns - bRuns
-  })
+      // 按原始刷取次数升序排序
+      return aRuns - bRuns
+    })
 
-  const currentIds = sorted.map((rec: Recommendation) => rec.weapon_id).join(',')
+    const currentIds = sorted.map((rec: Recommendation) => rec.weapon_id).join(',')
 
-  // 如果还没有冻结顺序，或者是全新的推荐列表，则冻结
-  if (frozenSortOrder.value === null || frozenSortOrder.value.join(',') !== currentIds) {
-    frozenSortOrder.value = sorted.map((rec: Recommendation) => rec.weapon_id)
-  }
-}, { deep: true })
+    // 如果还没有冻结顺序，或者是全新的推荐列表，则冻结
+    if (frozenSortOrder.value === null || frozenSortOrder.value.join(',') !== currentIds) {
+      frozenSortOrder.value = sorted.map((rec: Recommendation) => rec.weapon_id)
+    }
+  },
+  { deep: true },
+)
 
 const sortedRecommendations = computed(() => {
   // 星级筛选
@@ -793,17 +790,21 @@ const sortedRecommendations = computed(() => {
     if (frozenSortOrder.value) {
       const orderMap = new Map(frozenSortOrder.value.map((id, idx) => [id, idx]))
       return filtered.toSorted((a, b) => {
-        return (orderMap.get(a.weapon_id) ?? 0) - (orderMap.get(b.weapon_id) ?? 0)
+        // 冻结顺序里没有的条目排到末尾：默认 0 会让新出现的武器凭空跳到最前
+        return (
+          (orderMap.get(a.weapon_id) ?? Number.POSITIVE_INFINITY) -
+          (orderMap.get(b.weapon_id) ?? Number.POSITIVE_INFINITY)
+        )
       })
     }
     return filtered.toSorted((a, b) => a.total_expected_runs - b.total_expected_runs)
   }
 
-  // 按等级排序：自定义基质按 6★ 与普通武器一同按稀有度排序（6★ → 3★ 或反向）
+  // 按稀有度排序：自定义基质按 6★ 与普通武器一同排序（6★ → 3★ 或反向）
   return filtered.toSorted((a, b) => {
     const aRarity = getWeaponRarity(a.weapon_id) ?? 0
     const bRarity = getWeaponRarity(b.weapon_id) ?? 0
-    return recSortAsc.value ? bRarity - aRarity : aRarity - bRarity
+    return recRarityDesc.value ? bRarity - aRarity : aRarity - bRarity
   })
 })
 
@@ -833,7 +834,11 @@ const filteredMatrixEntries = computed(() => {
   if (!showMaxedWeapons.value) {
     entries = entries.filter(
       (entry) =>
-        !(entry.affix1_level === AFFIX_MAX_LEVEL[0] && entry.affix2_level === AFFIX_MAX_LEVEL[1] && entry.affix3_level === AFFIX_MAX_LEVEL[2]),
+        !(
+          entry.affix1_level === AFFIX_MAX_LEVEL[0] &&
+          entry.affix2_level === AFFIX_MAX_LEVEL[1] &&
+          entry.affix3_level === AFFIX_MAX_LEVEL[2]
+        ),
     )
   }
 
@@ -953,7 +958,9 @@ const targetSlots = [
     maxLevel: AFFIX_MAX_LEVEL[0],
     levels: affixLevelItems,
     get: () => targetAffix1.value,
-    set: (v: number) => { targetAffix1.value = v },
+    set: (v: number) => {
+      targetAffix1.value = v
+    },
   },
   {
     key: 'affix2',
@@ -962,7 +969,9 @@ const targetSlots = [
     maxLevel: AFFIX_MAX_LEVEL[1],
     levels: affixLevelItems,
     get: () => targetAffix2.value,
-    set: (v: number) => { targetAffix2.value = v },
+    set: (v: number) => {
+      targetAffix2.value = v
+    },
   },
   {
     key: 'affix3',
@@ -971,7 +980,9 @@ const targetSlots = [
     maxLevel: AFFIX_MAX_LEVEL[2],
     levels: skillLevelItems,
     get: () => targetAffix3.value,
-    set: (v: number) => { targetAffix3.value = v },
+    set: (v: number) => {
+      targetAffix3.value = v
+    },
   },
 ]
 
@@ -1180,13 +1191,19 @@ $attr-indigo: #5c6bc0;
       linear-gradient(135deg, rgba(var(--v-theme-surface), 1), rgba(var(--v-theme-primary), 0.035)),
       rgb(var(--v-theme-surface));
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
-    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease,
-      opacity 0.18s ease, filter 0.18s ease;
+    transition:
+      transform 0.18s ease,
+      box-shadow 0.18s ease,
+      border-color 0.18s ease,
+      opacity 0.18s ease,
+      filter 0.18s ease;
 
     &:hover {
       transform: translateY(-1px);
       border-color: rgba(var(--v-theme-primary), 0.35);
-      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09), 0 2px 8px rgba(15, 23, 42, 0.06) !important;
+      box-shadow:
+        0 12px 28px rgba(15, 23, 42, 0.09),
+        0 2px 8px rgba(15, 23, 42, 0.06) !important;
     }
 
     &.entry-card--muted {
@@ -1217,7 +1234,11 @@ $attr-indigo: #5c6bc0;
       align-items: center;
       gap: 12px;
       padding: 0 20px;
-      background: linear-gradient(135deg, rgba(var(--v-theme-surface), 0.98), rgba(var(--v-theme-primary), 0.06));
+      background: linear-gradient(
+        135deg,
+        rgba(var(--v-theme-surface), 0.98),
+        rgba(var(--v-theme-primary), 0.06)
+      );
       border-right: 1px solid rgba(var(--v-border-color), 0.12);
 
       &::after {
@@ -1365,7 +1386,10 @@ $attr-indigo: #5c6bc0;
       padding: 0 10px;
       border: 1px solid transparent;
       border-radius: 12px;
-      transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+      transition:
+        background 0.18s ease,
+        border-color 0.18s ease,
+        transform 0.18s ease;
 
       &:hover {
         transform: translateY(-1px);
@@ -1396,7 +1420,10 @@ $attr-indigo: #5c6bc0;
       border-radius: 999px;
       background: rgba(var(--v-theme-on-surface), 0.12);
       cursor: pointer;
-      transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+      transition:
+        background 0.18s ease,
+        box-shadow 0.18s ease,
+        transform 0.18s ease;
 
       &:hover,
       &:focus-visible {
@@ -1460,7 +1487,6 @@ $attr-indigo: #5c6bc0;
     .matrix-action {
       border-radius: 10px;
     }
-
   }
 
   @keyframes matrixPipPulse {
@@ -1546,7 +1572,7 @@ $attr-indigo: #5c6bc0;
     padding: 16px;
     border: 1px solid rgba(var(--v-border-color), 0.12);
     border-radius: 12px;
-    background: rgba(var(--v-theme-on-surface), 0.0);
+    background: rgba(var(--v-theme-on-surface), 0);
     transition: border-color 0.18s ease;
 
     &:hover {
@@ -1600,7 +1626,10 @@ $attr-indigo: #5c6bc0;
     border-radius: 3px;
     background: rgba(var(--v-theme-on-surface), 0.12);
     cursor: pointer;
-    transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    transition:
+      background 0.18s ease,
+      box-shadow 0.18s ease,
+      transform 0.18s ease;
 
     &:hover,
     &:focus-visible {
@@ -1632,7 +1661,9 @@ $attr-indigo: #5c6bc0;
 
   .rec-card {
     border-color: rgba(var(--v-border-color), 0.25);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease;
     &:hover {
       transform: translateY(-2px);
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
@@ -1731,7 +1762,9 @@ $attr-indigo: #5c6bc0;
     height: 8px;
     border-radius: 2px;
     background: rgba(var(--v-theme-on-surface), 0.12);
-    transition: background 0.18s ease, box-shadow 0.18s ease;
+    transition:
+      background 0.18s ease,
+      box-shadow 0.18s ease;
 
     &.active {
       background: rgb(var(--v-theme-primary));

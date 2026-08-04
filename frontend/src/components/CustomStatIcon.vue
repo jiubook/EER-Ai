@@ -1,21 +1,9 @@
 <template>
-  <div
-    class="custom-entry-icon"
-    :class="{ 'custom-entry-icon-small': small }"
-  >
-    <!-- 底板图片 -->
-    <img
-      alt="基质底板"
-      class="essence-bg-img"
-      :src="essenceBgSrc"
-    />
+  <div class="custom-entry-icon" :class="{ 'custom-entry-icon-small': small }">
+    <!-- 底板图片：静态数据未就绪时不渲染，避免 src="" 触发无效请求／破图 -->
+    <img v-if="essenceBgSrc" alt="" class="essence-bg-img" :src="essenceBgSrc" />
     <!-- 技能属性图标（叠加在底板上） -->
-    <img
-      v-if="skillIconSrc"
-      :alt="skillAltText"
-      class="skill-icon-img"
-      :src="skillIconSrc"
-    />
+    <img v-if="skillIconSrc" :alt="skillAltText" class="skill-icon-img" :src="skillIconSrc" />
     <div class="custom-entry-gradient" />
     <div class="custom-entry-tier-bar" />
     <div v-if="!hideName" ref="nameContainerRef" class="custom-entry-name-bar">
@@ -28,6 +16,7 @@
 import { computed, useTemplateRef, watch } from 'vue'
 import { updateText } from '@/utils/autoFontSizing'
 import { useStaticData } from '@/utils/gameData/staticData'
+import { getGemTagName } from '@/utils/gameData/weapon'
 
 interface Props {
   name: string
@@ -63,12 +52,10 @@ const skillIconSrc = computed(() => {
   return matrixIcons.value.skills[props.skillStatId] || null
 })
 
-// 技能图标alt文本
+// 技能图标 alt 文本：用词条的中文名，英文缩写对读屏软件没有意义
 const skillAltText = computed(() => {
   if (!props.skillStatId) return ''
-  // 从ID中提取技能名称，例如 weapon.stat.gst_passive_ult -> ult
-  const match = props.skillStatId.match(/gst_passive_(\w+)/)
-  return match ? match[1] : '技能属性'
+  return getGemTagName(props.skillStatId)
 })
 </script>
 
@@ -129,7 +116,7 @@ const skillAltText = computed(() => {
   bottom: 0;
   width: 100%;
   height: 4%;
-  background-color: #FF7100;
+  background-color: #ff7100;
   z-index: 3;
 }
 
