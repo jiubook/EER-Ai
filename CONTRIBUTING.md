@@ -274,6 +274,9 @@ npm run lint
 
 # 自动修复
 npm run lint:fix
+
+# 检查代码格式
+npm run format:check
 ```
 
 6. **运行测试**

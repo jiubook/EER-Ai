@@ -29,4 +29,9 @@ version.json
 # enfield data table config
 src/endfield_essence_recognizer/data/endfielddata/TableCfg/**.json
 
+# 仅限本地用 不上传
 AGENTS.md
+CLAUDE.md
+
+# 依赖目录
+node_modules/
