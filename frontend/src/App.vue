@@ -35,6 +35,9 @@
 
     <!-- 更新提示 -->
     <UpdateDialogs />
+
+    <!-- 全局操作结果提示 -->
+    <ToastHost />
   </v-app>
 </template>
 
@@ -44,6 +47,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useTheme } from 'vuetify'
 import Logo from '@/components/icons/logo.vue'
 import ProfileSelector from '@/components/ProfileSelector.vue'
+import ToastHost from '@/components/ToastHost.vue'
 import UpdateDialogs from '@/components/UpdateDialogs.vue'
 import { useLogs } from '@/composables/useLogs'
 import { useUpdateChecker } from '@/composables/useUpdateChecker'

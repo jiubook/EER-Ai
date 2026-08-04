@@ -31,7 +31,10 @@
                 />
               </template>
             </v-tooltip>
-            <v-tooltip location="bottom" :text="name === defaultProfileName ? '默认账号不可删除' : '删除账号'">
+            <v-tooltip
+              location="bottom"
+              :text="name === defaultProfileName ? '默认账号不可删除' : '删除账号'"
+            >
               <template #activator="{ props }">
                 <span v-bind="props">
                   <v-btn
@@ -86,9 +89,7 @@
       <v-card-actions>
         <v-spacer />
         <v-btn @click="showNewProfileDialog = false">取消</v-btn>
-        <v-btn color="primary" :disabled="!newProfileName.trim()" @click="onCreate">
-          创建
-        </v-btn>
+        <v-btn color="primary" :disabled="!newProfileName.trim()" @click="onCreate"> 创建 </v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -109,9 +110,7 @@
       <v-card-actions>
         <v-spacer />
         <v-btn @click="showRenameDialog = false">取消</v-btn>
-        <v-btn color="primary" :disabled="!renameNewName.trim()" @click="onRename">
-          确认
-        </v-btn>
+        <v-btn color="primary" :disabled="!renameNewName.trim()" @click="onRename"> 确认 </v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -139,7 +138,9 @@
     <v-card>
       <v-card-title class="text-error">确认清空数据</v-card-title>
       <v-card-text>
-        确定要清空账号「{{ clearDataTargetName }}」的数据吗？账号会保留，但该账号下所有已扫描的宝藏基质与优先级设置都会被清空，此操作不可撤销。
+        确定要清空账号「{{
+          clearDataTargetName
+        }}」的数据吗？账号会保留，但该账号下所有已扫描的宝藏基质与优先级设置都会被清空，此操作不可撤销。
       </v-card-text>
       <v-card-actions>
         <v-spacer />
@@ -148,15 +149,12 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
-
-  <v-snackbar v-model="showError" color="error" timeout="4000">
-    {{ errorMessage }}
-  </v-snackbar>
 </template>
 
 <script lang="ts" setup>
 import { onMounted, ref } from 'vue'
 import { useProfiles } from '@/composables/useProfiles'
+import { useToast } from '@/composables/useToast'
 
 const {
   activeProfileName,
@@ -184,16 +182,17 @@ const renameOldName = ref('')
 const deleteTargetName = ref('')
 const deleteIsActive = ref(false)
 const clearDataTargetName = ref('')
-const showError = ref(false)
-const errorMessage = ref('')
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
-}
+const toast = useToast()
 
+/**
+ * 提示校验错误。
+ *
+ * 接口错误由 useProfiles 统一推送到全局提示，这里只负责本地校验的反馈，
+ * 否则同一个失败会弹两次。
+ */
 function notifyError(message: string) {
-  errorMessage.value = message
-  showError.value = true
+  toast.error(message)
 }
 
 /**
@@ -210,9 +209,8 @@ function validateProfileName(name: string): string | null {
 }
 
 onMounted(() => {
-  void fetchProfiles().catch((error: unknown) => {
-    notifyError(getErrorMessage(error, '获取账号列表失败'))
-  })
+  // 失败信息已由 useProfiles 推送到全局提示，这里只需吞掉 rejection
+  void fetchProfiles().catch(() => {})
 })
 
 /**
@@ -221,8 +219,8 @@ onMounted(() => {
 async function onSwitch(name: string) {
   try {
     await switchProfile(name)
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '切换失败'))
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 
@@ -240,8 +238,8 @@ async function onCreate() {
     await switchProfile(name)
     showNewProfileDialog.value = false
     newProfileName.value = ''
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '创建失败'))
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 
@@ -272,8 +270,8 @@ async function onRename() {
   try {
     await renameProfile(renameOldName.value, newName)
     showRenameDialog.value = false
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '重命名失败'))
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 
@@ -295,8 +293,8 @@ async function onDelete() {
   try {
     await deleteProfile(deleteTargetName.value)
     showDeleteConfirm.value = false
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '删除失败'))
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 
@@ -315,8 +313,9 @@ async function onClearData() {
   try {
     await clearProfileData(clearDataTargetName.value)
     showClearDataConfirm.value = false
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '清空数据失败'))
+    toast.success(`已清空账号「${clearDataTargetName.value}」的数据`)
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 </script>
