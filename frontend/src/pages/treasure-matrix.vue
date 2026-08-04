@@ -341,7 +341,7 @@
               </v-chip>
             </v-chip-group>
             <v-btn
-              :prepend-icon="recSortMode === 'runs' ? 'mdi-sort-numeric-ascending' : (recSortAsc ? 'mdi-sort-ascending' : 'mdi-sort-descending')"
+              :prepend-icon="recSortMode === 'runs' ? 'mdi-sort-numeric-ascending' : (recSortAsc ? 'mdi-sort-descending' : 'mdi-sort-ascending')"
               size="small"
               variant="tonal"
               @click="toggleRecSort"
@@ -799,12 +799,8 @@ const sortedRecommendations = computed(() => {
     return filtered.toSorted((a, b) => a.total_expected_runs - b.total_expected_runs)
   }
 
-  // 按等级排序：自定义基质优先 → 按稀有度（6★ → 3★ 或反向）
+  // 按等级排序：自定义基质按 6★ 与普通武器一同按稀有度排序（6★ → 3★ 或反向）
   return filtered.toSorted((a, b) => {
-    const aCustom = isCustomEntry(a.weapon_id) ? 1 : 0
-    const bCustom = isCustomEntry(b.weapon_id) ? 1 : 0
-    if (aCustom !== bCustom) return bCustom - aCustom
-
     const aRarity = getWeaponRarity(a.weapon_id) ?? 0
     const bRarity = getWeaponRarity(b.weapon_id) ?? 0
     return recSortAsc.value ? bRarity - aRarity : aRarity - bRarity

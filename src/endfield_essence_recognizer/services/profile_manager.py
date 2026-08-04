@@ -228,10 +228,7 @@ class ProfileManager:
         with self._lock:
             collection = self._collection.model_copy(deep=True)
             name = self._validate_profile_name(name)
-            if (
-                name == "default"
-                and collection.default_profile != "default"
-            ):
+            if name == "default" and collection.default_profile != "default":
                 raise ValueError("不能使用保留名称 'default' 作为账号名称")
             if name not in collection.profiles:
                 collection.profiles[name] = ProfileData(name=name)

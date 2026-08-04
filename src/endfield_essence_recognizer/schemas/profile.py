@@ -103,6 +103,4 @@ class ProfileCollection(BaseModel):
     def ensure_default(self) -> None:
         """确保默认账号存在。"""
         if self.default_profile not in self.profiles:
-            self.profiles[self.default_profile] = ProfileData(
-                name=self.default_profile
-            )
+            self.profiles[self.default_profile] = ProfileData(name=self.default_profile)
