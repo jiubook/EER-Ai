@@ -558,11 +558,11 @@ import WeaponOverview from '@/components/WeaponOverview.vue'
 import { useCustomStats } from '@/composables/useCustomStats'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
-import { useToast } from '@/composables/useToast'
 import { AFFIX_MAX_LEVEL, useWeaponStats } from '@/composables/useWeaponStats'
 import { useStaticData } from '@/utils/gameData/staticData'
 import {
   fallbackCustomStatName,
+  findCustomStat,
   getCustomStatName,
   getCustomStatSkillId,
   getGemTagName,
@@ -585,7 +585,6 @@ const {
 const { selectedRarities } = useRarityFilters()
 const { customStats, customMatrixEntries, fetchCustomStats } = useCustomStats()
 const { isCustomEntry } = useWeaponStats()
-const toast = useToast()
 
 const { weaponsMap, weaponTypes, matrixIcons } = useStaticData()
 
@@ -616,8 +615,8 @@ async function onAddCustomStat(index: number) {
       affix3_level: 1,
     })
     showAddWeaponDialog.value = false
-  } catch (error) {
-    toast.reportError('添加自定义基质失败', error)
+  } catch {
+    // toast 已由 _handleError 统一弹出，此处不再重复。
   }
 }
 
@@ -864,11 +863,11 @@ const filteredMatrixEntries = computed(() => {
  * 自定义条目从 customStats 配置中读取
  */
 function getWeaponTraitNames(weaponId: string): string[] {
-  // 自定义条目：从配置中读取属性
+  // 自定义条目：从配置中读取属性（兼容新旧格式 ID）
   if (isCustomEntry(weaponId)) {
-    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
-    const stat = customStats.value[index]
-    if (!stat) return ['自定义基质']
+    const found = findCustomStat(weaponId, customStats.value)
+    if (!found) return ['自定义基质']
+    const stat = found.stat
     const parts: string[] = []
     if (stat.attribute) parts.push(getGemTagName(stat.attribute))
     if (stat.secondary) parts.push(getGemTagName(stat.secondary))

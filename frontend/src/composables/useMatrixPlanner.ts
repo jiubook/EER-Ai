@@ -6,9 +6,10 @@
 
 import type { EnergyAlluviumInfo } from '@/types/staticData'
 import { computed, onUnmounted, ref, type Ref, watch } from 'vue'
+import { useCustomStats } from '@/composables/useCustomStats'
 import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { getGemTagName } from '@/utils/gameData/weapon'
+import { findCustomStat, getGemTagName, isCustomStatId } from '@/utils/gameData/weapon'
 import { safeLoadJson, safeRemoveJson, safeSetJson } from '@/utils/safeStorage'
 
 let _nextId = 1
@@ -176,6 +177,7 @@ function findMatchingWeapons(
 export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
   const { weaponsMap, essencesMap, energyAlluviums: energyAlluviumsFromApi } = useStaticData()
   const { activeProfileName } = useProfiles()
+  const { customStats } = useCustomStats()
 
   /** stat_id → 中文显示名映射（从 essencesMap 构建） */
   const statIdToNameMap = computed<Record<string, string>>(() => {
@@ -353,12 +355,10 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
   function getEssenceStatDescription(stat: PlannerEssenceStat): string {
     if (stat.isCustom) return '自定义'
     if (stat.weaponId) {
-      // 识别自定义基质预设的合成 ID
-      const customMatch = stat.weaponId.match(/^custom_stat_(\d+)$/)
-      if (customMatch) {
-        const index = Number.parseInt(customMatch[1]!, 10)
-        const name = _customStatNames.value[index]
-        return name || `自定义基质 ${index + 1}`
+      // 识别自定义基质预设的合成 ID（兼容新旧格式）
+      if (isCustomStatId(stat.weaponId)) {
+        const found = findCustomStat(stat.weaponId, customStats.value)
+        return found?.stat.name || `自定义基质 ${found ? found.index + 1 : ''}`
       }
       const weapon = weaponsMap.value.get(stat.weaponId)
       return weapon ? weapon.name : stat.weaponId
@@ -376,7 +376,7 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
     battleSkillStats: string[],
   ) {
     for (const stat of requiredEssenceStats.value) {
-      if (!stat.weaponId || !stat.weaponId.startsWith('custom_stat_')) continue
+      if (!stat.weaponId || !isCustomStatId(stat.weaponId)) continue
       if (
         requirementMatchesBattle(
           stat,

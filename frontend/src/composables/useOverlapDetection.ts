@@ -7,6 +7,7 @@
 import type { TreasureMatrixEntry } from '@/composables/useProfiles'
 import type { CustomStat } from '@/utils/gameData/weapon'
 import { ref } from 'vue'
+import { useCustomStats } from '@/composables/useCustomStats'
 import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
 import {
@@ -52,26 +53,7 @@ export function __resetOverlapStateForTests() {
 export function useOverlapDetection() {
   const { updateTreasureMatrix } = useProfiles()
   const { weaponsMap, essencesMap } = useStaticData()
-
-  /**
-   * 将自定义宝藏基质配置保存到后端
-   */
-  async function postCustomStatsUpdate(stats: CustomStat[]) {
-    const getRes = await fetch('/api/config')
-    if (!getRes.ok) {
-      throw new Error(`HTTP ${getRes.status}: ${getRes.statusText}`)
-    }
-    const currentConfig = await getRes.json()
-    currentConfig.treasure_essence_stats = stats
-    const postRes = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(currentConfig),
-    })
-    if (!postRes.ok) {
-      throw new Error(`HTTP ${postRes.status}: ${postRes.statusText}`)
-    }
-  }
+  const { postCustomStatsUpdate } = useCustomStats()
 
   /**
    * 检查自定义基质与内置武器的词条重合

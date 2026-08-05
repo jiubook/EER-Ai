@@ -8,6 +8,7 @@ import type { TreasureMatrixEntry } from '@/composables/useProfiles'
 import type { CustomStat } from '@/utils/gameData/weapon'
 import { computed, ref } from 'vue'
 import { useProfiles } from '@/composables/useProfiles'
+import { useToast } from '@/composables/useToast'
 import { useWeaponStats } from '@/composables/useWeaponStats'
 import { useStaticData } from '@/utils/gameData/staticData'
 import {
@@ -60,9 +61,12 @@ export function useCustomStats() {
    * 将自定义宝藏基质配置保存到后端
    */
   async function postCustomStatsUpdate(stats?: CustomStat[]) {
+    const toast = useToast()
     const getRes = await fetch('/api/config')
     if (!getRes.ok) {
-      throw new Error(`HTTP ${getRes.status}: ${getRes.statusText}`)
+      const msg = `获取配置失败: HTTP ${getRes.status}`
+      toast.error(msg)
+      throw new Error(msg)
     }
     const currentConfig = await getRes.json()
     currentConfig.treasure_essence_stats = stats ?? customStats.value
@@ -72,7 +76,9 @@ export function useCustomStats() {
       body: JSON.stringify(currentConfig),
     })
     if (!postRes.ok) {
-      throw new Error(`HTTP ${postRes.status}: ${postRes.statusText}`)
+      const msg = `保存自定义基质配置失败: HTTP ${postRes.status}`
+      toast.error(msg)
+      throw new Error(msg)
     }
   }
 
@@ -184,6 +190,8 @@ export function useCustomStats() {
     const tempStats = customStats.value.filter((_, i) => i !== found.index)
 
     await updateTreasureMatrix(newMatrix)
+    // 清理 weapon_priorities 中的幽灵键（priority=0 时后端会 pop 该键）
+    await updateWeaponPriority(targetId, 0)
     await postCustomStatsUpdate(tempStats)
     await fetchCustomStats()
   }
