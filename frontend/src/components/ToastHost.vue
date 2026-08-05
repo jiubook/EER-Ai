@@ -3,7 +3,7 @@
     全局提示容器：挂在 App 根部，任何组件通过 useToast() 上报的消息都在这里呈现。
     多条消息纵向堆叠，避免后一条把前一条顶掉导致用户漏看。
   -->
-  <div class="toast-stack">
+  <div aria-live="polite" class="toast-stack" role="status">
     <v-snackbar
       v-for="(message, index) in messages"
       :key="message.id"

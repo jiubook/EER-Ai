@@ -282,11 +282,11 @@ function toggleSwitchDisplayMode() {
     switchDisplayMode.value === 'chip' ? 'dot' : switchDisplayMode.value === 'dot' ? 'off' : 'chip'
   const previous = switchDisplayMode.value
   switchDisplayMode.value = next
-  updateSwitchDisplayMode(next).catch((error) => {
+  updateSwitchDisplayMode(next).catch(() => {
     // 保存失败要退回原值，否则界面显示的模式与实际持久化的不一致，
     // 下次进入页面又会莫名其妙地变回去。
+    // toast 已由 _handleError 统一弹出，此处不再重复。
     switchDisplayMode.value = previous
-    toast.reportError('保存切换提示显示模式失败', error)
   })
 }
 
@@ -324,9 +324,9 @@ function toggleMatrixBadgeDisplayMode() {
         : 'small'
   const previous = matrixBadgeDisplayMode.value
   matrixBadgeDisplayMode.value = next
-  updateMatrixBadgeDisplayMode(next).catch((error) => {
+  updateMatrixBadgeDisplayMode(next).catch(() => {
+    // toast 已由 _handleError 统一弹出，此处不再重复。
     matrixBadgeDisplayMode.value = previous
-    toast.reportError('保存基质图标显示模式失败', error)
   })
 }
 

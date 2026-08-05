@@ -341,7 +341,6 @@ import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { useCustomStats } from '@/composables/useCustomStats'
 import { useProfiles } from '@/composables/useProfiles'
-import { useToast } from '@/composables/useToast'
 import { useWeaponStats } from '@/composables/useWeaponStats'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { fallbackCustomStatName, findCustomStat, getGemTagName } from '@/utils/gameData/weapon'
@@ -374,7 +373,6 @@ const {
   getSameStatWeapons,
   getMatrixLevelText,
 } = useWeaponStats()
-const toast = useToast()
 
 // --- 详情弹窗编辑状态 ---
 
@@ -442,6 +440,11 @@ watch(weaponId, () => {
   // 弹窗关闭时复位删除标记，避免 mousedown 后放弃点击导致标记卡住
   if (!weaponId.value) {
     pendingCustomDelete.value = false
+    // 清理防抖定时器，避免关窗后发起无效请求
+    if (detailSaveTimer) {
+      clearTimeout(detailSaveTimer)
+      detailSaveTimer = null
+    }
     return
   }
 
@@ -518,8 +521,8 @@ async function saveCustomEntry() {
       treasureMatrix: treasureMatrix.value,
     })
     dialogOpen.value = false
-  } catch (error) {
-    toast.reportError('保存自定义基质失败', error)
+  } catch {
+    // toast 已由 _handleError 统一弹出，此处不再重复。
   }
 }
 
@@ -528,8 +531,8 @@ async function removeNonCustomEntry(weaponId: string) {
   try {
     await removeNonCustomEntryBase(weaponId)
     dialogOpen.value = false
-  } catch (error) {
-    toast.reportError('移除基质条目失败', error)
+  } catch {
+    // toast 已由 _handleError 统一弹出，此处不再重复。
   }
 }
 
@@ -560,8 +563,8 @@ watch([detailAffix1, detailAffix2, detailAffix3, detailPriority], async () => {
       )
       await updateTreasureMatrix(nextMatrix)
       await updateWeaponPriority(id, detailPriority.value)
-    } catch (error) {
-      toast.reportError('自动保存等级/优先级失败', error)
+    } catch {
+      // toast 已由 _handleError 统一弹出，此处不再重复。
     } finally {
       detailSaveTimer = null
     }
@@ -615,8 +618,8 @@ async function confirmDeleteCustomEntry() {
     dialogOpen.value = false
     weaponId.value = null
     deleteCustomTargetId.value = null
-  } catch (error) {
-    toast.reportError('删除自定义基质失败', error)
+  } catch {
+    // toast 已由 _handleError 统一弹出，此处不再重复。
   }
 }
 
@@ -692,8 +695,8 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
     await updateWeaponPriority(weaponAId, priorityB)
     await updateWeaponPriority(weaponBId, priorityA)
     dialogOpen.value = false
-  } catch (error) {
-    toast.reportError('交换基质数据失败', error)
+  } catch {
+    // toast 已由 _handleError 统一弹出，此处不再重复。
   }
 }
 </script>
@@ -875,6 +878,8 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
 .weapon-icon-detail {
   width: 3rem !important;
   height: 3rem !important;
+  min-width: 3rem !important;
+  min-height: 3rem !important;
 }
 
 .weapon-icon-same {
