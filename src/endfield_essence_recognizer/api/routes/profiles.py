@@ -323,8 +323,22 @@ class CompareLevelsItem(BaseModel):
     )
     stat_types: list[str | None] = Field(
         default=["ATTRIBUTE", "SECONDARY", "SKILL"],
+        min_length=3,
+        max_length=3,
         description="各槽位的词条类型（ATTRIBUTE/SECONDARY/SKILL/null）",
     )
+
+    @field_validator("stat_types")
+    @classmethod
+    def validate_stat_types(cls, value: list[str | None]) -> list[str | None]:
+        """校验词条类型是否合法。"""
+        valid_types = {"ATTRIBUTE", "SECONDARY", "SKILL", None}
+        for i, stat_type in enumerate(value):
+            if stat_type not in valid_types:
+                raise ValueError(
+                    f"未知词条类型: {stat_type}，槽位 {i} 可选: {[t for t in valid_types if t is not None]} 或 null"
+                )
+        return value
 
 
 class CompareLevelsRequest(BaseModel):
