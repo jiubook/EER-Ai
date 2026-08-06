@@ -18,6 +18,8 @@ from endfield_essence_recognizer.core.farming_calculator import (
 )
 from endfield_essence_recognizer.dependencies import get_static_game_data
 from endfield_essence_recognizer.schemas.profile import (
+    CUSTOM_ID_PREFIX,
+    LEGACY_CUSTOM_ID_PREFIX,
     ProfileCollection,
     ProfileData,
     TreasureMatrixEntry,
@@ -44,6 +46,13 @@ def set_profile_manager(manager: ProfileManager) -> None:
     """设置全局账号管理器实例。"""
     global _profile_manager
     _profile_manager = manager
+
+
+def _is_custom_stat_id(weapon_id: str) -> bool:
+    """判断 weapon_id 是否指向自定义基质（兼容迁移前的旧格式）。"""
+    return weapon_id.startswith(CUSTOM_ID_PREFIX) or weapon_id.startswith(
+        LEGACY_CUSTOM_ID_PREFIX
+    )
 
 
 # --- 账号 CRUD ---
@@ -274,7 +283,7 @@ async def get_batch_farming_recommendations(
         weapon = static_data.get_weapon(item.weapon_id)
         if weapon:
             weapon_name = weapon.name
-        elif item.weapon_id.startswith("custom_stat_"):
+        elif _is_custom_stat_id(item.weapon_id):
             weapon_name = item.weapon_id
         else:
             results.append(

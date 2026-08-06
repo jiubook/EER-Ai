@@ -119,8 +119,6 @@ function getStatDisplayName(statId: string | null): string {
 }
 
 /** 自定义基质名称缓存，由页面层注入 */
-const _customStatNames = ref<string[]>([])
-
 function clearAllStats(
   requiredEssenceStats: Ref<PlannerEssenceStat[]>,
   lastSelectedWeaponId: Ref<string | null>,
@@ -532,6 +530,11 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
 
   watch(requiredEssenceStats, () => _recomputeChoices(), { deep: true, immediate: true })
 
+  // 淤积点数据是异步到达的：若需求在数据就绪前建立（或从缓存恢复），
+  // 上面的 watch 只在空数据上算过一遍，之后没有触发点，方案列表会永久为空。
+  // 数据到达时补算一次，保证首屏方案可用。
+  watch(energyAlluviums, () => _recomputeChoices())
+
   /** 按优先级排序后的所有有效方案：满足需求数 > 匹配已选武器数 > 未获得武器数 > 匹配武器总数 */
   const _sortedChoices = computed(() => {
     const filtered = battleChoices.value.filter(
@@ -596,8 +599,5 @@ export function useMatrixPlanner(obtainedWeaponIds?: Ref<Set<string>>) {
     bestChoices,
     allChoices,
     clearAllStats: () => clearAllStats(requiredEssenceStats, lastSelectedWeaponId),
-    updateCustomStatNames: (names: string[]) => {
-      _customStatNames.value = names
-    },
   }
 }

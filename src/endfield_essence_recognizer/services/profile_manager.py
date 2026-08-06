@@ -166,9 +166,12 @@ class ProfileManager:
             collection.default_profile = DEFAULT_PROFILE_NAME
         else:
             logger.warning(
-                "默认账号 '{}' 在配置文件中不存在，已自动创建空账号",
+                "默认账号 '{}' 在配置文件中不存在且没有 '{}' 账号，已回退到 '{}'",
                 collection.default_profile,
+                DEFAULT_PROFILE_NAME,
+                DEFAULT_PROFILE_NAME,
             )
+            collection.default_profile = DEFAULT_PROFILE_NAME
 
     def save(self) -> None:
         """保存账号配置到磁盘。"""
@@ -180,6 +183,10 @@ class ProfileManager:
 
         下标越界的引用（配置中已被删掉、但 profile 里还留着的孤儿条目）会被
         丢弃——它们本来就指不到任何自定义基质，保留只会在界面上显示成幽灵条目。
+
+        已知局限：v7 时代删除过自定义基质且未清理 profile 引用的配置，
+        残留的旧下标会因列表前移而错绑到相邻条目（无法从数据上区分）。
+        该迁移为一次性操作，错绑仅在升级瞬间发生且影响有限。
 
         幂等：已是新格式的引用不受影响，可安全地在每次启动时调用。
 
@@ -237,6 +244,47 @@ class ProfileManager:
                     "已将自定义基质引用迁移为稳定 ID{}",
                     f"，丢弃 {dropped} 条失效引用" if dropped else "",
                 )
+            return changed
+
+    def remove_custom_stat_refs(self) -> bool:
+        """移除所有账号中对自定义基质的引用（配置被重置/清空后调用）。
+
+        自定义基质随配置重置而被删除，但各账号的矩阵与优先级里仍可能残留
+        `custom:{id}` 引用；逐账号清理会让引用永远指向不存在的基质，在
+        界面上表现为无法操作的幽灵条目。
+
+        Returns:
+            是否发生了变更（调用方据此决定是否需要写盘）。
+        """
+        with self._lock:
+            collection = self._collection.model_copy(deep=True)
+            changed = False
+            for profile in collection.profiles.values():
+                kept_matrix = [
+                    entry
+                    for entry in profile.treasure_matrix
+                    if not (
+                        entry.weapon_id.startswith(CUSTOM_ID_PREFIX)
+                        or entry.weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX)
+                    )
+                ]
+                if len(kept_matrix) != len(profile.treasure_matrix):
+                    profile.treasure_matrix = kept_matrix
+                    changed = True
+                custom_priorities = [
+                    weapon_id
+                    for weapon_id in profile.weapon_priorities
+                    if weapon_id.startswith(CUSTOM_ID_PREFIX)
+                    or weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX)
+                ]
+                if custom_priorities:
+                    for weapon_id in custom_priorities:
+                        del profile.weapon_priorities[weapon_id]
+                    changed = True
+
+            if changed:
+                self._commit_collection_unlocked(collection)
+                logger.info("已清理所有账号中对自定义基质的引用")
             return changed
 
     def _save_unlocked(self) -> None:

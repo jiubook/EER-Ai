@@ -11,7 +11,7 @@
           v-for="(routeItem, index) in router.options.routes"
           :key="index"
           color="primary"
-          :prepend-icon="(routeItem.meta as any)?.icon"
+          :prepend-icon="getRouteIcon(routeItem)"
           :to="routeItem.path"
         >
           {{ routeItem.meta?.title ?? routeItem.name }}
@@ -43,7 +43,7 @@
 
 <script lang="ts" setup>
 import { onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { type RouteRecordRaw, useRoute, useRouter } from 'vue-router'
 import { useTheme } from 'vuetify'
 import Logo from '@/components/icons/logo.vue'
 import ProfileSelector from '@/components/ProfileSelector.vue'
@@ -58,6 +58,12 @@ const router = useRouter()
 const theme = useTheme()
 
 const drawer = ref<boolean | null>(null)
+
+/** 从路由元信息中提取导航图标（meta 中的值类型未知，需先收窄） */
+function getRouteIcon(routeItem: RouteRecordRaw): string {
+  const icon = routeItem.meta?.icon
+  return typeof icon === 'string' && icon ? icon : String(routeItem.name ?? '')
+}
 
 // 初始化日志 WebSocket 连接
 useLogs()

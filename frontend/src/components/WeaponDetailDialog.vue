@@ -214,18 +214,29 @@
             <v-chip
               v-for="p in [1, 2, 3, 4, 5, 6, 7, 8, 9]"
               :key="p"
-              :color="detailPriority === p ? 'primary' : undefined"
+              :color="getPriorityColor(p)"
               size="small"
-              :variant="detailPriority === p ? 'flat' : 'outlined'"
+              :variant="isPriorityActive(p) ? 'flat' : 'outlined'"
               @click="detailPriority = p"
             >
               {{ p }}
             </v-chip>
+            <v-divider class="mx-1" vertical />
+            <v-btn
+              :color="detailPriority === 0 ? 'primary' : undefined"
+              prepend-icon="mdi-restore"
+              size="small"
+              :variant="detailPriority === 0 ? 'flat' : 'outlined'"
+              @click="detailPriority = 0"
+            >
+              默认 {{ defaultPriority }}
+            </v-btn>
           </div>
           <div class="text-caption text-medium-emphasis" style="line-height: 1.6">
             当扫描到一个无暇基质同时匹配多把武器时，系统会按优先级将该基质分配给优先级最高的武器。<br />
-            默认使用武器稀有度作为优先级（6★=6, 5★=5, 4★=4, 3★=3）。<br />
-            手动设置 1-9 可覆盖默认值，数值越大越优先。<br />
+            默认使用武器稀有度作为优先级（6★=6, 5★=5, 4★=4, 3★=3），自定义基质默认 6。<br />
+            点击 1-9 手动设置优先级（数值越大越优先）；点击「默认
+            {{ defaultPriority }}」恢复默认优先级。<br />
             已满级（6/6/3）的武器会被自动跳过。
           </div>
         </div>
@@ -286,7 +297,6 @@
             prepend-icon="mdi-delete"
             variant="text"
             @click="promptDeleteCustomEntry"
-            @mousedown="pendingCustomDelete = true"
           >
             删除此自定义基质·无法恢复
           </v-btn>
@@ -379,6 +389,48 @@ const {
 /** 新建模式标识 */
 const isNewCustom = computed(() => weaponId.value === '__new_custom__')
 
+/**
+ * 未手动设置优先级时生效的默认值：自定义基质按 6★ 处理，普通武器取稀有度。
+ * 直接显示在「默认」chip 上，用户无需对照武器颜色推算当前优先级。
+ */
+const defaultPriority = computed(() => {
+  const id = weaponId.value
+  if (!id || id === '__new_custom__' || isCustomEntry(id)) return 6
+  return weaponsMap.value.get(id)?.rarity ?? 0
+})
+
+/**
+ * 优先级的点亮颜色按区段区分：
+ * 1-3 亮粉 → 紫，4-6 与武器稀有度色一致（4★紫/5★金橙/6★红橙），7-9 橙 → 红。
+ * 颜色与宝藏基质页的 tier 样式保持一致。
+ */
+const priorityColors: Record<number, string> = {
+  1: '#B7B8BE',
+  2: '#539A31',
+  3: '#009fe6',
+  4: '#8e5cff',
+  5: '#ffb020',
+  6: '#ff5a36',
+  7: '#FF0000',
+  8: '#BD1F80',
+  9: '#FF39FF',
+}
+
+function getPriorityColor(priority: number): string {
+  return priorityColors[priority] ?? 'primary'
+}
+
+/**
+ * chip 是否点亮：手动设置的值点亮；未设置时点亮默认值对应的数字，
+ * 让用户不用盯着「默认 N」也能一眼看到当前生效的优先级。
+ */
+function isPriorityActive(priority: number): boolean {
+  return (
+    detailPriority.value === priority ||
+    (detailPriority.value === 0 && priority === defaultPriority.value)
+  )
+}
+
 /** 自定义基质编辑中的属性 */
 const customEditAttribute = ref<string | null>(null)
 const customEditSecondary = ref<string | null>(null)
@@ -431,16 +483,11 @@ const skillLevelItems = [1, 2, 3]
 const deleteCustomConfirm = ref(false)
 const deleteCustomTargetId = ref<string | null>(null)
 const deleteCustomName = ref('')
-// 标记「正在发起删除」：删除按钮按下（mousedown）时置位，用于让名称输入框的
-// @blur 保存跳过本次写入，避免与删除流程交错写后端。
-const pendingCustomDelete = ref(false)
 
 // 弹窗打开时，加载编辑状态
 watch(weaponId, () => {
-  // 弹窗关闭时复位删除标记，避免 mousedown 后放弃点击导致标记卡住
+  // 弹窗关闭时清理防抖定时器，避免关窗后发起无效请求
   if (!weaponId.value) {
-    pendingCustomDelete.value = false
-    // 清理防抖定时器，避免关窗后发起无效请求
     if (detailSaveTimer) {
       clearTimeout(detailSaveTimer)
       detailSaveTimer = null
@@ -459,7 +506,7 @@ watch(weaponId, () => {
     detailAffix1.value = 1
     detailAffix2.value = 1
     detailAffix3.value = 1
-    detailPriority.value = 6
+    detailPriority.value = 0
     detailOwnedOverride.value = false
   } else if (isCustomEntry(id)) {
     // 编辑自定义条目
@@ -473,20 +520,17 @@ watch(weaponId, () => {
     detailAffix1.value = entry?.affix1_level ?? 1
     detailAffix2.value = entry?.affix2_level ?? 1
     detailAffix3.value = entry?.affix3_level ?? 1
-    detailPriority.value = getWeaponPriority(id)
+    // 只回显用户显式设置过的优先级：把稀有度默认值当"用户设置"写回
+    // 会污染数据，且此后没有入口清除。
+    detailPriority.value = getUserPriority(id)
   } else {
     // 非自定义条目：从 profile 中读取等级
     const entry = matrixEntryByWeaponId.value.get(id)
     detailAffix1.value = entry?.affix1_level ?? 1
     detailAffix2.value = entry?.affix2_level ?? 1
     detailAffix3.value = entry?.affix3_level ?? 1
-    detailPriority.value = getWeaponPriority(id)
+    detailPriority.value = getUserPriority(id)
   }
-})
-
-// 确认弹窗以任意方式关闭（取消/遮罩/ESC）时复位删除标记，避免误跳过后续名称保存
-watch(deleteCustomConfirm, (open) => {
-  if (!open) pendingCustomDelete.value = false
 })
 
 /** 切换当前弹窗条目的拥有状态 */
@@ -593,7 +637,6 @@ function promptDeleteCustomEntry() {
 /** 取消删除 */
 function cancelDeleteCustomEntry() {
   deleteCustomConfirm.value = false
-  pendingCustomDelete.value = false
 }
 
 /**
@@ -614,7 +657,6 @@ async function confirmDeleteCustomEntry() {
       treasureMatrix: treasureMatrix.value,
     })
     deleteCustomConfirm.value = false
-    pendingCustomDelete.value = false
     dialogOpen.value = false
     weaponId.value = null
     deleteCustomTargetId.value = null

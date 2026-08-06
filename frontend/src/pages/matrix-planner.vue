@@ -623,7 +623,6 @@ import { useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
 import { useStaticData } from '@/utils/gameData/staticData'
 import {
-  fallbackCustomStatName,
   findCustomStat,
   getCustomStatName,
   getCustomStatSkillId,
@@ -660,7 +659,6 @@ const {
   getStatDisplayName,
   bestChoices,
   clearAllStats,
-  updateCustomStatNames,
 } = useMatrixPlanner(obtainedWeaponIds)
 
 /**
@@ -709,14 +707,6 @@ function getCustomStatTooltip(index: number): string {
 // --- 自定义基质相关 ---
 // customStats / customMatrixEntries / fetchCustomStats 统一走 useCustomStats 的
 // 模块级单例，避免各页面各存一份副本后互相不同步。
-
-/** 配置变化时同步基质名称（用于规划器内的展示） */
-watch(
-  customStats,
-  (stats) =>
-    updateCustomStatNames(stats.map((s, index) => s.name || fallbackCustomStatName(index))),
-  { deep: true, immediate: true },
-)
 
 /** 处理自定义基质条目点击，添加/移除需求词条 */
 function handleCustomStatClick(entry: { syntheticId: string; index: number }) {

@@ -1047,7 +1047,9 @@ function getAdjustedStats(rec: Recommendation) {
 
 function persistMatrix(entries: TreasureMatrixEntry[]) {
   void updateTreasureMatrix(entries).catch(() => {
-    // 错误已由 useProfiles 的 lastError 处理
+    // 错误已由 useProfiles 的 lastError/toast 提示；本地条目已被就地修改，
+    // 重新拉取后端状态覆盖，避免界面停留在与后端不一致的"假修改"上。
+    void fetchProfiles().catch(() => {})
   })
 }
 

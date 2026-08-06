@@ -284,7 +284,7 @@ def test_load_self_heals_missing_default_profile(temp_profiles_file: Path):
 
 
 def test_load_creates_default_when_no_candidate(temp_profiles_file: Path):
-    """default_profile 悬空且没有 'default' 账号时，才创建空账号。"""
+    """default_profile 悬空且没有 'default' 账号时，回退并创建默认账号。"""
     temp_profiles_file.write_text(
         json.dumps(
             {
@@ -302,8 +302,9 @@ def test_load_creates_default_when_no_candidate(temp_profiles_file: Path):
     manager = ProfileManager(temp_profiles_file)
     manager.load()
     collection = manager.get_collection()
-    assert collection.default_profile == "我的账号"
-    assert "我的账号" in collection.profiles
+    assert collection.default_profile == "default"
+    assert "default" in collection.profiles
+    assert "我的账号" not in collection.profiles
 
 
 def test_switch_to_reserved_default_name_after_rename(
@@ -772,3 +773,50 @@ def test_migrate_custom_stat_ids_no_custom_refs(profile_manager: ProfileManager)
     )
 
     assert profile_manager.migrate_custom_stat_ids(["aaa"]) is False
+
+
+def test_remove_custom_stat_refs_cleans_all_profiles(profile_manager: ProfileManager):
+    """清理自定义引用：覆盖全部账号的矩阵与优先级，普通武器不受影响。"""
+    profile_manager.load()
+    profile_manager.switch_profile("alt")
+    _seed_legacy_custom_refs(profile_manager)
+    profile_manager.switch_profile("default")
+    _seed_legacy_custom_refs(profile_manager)
+
+    assert profile_manager.remove_custom_stat_refs() is True
+
+    for name in ("default", "alt"):
+        profile = profile_manager.get_collection().profiles[name]
+        assert [e.weapon_id for e in profile.treasure_matrix] == ["wpn_normal"]
+        assert profile.weapon_priorities == {"wpn_normal": 4}
+
+
+def test_remove_custom_stat_refs_cleans_new_format(profile_manager: ProfileManager):
+    """新格式 custom:{id} 引用同样被清理。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [
+            TreasureMatrixEntry(
+                weapon_id="custom:abc123", weapon_name="C", affix1_level=3, priority=5
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_normal", weapon_name="N", affix1_level=1
+            ),
+        ]
+    )
+
+    assert profile_manager.remove_custom_stat_refs() is True
+
+    profile = profile_manager.get_active_profile()
+    assert [e.weapon_id for e in profile.treasure_matrix] == ["wpn_normal"]
+    assert profile.weapon_priorities == {}
+
+
+def test_remove_custom_stat_refs_no_custom_refs(profile_manager: ProfileManager):
+    """没有自定义引用时不写盘。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="W", affix1_level=1)]
+    )
+
+    assert profile_manager.remove_custom_stat_refs() is False
