@@ -385,9 +385,7 @@ class ScannerService:
                     weapon_name = entry.weapon_name or (
                         weapon.name if weapon else entry.weapon_id
                     )
-                    weapon_text = (
-                        f"<fg {rarity_color}><bold>{weapon_name}（{rarity_label}）</></>"
-                    )
+                    weapon_text = f"<fg {rarity_color}><bold>{weapon_name}（{rarity_label}）</></>"
                 level_text = _format_levels(
                     entry.affix1_level,
                     entry.affix2_level,

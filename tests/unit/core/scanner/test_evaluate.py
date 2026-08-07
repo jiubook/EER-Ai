@@ -507,6 +507,75 @@ def test_evaluate_by_stat_custom_only_match_writes_custom_entry(
     assert "custom:abc" in get_updated_weapon_ids()
 
 
+def test_evaluate_by_stat_worse_level_does_not_overwrite_saved_best(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按基质划分：更差基质跳过已保存更高等级的武器，回退给下一把武器，不降级。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_STAT
+    default_settings.same_type_non_downgrade_filter = False
+    _reset_scan_state(default_settings)
+    # 模拟 profile 已保存 wpn_0 (3,3,3)
+    default_settings._same_type_best_levels["wpn_0"] = (3, 3, 3)
+    default_settings._same_type_equal_skips["wpn_0"] = 1
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_0", "wpn_1"])
+    default_essence_data.levels = [2, 2, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels["wpn_0"] == (3, 3, 3)
+    assert default_settings._same_type_best_levels["wpn_1"] == (2, 2, 2)
+    assert "wpn_1" in get_updated_weapon_ids()
+    assert "wpn_0" not in get_updated_weapon_ids()
+
+
+def test_evaluate_by_stat_worse_level_virtual_claim_keeps_profile(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按基质划分：仅一把武器且其已保存更高等级时，更差基质由虚拟槽接收，锁定但不落盘。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_STAT
+    default_settings.same_type_non_downgrade_filter = False
+    _reset_scan_state(default_settings)
+    default_settings._same_type_best_levels["wpn_0"] = (3, 3, 3)
+    default_settings._same_type_equal_skips["wpn_0"] = 1
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_0"])
+    default_essence_data.levels = [2, 2, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels["wpn_0"] == (3, 3, 3)
+    assert "wpn_0" not in get_updated_weapon_ids()
+    # 虚拟槽认领：消耗共享计数，但不落盘
+    assert default_settings._same_type_treasure_counts[("A", "B", "C")] == 1
+
+
+def test_evaluate_by_stat_worse_level_when_count_full_trashes(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按基质划分：共享计数已满且无武器可接收时，更差基质标记为养成材料。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_STAT
+    default_settings.same_type_non_downgrade_filter = False
+    _reset_scan_state(default_settings)
+    default_settings._same_type_best_levels["wpn_0"] = (3, 3, 3)
+    default_settings._same_type_equal_skips["wpn_0"] = 1
+    # 共享计数已满
+    default_settings._same_type_treasure_counts[("A", "B", "C")] = 1
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_0"])
+    default_essence_data.levels = [2, 2, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TRASH
+    assert default_settings._same_type_best_levels["wpn_0"] == (3, 3, 3)
+
+
 def _reset_scan_state(settings: UserSetting) -> None:
     """模拟引擎扫描开始前的状态重置。"""
     reset_scan_claims()

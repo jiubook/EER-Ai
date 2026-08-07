@@ -772,6 +772,18 @@ def _apply_stat_group_limit(
 
         # 数量上限：用 stat_key 做共享计数，用 weapon_id 记录最佳等级
         if count < limit:
+            # 与 BY_WEAPON 的 _claim_by_limit 对齐：劣于该武器已保存的最佳等级时
+            # 跳过该武器，避免更差基质覆盖已保存的更高等级（profile 降级）。
+            best = setting._same_type_best_levels.get(weapon_id)
+            if (
+                best is not None
+                and _level_cmp(current_levels, best, mode, stat_types) < 0
+            ):
+                logger.debug(
+                    f"[数量上限] 武器 {_display(weapon_id)} 已保存等级 {best}，"
+                    f"基质等级 {current_levels} 更差，跳过"
+                )
+                continue
             setting._same_type_treasure_counts[stat_key] = count + 1
             setting._same_type_best_levels[weapon_id] = current_levels
             _updated_this_scan.add(weapon_id)

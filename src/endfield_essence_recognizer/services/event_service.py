@@ -31,7 +31,9 @@ class EventService:
     async def add_connection(self, websocket: WebSocket) -> None:
         """注册新的 WebSocket 连接。"""
         self._connections.add(websocket)
-        logger.debug(f"Event WebSocket connection added. Total: {len(self._connections)}")
+        logger.debug(
+            f"Event WebSocket connection added. Total: {len(self._connections)}"
+        )
 
     def remove_connection(self, websocket: WebSocket) -> None:
         """注销 WebSocket 连接。"""
