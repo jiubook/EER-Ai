@@ -576,6 +576,73 @@ def test_evaluate_by_stat_worse_level_when_count_full_trashes(
     assert default_settings._same_type_best_levels["wpn_0"] == (3, 3, 3)
 
 
+def test_evaluate_by_stat_worse_level_does_not_overwrite_virtual_slot(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按基质划分：更差基质不覆盖已认领虚拟槽的更高等级，配额耗尽后标记为养成材料。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_STAT
+    default_settings.same_type_non_downgrade_filter = False
+    default_settings.same_type_treasure_limit = 3
+    _reset_scan_state(default_settings)
+    default_settings._same_type_best_levels["wpn_0"] = (3, 3, 3)
+    default_settings._same_type_equal_skips["wpn_0"] = 1
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_0"])
+    virtual_0 = f"_virtual_{('A', 'B', 'C')}_0"
+
+    # 第一枚更差基质：无虚拟槽，认领新槽
+    default_essence_data.levels = [2, 2, 2]
+    first = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert first.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels[virtual_0] == (2, 2, 2)
+
+    # 第二枚更差基质：跳过已认领的更高等级，认领新槽而不是覆盖
+    default_essence_data.levels = [1, 1, 1]
+    second = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert second.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels[virtual_0] == (2, 2, 2)
+    assert default_settings._same_type_treasure_counts[("A", "B", "C")] == 2
+
+    # 第三枚：认领最后一个空闲槽
+    third = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert third.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_treasure_counts[("A", "B", "C")] == 3
+
+    # 配额耗尽：所有虚拟槽已保存等级均更优，标记为养成材料
+    fourth = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert fourth.quality == EssenceQuality.TRASH
+    assert default_settings._same_type_best_levels[virtual_0] == (2, 2, 2)
+
+
+def test_evaluate_no_weapon_worse_level_trashes_with_clear_message(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """无匹配武器：数量未满但等级劣于已保存最佳时，提示'低于已保存'而非'达到上限'。"""
+    default_settings.treasure_essence_stats = [
+        EssenceStats(attribute="A", secondary="B", skill="C")
+    ]
+    _reset_scan_state(default_settings)
+    default_settings._same_type_best_levels[("A", "B", "C")] = (3, 3, 3)
+    default_essence_data.levels = [2, 2, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TRASH
+    assert "低于已保存" in result.log_message
+    assert "达到设置上限" not in result.log_message
+    # 未消耗数量上限配额
+    assert default_settings._same_type_treasure_counts.get(("A", "B", "C"), 0) == 0
+
+
 def _reset_scan_state(settings: UserSetting) -> None:
     """模拟引擎扫描开始前的状态重置。"""
     reset_scan_claims()

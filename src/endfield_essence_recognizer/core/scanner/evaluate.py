@@ -543,6 +543,20 @@ def _make_trash_by_limit(
     )
 
 
+def _make_trash_by_worse_level(evaluation: EvaluationResult) -> EvaluationResult:
+    """构造因等级劣于已保存最佳（数量上限未满）而标记为养成材料的结果。"""
+    return EvaluationResult(
+        quality=EssenceQuality.TRASH,
+        log_message=(
+            "这个基质是<red><bold><underline>养成材料</></></>，"
+            "因为它的等级低于已保存的最佳基质，不会被接收。"
+        ),
+        matched_weapons=evaluation.matched_weapons,
+        matched_weapons_all_blocked=True,
+        is_high_level=evaluation.is_high_level,
+    )
+
+
 def _claim_as_owned(
     setting: UserSetting,
     key: tuple[str | None, ...] | str,
@@ -686,7 +700,7 @@ def _apply_stat_group_limit(
                     best is not None
                     and _level_cmp(current_levels, best, mode, stat_types) < 0
                 ):
-                    return _make_trash_by_limit(evaluation, count, limit)
+                    return _make_trash_by_worse_level(evaluation)
         setting._same_type_treasure_counts[stat_key] = count + 1
         best = setting._same_type_best_levels.get(stat_key)
         if best is None or _level_cmp(current_levels, best, mode, stat_types) > 0:
@@ -794,29 +808,35 @@ def _apply_stat_group_limit(
             return evaluation
 
     # 真实武器都已认领过，但共享计数还没到 limit → 用虚拟武器接收
-    # 虚拟武器支持留大弃小，但不落盘（不加入 _updated_this_scan）
-    remaining = limit - count
-    for v_idx in range(remaining):
+    # 虚拟武器支持留大弃小，但不落盘（不加入 _updated_this_scan）。
+    # 已认领虚拟槽（index 0..count-1）只允许更优等级覆盖，更差/相等跳过；
+    # 配额未满时，index == count 的空闲槽用于新认领。
+    for v_idx in range(count + 1):
         virtual_key = f"_virtual_{stat_key}_{v_idx}"
-        if keep_best:
-            best = setting._same_type_best_levels.get(virtual_key)
-            if (
-                best is not None
-                and _level_cmp(current_levels, best, mode, stat_types) == 0
-            ):
-                # 等级相等，虚拟武器无跳过名额，跳过
-                continue
-            if (
-                best is not None
-                and _level_cmp(current_levels, best, mode, stat_types) > 0
-            ):
-                setting._same_type_best_levels[virtual_key] = current_levels
-                logger.debug(
-                    f"[留大弃小] 属性组合 [{stat_label}] 虚拟基质 #{v_idx + 1} "
-                    f"等级 {current_levels} 优于已保存 {best}，认领并提升阈值"
-                )
-                return evaluation
-        # 分配给虚拟武器
+        if v_idx < count:
+            if keep_best:
+                best = setting._same_type_best_levels.get(virtual_key)
+                if best is not None:
+                    cmp = _level_cmp(current_levels, best, mode, stat_types)
+                    if cmp == 0:
+                        # 等级相等，虚拟武器无跳过名额，跳过
+                        continue
+                    if cmp > 0:
+                        setting._same_type_best_levels[virtual_key] = current_levels
+                        logger.debug(
+                            f"[留大弃小] 属性组合 [{stat_label}] 虚拟基质 #{v_idx + 1} "
+                            f"等级 {current_levels} 优于已保存 {best}，认领并提升阈值"
+                        )
+                        return evaluation
+                    # 更差：跳过该虚拟槽，避免覆盖已保存的更高等级（与真实武器分支对齐）
+                    logger.debug(
+                        f"[留大弃小] 属性组合 [{stat_label}] 虚拟基质 #{v_idx + 1} "
+                        f"已保存等级 {best}，基质等级 {current_levels} 更差，跳过"
+                    )
+            continue
+        if count >= limit:
+            break
+        # 分配给新虚拟武器
         setting._same_type_treasure_counts[stat_key] = count + 1
         setting._same_type_best_levels[virtual_key] = current_levels
         logger.debug(
