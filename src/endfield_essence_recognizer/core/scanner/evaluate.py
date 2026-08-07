@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from itertools import accumulate
+from typing import Literal
 
 from loguru import logger
 
@@ -823,6 +824,7 @@ def _apply_weapon_group_limit(
     weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
     weapon_priority_order: list[str] | None = None,
     static_game_data: StaticGameData | None = None,
+    exhausted_policy: Literal["trash", "keep"] = "trash",
 ) -> EvaluationResult:
     """按武器分组（每把武器独立计数）的限制逻辑。
 
@@ -831,6 +833,8 @@ def _apply_weapon_group_limit(
         stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
         weapon_essence_levels: 各武器当前基质等级，用于非降级原则过滤。
         weapon_priority_order: 武器优先级排序（高优先级在前），用于决定分配顺序。
+        exhausted_policy: 认领耗尽（或非降级过滤后无可用武器）时的处理方式：
+            "trash" 标记为养成材料；"keep" 保留原判定结果（不落盘，用于限制关闭时）。
     """
     if weapon_priority_order:
         weapon_ids = [w for w in weapon_priority_order if w in matched_weapon_ids]
@@ -879,6 +883,11 @@ def _apply_weapon_group_limit(
         weapon_ids = upgradeable_ids
 
     if not weapon_ids:
+        if exhausted_policy == "keep":
+            logger.debug(
+                "[非降级] 所有匹配武器均不满足非降级原则，保留为宝藏基质（不落盘）"
+            )
+            return evaluation
         return EvaluationResult(
             quality=EssenceQuality.TRASH,
             log_message=(
@@ -926,6 +935,12 @@ def _apply_weapon_group_limit(
             return evaluation
 
     # 所有匹配武器都已达上限
+    if exhausted_policy == "keep":
+        logger.debug(
+            f"[数量上限] 所有可选武器 {', '.join(_display(w) for w in weapon_ids)} "
+            "均已认领 1 枚，保留为宝藏基质（不落盘）"
+        )
+        return evaluation
     logger.debug(
         f"[数量上限] 所有可选武器 {', '.join(_display(w) for w in weapon_ids)} 均已达上限 {limit}，标记为养成材料"
     )
@@ -944,18 +959,6 @@ def _apply_same_type_treasure_limit(
     if evaluation.quality != EssenceQuality.TREASURE:
         return evaluation
 
-    # 当限制功能关闭时，仍需将匹配的武器加入更新集合，确保扫描结果同步到引擎
-    if not setting.same_type_treasure_limit_enabled:
-        if matched_weapon_ids:
-            for weapon_id in matched_weapon_ids:
-                _updated_this_scan.add(weapon_id)
-        return evaluation
-
-    limit = setting.same_type_treasure_limit
-    keep_best = setting.same_type_keep_best
-    mode = (
-        setting.same_type_keep_best_mode
-    )  # 留大弃小的等级比较方式（依次比对/和值比对/冷却脂消耗/概率和值）
     current_levels = (
         data.levels[0] or 1,
         data.levels[1] or 1,
@@ -963,6 +966,32 @@ def _apply_same_type_treasure_limit(
     )
     # 传递词条类型，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表
     stat_types = data.stat_types
+
+    # 限制关闭时：仍按武器分配规则记录（每把武器上限 1 枚），认领的落盘，
+    # 分配不到武器的（耗尽/非降级过滤/无匹配武器）保留为宝藏基质，不落盘。
+    if not setting.same_type_treasure_limit_enabled:
+        if matched_weapon_ids:
+            return _apply_weapon_group_limit(
+                setting,
+                evaluation,
+                matched_weapon_ids,
+                current_levels,
+                limit=1,
+                keep_best=setting.same_type_keep_best,
+                mode=setting.same_type_keep_best_mode,
+                stat_types=stat_types,
+                weapon_essence_levels=weapon_essence_levels,
+                weapon_priority_order=weapon_priority_order,
+                static_game_data=static_game_data,
+                exhausted_policy="keep",
+            )
+        return evaluation
+
+    limit = setting.same_type_treasure_limit
+    keep_best = setting.same_type_keep_best
+    mode = (
+        setting.same_type_keep_best_mode
+    )  # 留大弃小的等级比较方式（依次比对/和值比对/冷却脂消耗/概率和值）
 
     if (
         setting.same_type_group_mode == SameTypeGroupMode.BY_WEAPON

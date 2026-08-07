@@ -10,6 +10,8 @@ from endfield_essence_recognizer.core.recognition import (
 from endfield_essence_recognizer.core.scanner.evaluate import (
     compare_levels,
     evaluate_essence,
+    get_updated_weapon_ids,
+    reset_scan_claims,
 )
 from endfield_essence_recognizer.core.scanner.models import (
     EssenceData,
@@ -381,6 +383,183 @@ def test_evaluate_same_type_treasure_limit_marks_later_items_as_trash(
     assert first.quality == EssenceQuality.TREASURE
     assert second.quality == EssenceQuality.TRASH
     assert "达到设置上限" in second.log_message
+
+
+def _reset_scan_state(settings: UserSetting) -> None:
+    """模拟引擎扫描开始前的状态重置。"""
+    reset_scan_claims()
+    settings._same_type_treasure_counts = {}
+    settings._same_type_best_levels = {}
+    settings._same_type_equal_skips = {}
+
+
+def _set_weapon_match(
+    mock_static_game_data, weapon_ids: list[str], *, weapon_levels: dict | None = None
+) -> dict:
+    """配置武器匹配与各武器已有等级，返回 evaluate 所需的辅助参数。"""
+    mock_static_game_data.find_weapons_by_stats.return_value = weapon_ids
+    return {
+        "weapon_essence_levels": weapon_levels or {},
+        "weapon_priority_order": weapon_ids,
+    }
+
+
+def test_evaluate_limit_disabled_claims_single_weapon(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """关闭数量上限后，匹配单武器时认领并写入最佳等级与计数。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels["wpn_a"] == (1, 1, 1)
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 1
+    assert "wpn_a" in get_updated_weapon_ids()
+
+
+def test_evaluate_limit_disabled_claims_highest_priority_weapon_only(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """关闭数量上限后，多武器匹配时按优先级只认领一把武器。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_b", "wpn_a"])
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels == {"wpn_b": (1, 1, 1)}
+    assert default_settings._same_type_treasure_counts == {"wpn_b": 1}
+
+
+def test_evaluate_limit_disabled_keep_best_upgrades_keeps_worse(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """关闭数量上限 + 留大弃小：更优的替换升级，更差的保留且不标记养成材料。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    default_settings.same_type_keep_best = True
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    default_essence_data.levels = [3, 3, 3]
+    evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert default_settings._same_type_best_levels["wpn_a"] == (3, 3, 3)
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 1
+
+    default_essence_data.levels = [4, 3, 3]
+    upgraded = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert upgraded.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels["wpn_a"] == (4, 3, 3)
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 1
+
+    default_essence_data.levels = [2, 2, 2]
+    worse = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert worse.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels["wpn_a"] == (4, 3, 3)
+
+
+def test_evaluate_limit_disabled_no_keep_best_first_come_first_served(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """关闭数量上限且关闭留大弃小：无比较，首枚认领后锁定，更优的也不替换。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    default_settings.same_type_keep_best = False
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    default_essence_data.levels = [3, 3, 3]
+    evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert default_settings._same_type_best_levels["wpn_a"] == (3, 3, 3)
+
+    default_essence_data.levels = [4, 3, 3]
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels["wpn_a"] == (3, 3, 3)
+
+
+def test_evaluate_limit_disabled_exhausted_keeps_treasure(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """关闭数量上限后，所有匹配武器各认领 1 枚后，多余的保留为宝藏基质。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a", "wpn_b"])
+
+    for _weapon_id in ("wpn_a", "wpn_b"):
+        result = evaluate_essence(
+            default_essence_data, default_settings, mock_static_game_data, **kwargs
+        )
+        assert result.quality == EssenceQuality.TREASURE
+
+    extra = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert extra.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels == {
+        "wpn_a": (1, 1, 1),
+        "wpn_b": (1, 1, 1),
+    }
+
+
+def test_evaluate_limit_disabled_non_downgrade_filter_blocks_keeps(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """关闭数量上限 + 非降级过滤：无可用武器时保留，不标记为养成材料。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    default_settings.same_type_non_downgrade_filter = True
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(
+        mock_static_game_data,
+        ["wpn_a"],
+        weapon_levels={"wpn_a": (6, 6, 3)},
+    )
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels == {}
+
+
+def test_evaluate_limit_disabled_non_downgrade_filter_passes_claims(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """关闭数量上限 + 非降级过滤：满足非降级原则时正常认领。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    default_settings.same_type_non_downgrade_filter = True
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(
+        mock_static_game_data,
+        ["wpn_a"],
+        weapon_levels={"wpn_a": (2, 2, 1)},
+    )
+    default_essence_data.levels = [3, 3, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels["wpn_a"] == (3, 3, 2)
+    assert "wpn_a" in get_updated_weapon_ids()
 
 
 def test_evaluate_non_five_star_skip(
