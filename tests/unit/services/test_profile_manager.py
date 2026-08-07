@@ -446,7 +446,7 @@ def test_update_treasure_matrix_clears_zeroed_priority(profile_manager: ProfileM
     assert "wpn_001" not in profile.weapon_priorities
 
 
-def test_update_treasure_matrix_drops_removed_entry_priority(
+def test_update_treasure_matrix_keeps_removed_entry_priority(
     profile_manager: ProfileManager,
 ):
     """条目移出矩阵后优先级仍保留：优先级是独立于"是否拥有基质"的用户偏好。

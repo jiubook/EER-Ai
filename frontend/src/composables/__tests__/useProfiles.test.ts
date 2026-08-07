@@ -194,6 +194,104 @@ describe('useProfiles', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/profiles')
   })
 
+  it('clearProfileData 不带 name 时清空当前激活账号并重新拉取集合', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        mockResponse({
+          version: 1,
+          name: 'default',
+          treasure_matrix: [],
+          weapon_priorities: {},
+        }),
+      )
+      .mockResolvedValueOnce(mockResponse(COLLECTION))
+    const { clearProfileData } = useProfiles()
+
+    await clearProfileData()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/profiles/clear_data',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/profiles')
+  })
+
+  it('clearProfileData 带 name 时清空指定账号', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        mockResponse({
+          version: 1,
+          name: 'alt',
+          treasure_matrix: [],
+          weapon_priorities: {},
+        }),
+      )
+      .mockResolvedValueOnce(mockResponse(COLLECTION))
+    const { clearProfileData } = useProfiles()
+
+    await clearProfileData('alt')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/profiles/clear_data',
+      expect.objectContaining({
+        body: JSON.stringify({ name: 'alt' }),
+      }),
+    )
+  })
+
+  it('updateSwitchDisplayMode 发送模式并更新本地账号快照', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        version: 1,
+        name: 'default',
+        treasure_matrix: [],
+        switch_display_mode: 'dot',
+      }),
+    )
+    const { updateSwitchDisplayMode, activeProfile } = useProfiles()
+
+    await updateSwitchDisplayMode('dot')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/profiles/switch_display_mode',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ mode: 'dot' }),
+      }),
+    )
+    expect(activeProfile.value.switch_display_mode).toBe('dot')
+  })
+
+  it('updateMatrixBadgeDisplayMode 发送模式并更新本地账号快照', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        version: 1,
+        name: 'default',
+        treasure_matrix: [],
+        matrix_badge_display_mode: 'medium',
+      }),
+    )
+    const { updateMatrixBadgeDisplayMode, activeProfile } = useProfiles()
+
+    await updateMatrixBadgeDisplayMode('medium')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/profiles/matrix_badge_display_mode',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ mode: 'medium' }),
+      }),
+    )
+    expect(activeProfile.value.matrix_badge_display_mode).toBe('medium')
+  })
+
   it('写操作接口返回 ProfileData 时直接更新本地快照，不重复拉取', async () => {
     fetchMock.mockResolvedValueOnce(
       mockResponse({

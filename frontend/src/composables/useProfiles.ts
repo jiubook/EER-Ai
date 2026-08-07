@@ -122,8 +122,8 @@ function _handleError(context: string, error: unknown): never {
   lastError.value = fullMessage
   // 同时推给全局提示：只写 lastError 而无人订阅，等于什么都没做。
   useToast().error(fullMessage)
-  // 始终抛出包含上下文的新 Error，避免调用方丢失上下文信息。
-  throw new Error(fullMessage)
+  // 始终抛出包含上下文的新 Error，保留原始错误的 stack trace 以便排查。
+  throw new Error(fullMessage, { cause: error })
 }
 
 async function parseJsonResponse<T>(res: Response, fallbackMessage: string): Promise<T> {

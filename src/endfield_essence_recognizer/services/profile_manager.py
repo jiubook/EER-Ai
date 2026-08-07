@@ -300,13 +300,13 @@ class ProfileManager:
         """获取激活账号；调用方必须已经持有 `_lock`。"""
         return self._collection.get_active()
 
-    def _update_active_profile(
+    def _update_active_profile_unlocked(
         self,
         mutator: Callable[[ProfileData], None],
         *,
         name: str | None = None,
     ) -> ProfileData:
-        """更新账号数据并提交到磁盘。
+        """更新账号数据并提交到磁盘；调用方必须已经持有 `_lock`。
 
         这是一个辅助方法，用于简化常见的 lock-copy-modify-commit 模式。
 
@@ -672,7 +672,7 @@ class ProfileManager:
                 profile.treasure_matrix = []
                 profile.weapon_priorities = {}
 
-            result = self._update_active_profile(_mutator, name=name)
+            result = self._update_active_profile_unlocked(_mutator, name=name)
             logger.info("清空账号数据: {}", result.name)
             return result
 
@@ -727,7 +727,7 @@ class ProfileManager:
             def _mutator(profile: ProfileData) -> None:
                 profile.switch_display_mode = mode
 
-            return self._update_active_profile(_mutator)
+            return self._update_active_profile_unlocked(_mutator)
 
     def update_matrix_badge_display_mode(self, mode: str) -> ProfileData:
         """更新激活账号的基质图标显示模式。
@@ -743,7 +743,7 @@ class ProfileManager:
             def _mutator(profile: ProfileData) -> None:
                 profile.matrix_badge_display_mode = mode
 
-            return self._update_active_profile(_mutator)
+            return self._update_active_profile_unlocked(_mutator)
 
     def update_weapon_priority(self, weapon_id: str, priority: int) -> ProfileData:
         """更新单个武器优先级，未拥有宝藏基质的武器也会保存。
