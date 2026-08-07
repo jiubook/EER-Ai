@@ -12,6 +12,7 @@ from endfield_essence_recognizer.core.scanner.models import (
 )
 from endfield_essence_recognizer.game_data.models.v2 import StatType
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
+from endfield_essence_recognizer.schemas.profile import CUSTOM_ID_PREFIX
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
     KeepBestMode,
@@ -46,6 +47,44 @@ def get_updated_weapon_ids() -> set[str]:
 def get_cascade_updated_weapon_ids() -> set[str]:
     """获取本轮扫描中级联更新了 best levels 的武器 ID（仅等级，无计数）。"""
     return _cascade_updated_this_scan.copy()
+
+
+def _order_candidate_ids(
+    matched_weapon_ids: set[str],
+    weapon_priority_order: list[str] | None,
+) -> list[str]:
+    """排序候选 ID：自定义基质优先，其余按武器优先级（无优先级时按 ID 排序）。
+
+    自定义基质与内置武器同时命中时，基质优先保存到自定义条目（视作独立武器），
+    自定义达到上限后再回退到内置武器。
+    """
+    custom_ids = sorted(
+        wid for wid in matched_weapon_ids if wid.startswith(CUSTOM_ID_PREFIX)
+    )
+    if not custom_ids:
+        if weapon_priority_order:
+            return [wid for wid in weapon_priority_order if wid in matched_weapon_ids]
+        return sorted(matched_weapon_ids)
+    custom_set = set(custom_ids)
+    if weapon_priority_order:
+        rest = [
+            wid
+            for wid in weapon_priority_order
+            if wid in matched_weapon_ids and wid not in custom_set
+        ]
+    else:
+        rest = sorted(wid for wid in matched_weapon_ids if wid not in custom_set)
+    return custom_ids + rest
+
+
+def _custom_stat_display(setting: UserSetting, key: str) -> str | None:
+    """返回自定义基质的显示名称；非自定义 ID 返回 None。"""
+    if not key.startswith(CUSTOM_ID_PREFIX):
+        return None
+    for treasure_stat in setting.treasure_essence_stats:
+        if treasure_stat.id and f"{CUSTOM_ID_PREFIX}{treasure_stat.id}" == key:
+            return treasure_stat.name or "未命名"
+    return key
 
 
 # StatType → 对应 EssenceStats / 阈值配置中的字段名
@@ -529,7 +568,9 @@ def _claim_as_owned(
     cmp = _level_cmp(current_levels, best, mode, stat_types)
     if cmp > 0:
         setting._same_type_best_levels[key] = current_levels
-        if isinstance(key, str) and key.startswith("wpn_"):
+        if isinstance(key, str) and (
+            key.startswith("wpn_") or key.startswith(CUSTOM_ID_PREFIX)
+        ):
             _updated_this_scan.add(key)
         skip = setting._same_type_equal_skips.get(key, 0)
         if skip > 0:
@@ -652,13 +693,13 @@ def _apply_stat_group_limit(
             setting._same_type_best_levels[stat_key] = current_levels
         return evaluation
 
-    if weapon_priority_order:
-        weapon_ids = [w for w in weapon_priority_order if w in matched_weapon_ids]
-    else:
-        weapon_ids = sorted(matched_weapon_ids)
+    weapon_ids = _order_candidate_ids(matched_weapon_ids, weapon_priority_order)
 
     # 武器名称显示工具
     def _display(wid: str) -> str:
+        custom_display = _custom_stat_display(setting, wid)
+        if custom_display is not None:
+            return custom_display
         if static_game_data:
             weapon = static_game_data.get_weapon(wid)
             if weapon:
@@ -836,13 +877,13 @@ def _apply_weapon_group_limit(
         exhausted_policy: 认领耗尽（或非降级过滤后无可用武器）时的处理方式：
             "trash" 标记为养成材料；"keep" 保留原判定结果（不落盘，用于限制关闭时）。
     """
-    if weapon_priority_order:
-        weapon_ids = [w for w in weapon_priority_order if w in matched_weapon_ids]
-    else:
-        weapon_ids = sorted(matched_weapon_ids)
+    weapon_ids = _order_candidate_ids(matched_weapon_ids, weapon_priority_order)
 
     # 武器名称显示工具：输出 "武器名称(武器ID)" 格式
     def _display(wid: str) -> str:
+        custom_display = _custom_stat_display(setting, wid)
+        if custom_display is not None:
+            return custom_display
         if static_game_data:
             weapon = static_game_data.get_weapon(wid)
             if weapon:
@@ -1122,6 +1163,11 @@ def evaluate_essence(
         ):
             # 显示自定义基质名称，使用橙色（六星颜色）
             custom_name = treasure_stat.name or "未命名"
+            # 自定义基质优先于内置武器认领：把 custom:{id} 加入候选，由分组逻辑排在最前。
+            # 自定义基质视作一把独立武器，参与按武器划分的上限（自定义与内置武器各计各的）。
+            candidate_ids = set(matched_weapon_ids)
+            if treasure_stat.id:
+                candidate_ids.add(f"{CUSTOM_ID_PREFIX}{treasure_stat.id}")
             return _apply_same_type_treasure_limit(
                 data,
                 setting,
@@ -1130,7 +1176,7 @@ def evaluate_essence(
                     log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合自定义基质 <fg #FF7100><bold>{custom_name}</></> 的条件{high_level_info}。",
                     is_high_level=is_high_level_treasure,
                 ),
-                matched_weapon_ids=matched_weapon_ids,
+                matched_weapon_ids=candidate_ids,
                 weapon_essence_levels=weapon_essence_levels,
                 weapon_priority_order=weapon_priority_order,
                 static_game_data=static_game_data,
