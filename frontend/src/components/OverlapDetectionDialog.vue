@@ -62,7 +62,7 @@
             density="compact"
             hide-details
             :items="targetOptions(item)"
-            :label="`切换目标（${item.matchedWeaponIds.length} 把同词条武器）`"
+            :label="`共有${item.matchedWeaponIds.length}把同词条武器`"
             style="max-width: 260px"
             variant="outlined"
             @update:model-value="onTargetChanged"
