@@ -17,13 +17,14 @@ from endfield_essence_recognizer.dependencies import (
 from endfield_essence_recognizer.hotkey_entrypoints import bind_hotkeys
 from endfield_essence_recognizer.services.profile_manager import ProfileManager
 from endfield_essence_recognizer.utils.log import logger
+from endfield_essence_recognizer.version import __version__
 
 
 def log_welcome_message():
     """Log a formatted welcome and usage guide message to the logger."""
-    message = """
+    message = f"""
 ==================================================
-<green><bold>终末地基质妙妙小工具已启动</></>
+<green><bold>终末地基质妙妙小工具 v{__version__ or "?"} 已启动</></>
 ==================================================
 <green><bold>使用前阅读：</></>
   - 请使用<yellow><bold>管理员权限</></>运行本工具，否则无法捕获全局热键
