@@ -18,6 +18,12 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from endfield_essence_recognizer.schemas.profile import (
+    AFFIX1_MAX_LEVEL,
+    AFFIX2_MAX_LEVEL,
+    AFFIX3_MAX_LEVEL,
+    CUSTOM_ID_PREFIX,
+    DEFAULT_PROFILE_NAME,
+    LEGACY_CUSTOM_ID_PREFIX,
     ProfileCollection,
     ProfileData,
     TreasureMatrixEntry,
@@ -25,6 +31,7 @@ from endfield_essence_recognizer.schemas.profile import (
 from endfield_essence_recognizer.utils.log import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 __all__ = [
@@ -128,6 +135,7 @@ class ProfileManager:
             result = _load_profiles_from_file(self._profiles_file)
             if result is not None:
                 self._collection = result
+                self._heal_default_profile_unlocked()
                 self._collection.ensure_default()
                 logger.info(
                     "加载账号配置成功，当前账号: {}", self._collection.active_profile
@@ -139,10 +147,145 @@ class ProfileManager:
                 _save_profiles_to_file(collection, self._profiles_file)
                 self._collection = collection
 
+    def _heal_default_profile_unlocked(self) -> None:
+        """修正指向不存在账号的 default_profile；调用方必须已经持有 `_lock`。
+
+        优先复用现有的 'default' 账号，避免凭空造出一个既没有数据、
+        又因保留名校验而无法切换过去的僵尸账号。
+        """
+        collection = self._collection
+        if collection.default_profile in collection.profiles:
+            return
+
+        if DEFAULT_PROFILE_NAME in collection.profiles:
+            logger.warning(
+                "默认账号 '{}' 在配置文件中不存在，已回退到 '{}'",
+                collection.default_profile,
+                DEFAULT_PROFILE_NAME,
+            )
+            collection.default_profile = DEFAULT_PROFILE_NAME
+        else:
+            logger.warning(
+                "默认账号 '{}' 在配置文件中不存在且没有 '{}' 账号，已回退到 '{}'",
+                collection.default_profile,
+                DEFAULT_PROFILE_NAME,
+                DEFAULT_PROFILE_NAME,
+            )
+            collection.default_profile = DEFAULT_PROFILE_NAME
+
     def save(self) -> None:
         """保存账号配置到磁盘。"""
         with self._lock:
             self._save_unlocked()
+
+    def migrate_custom_stat_ids(self, custom_stat_ids: list[str]) -> bool:
+        """把旧格式 `custom_stat_{index}` 引用改写为稳定的 `custom:{id}`。
+
+        下标越界的引用（配置中已被删掉、但 profile 里还留着的孤儿条目）会被
+        丢弃——它们本来就指不到任何自定义基质，保留只会在界面上显示成幽灵条目。
+
+        已知局限：v7 时代删除过自定义基质且未清理 profile 引用的配置，
+        残留的旧下标会因列表前移而错绑到相邻条目（无法从数据上区分）。
+        该迁移为一次性操作，错绑仅在升级瞬间发生且影响有限。
+
+        幂等：已是新格式的引用不受影响，可安全地在每次启动时调用。
+
+        Args:
+            custom_stat_ids: 按配置顺序排列的稳定 ID，下标即旧编号。
+
+        Returns:
+            是否发生了改写（调用方据此决定是否需要写盘）。
+        """
+        with self._lock:
+            collection = self._collection.model_copy(deep=True)
+            changed = False
+            dropped = 0
+
+            def resolve(weapon_id: str) -> str | None:
+                """返回新 ID；None 表示该引用已失效、应当丢弃。"""
+                if not weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX):
+                    return weapon_id
+                raw = weapon_id[len(LEGACY_CUSTOM_ID_PREFIX) :]
+                if not raw.isdigit():
+                    return None
+                index = int(raw)
+                if index >= len(custom_stat_ids):
+                    return None
+                return f"{CUSTOM_ID_PREFIX}{custom_stat_ids[index]}"
+
+            for profile in collection.profiles.values():
+                new_matrix = []
+                for entry in profile.treasure_matrix:
+                    resolved = resolve(entry.weapon_id)
+                    if resolved is None:
+                        dropped += 1
+                        changed = True
+                        continue
+                    if resolved != entry.weapon_id:
+                        entry.weapon_id = resolved
+                        changed = True
+                    new_matrix.append(entry)
+                profile.treasure_matrix = new_matrix
+
+                new_priorities: dict[str, int] = {}
+                for weapon_id, priority in profile.weapon_priorities.items():
+                    resolved = resolve(weapon_id)
+                    if resolved is None:
+                        changed = True
+                        continue
+                    if resolved != weapon_id:
+                        changed = True
+                    new_priorities[resolved] = priority
+                profile.weapon_priorities = new_priorities
+
+            if changed:
+                self._commit_collection_unlocked(collection)
+                logger.info(
+                    "已将自定义基质引用迁移为稳定 ID{}",
+                    f"，丢弃 {dropped} 条失效引用" if dropped else "",
+                )
+            return changed
+
+    def remove_custom_stat_refs(self) -> bool:
+        """移除所有账号中对自定义基质的引用（配置被重置/清空后调用）。
+
+        自定义基质随配置重置而被删除，但各账号的矩阵与优先级里仍可能残留
+        `custom:{id}` 引用；逐账号清理会让引用永远指向不存在的基质，在
+        界面上表现为无法操作的幽灵条目。
+
+        Returns:
+            是否发生了变更（调用方据此决定是否需要写盘）。
+        """
+        with self._lock:
+            collection = self._collection.model_copy(deep=True)
+            changed = False
+            for profile in collection.profiles.values():
+                kept_matrix = [
+                    entry
+                    for entry in profile.treasure_matrix
+                    if not (
+                        entry.weapon_id.startswith(CUSTOM_ID_PREFIX)
+                        or entry.weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX)
+                    )
+                ]
+                if len(kept_matrix) != len(profile.treasure_matrix):
+                    profile.treasure_matrix = kept_matrix
+                    changed = True
+                custom_priorities = [
+                    weapon_id
+                    for weapon_id in profile.weapon_priorities
+                    if weapon_id.startswith(CUSTOM_ID_PREFIX)
+                    or weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX)
+                ]
+                if custom_priorities:
+                    for weapon_id in custom_priorities:
+                        del profile.weapon_priorities[weapon_id]
+                    changed = True
+
+            if changed:
+                self._commit_collection_unlocked(collection)
+                logger.info("已清理所有账号中对自定义基质的引用")
+            return changed
 
     def _save_unlocked(self) -> None:
         """保存账号配置；调用方必须已经持有 `_lock`。"""
@@ -156,6 +299,49 @@ class ProfileManager:
     def _get_active_unlocked(self) -> ProfileData:
         """获取激活账号；调用方必须已经持有 `_lock`。"""
         return self._collection.get_active()
+
+    def _update_active_profile_unlocked(
+        self,
+        mutator: Callable[[ProfileData], None],
+        *,
+        name: str | None = None,
+    ) -> ProfileData:
+        """更新账号数据并提交到磁盘；调用方必须已经持有 `_lock`。
+
+        这是一个辅助方法，用于简化常见的 lock-copy-modify-commit 模式。
+
+        Args:
+            mutator: 一个函数，接收 ProfileData 并就地修改它。
+            name: 要更新的账号名称；None 表示更新当前激活账号。
+
+        Returns:
+            更新后的 ProfileData 的深拷贝。
+
+        Raises:
+            ValueError: 如果指定的账号不存在。
+        """
+        collection = self._collection.model_copy(deep=True)
+        if name is None:
+            profile = collection.get_active()
+        elif name in collection.profiles:
+            profile = collection.profiles[name]
+        else:
+            raise ValueError(f"账号 '{name}' 不存在")
+        mutator(profile)
+        self._commit_collection_unlocked(collection)
+        return profile.model_copy(deep=True)
+
+    @staticmethod
+    def _sync_priority_projection(profile: ProfileData) -> None:
+        """以 weapon_priorities 为准回填矩阵条目的 priority。
+
+        优先级有唯一权威来源 `weapon_priorities`——只有它能表达"未拥有基质
+        但用户设过优先级"；`entry.priority` 只是给前端就近读取的投影。
+        所有写路径改完权威源后统一调用本方法收敛，避免各处各写一遍同步
+        逻辑，日久必然漂移。
+        """
+        for entry in profile.treasure_matrix:
+            entry.priority = profile.weapon_priorities.get(entry.weapon_id, 0)
 
     def get_collection(self) -> ProfileCollection:
         """获取当前账号集合。"""
@@ -188,6 +374,16 @@ class ProfileManager:
         with self._lock:
             collection = self._collection.model_copy(deep=True)
             name = self._validate_profile_name(name)
+            # 仅拦截"新建"保留名账号；已存在的同名账号允许切换过去，
+            # 避免历史数据把用户困在无法访问的账号上。
+            if (
+                name == DEFAULT_PROFILE_NAME
+                and collection.default_profile != DEFAULT_PROFILE_NAME
+                and name not in collection.profiles
+            ):
+                raise ValueError(
+                    f"不能使用保留名称 '{DEFAULT_PROFILE_NAME}' 作为账号名称"
+                )
             if name not in collection.profiles:
                 collection.profiles[name] = ProfileData(name=name)
             collection.active_profile = name
@@ -232,7 +428,7 @@ class ProfileManager:
         return stripped
 
     def rename_profile(self, old_name: str, new_name: str) -> ProfileData:
-        """重命名账号。
+        """重命名账号（含默认账号）。
 
         Args:
             old_name: 当前账号名称。必须存在。
@@ -245,12 +441,23 @@ class ProfileManager:
             ValueError: 如果 old_name 不存在、new_name 已被占用或 new_name 无效。
         """
         with self._lock:
-            if old_name == "default":
-                raise ValueError("不能重命名默认账号")
             collection = self._collection.model_copy(deep=True)
             if old_name not in collection.profiles:
                 raise ValueError(f"账号 '{old_name}' 不存在")
             new_name = self._validate_profile_name(new_name)
+            if new_name == old_name:
+                # 同名重命名视为无操作，避免把"未修改"误报为名称冲突。
+                return collection.profiles[old_name].model_copy(deep=True)
+            # 默认账号本身改回 'default' 是允许的（这正是撤销改名的唯一途径）；
+            # 只有其它账号才禁止占用该保留名。
+            if (
+                new_name == DEFAULT_PROFILE_NAME
+                and collection.default_profile != DEFAULT_PROFILE_NAME
+                and collection.default_profile != old_name
+            ):
+                raise ValueError(
+                    f"不能使用保留名称 '{DEFAULT_PROFILE_NAME}' 作为账号名称"
+                )
             if new_name in collection.profiles:
                 raise ValueError(f"账号 '{new_name}' 已存在")
 
@@ -260,6 +467,8 @@ class ProfileManager:
 
             if collection.active_profile == old_name:
                 collection.active_profile = new_name
+            if collection.default_profile == old_name:
+                collection.default_profile = new_name
 
             self._commit_collection_unlocked(collection)
             logger.info("重命名账号: {} -> {}", old_name, new_name)
@@ -268,29 +477,38 @@ class ProfileManager:
     def delete_profile(self, name: str) -> None:
         """删除账号。
 
-        不能删除 'default' 账号和当前激活的账号。
+        不能删除默认账号；删除当前激活的账号后会自动切换回默认账号。
 
         Args:
             name: 要删除的账号名称。
 
         Raises:
-            ValueError: 如果账号是 'default'、是激活账号或不存在。
+            ValueError: 如果账号是默认账号或不存在。
         """
         with self._lock:
             collection = self._collection.model_copy(deep=True)
-            if name == "default":
+            if name == collection.default_profile:
                 raise ValueError("不能删除默认账号")
             if name not in collection.profiles:
                 raise ValueError(f"账号 '{name}' 不存在")
-            if collection.active_profile == name:
-                raise ValueError("不能删除当前正在使用的账号")
 
             del collection.profiles[name]
+            if collection.active_profile == name:
+                collection.active_profile = collection.default_profile
+                logger.info(
+                    "删除激活账号: {}，已自动切换回默认账号: {}",
+                    name,
+                    collection.default_profile,
+                )
             self._commit_collection_unlocked(collection)
             logger.info("删除账号: {}", name)
 
     def update_treasure_matrix(self, entries: list[TreasureMatrixEntry]) -> ProfileData:
         """替换激活账号的完整宝藏基质配置。
+
+        矩阵内条目的优先级以 entry.priority 为准同步进 weapon_priorities；
+        未出现在矩阵中的武器（未拥有基质但用户设过优先级）保持原值不变，
+        详见 `update_weapon_priority` 的契约。
 
         Args:
             entries: 新的宝藏基质条目列表。
@@ -302,12 +520,23 @@ class ProfileManager:
             collection = self._collection.model_copy(deep=True)
             profile = collection.get_active()
             profile.treasure_matrix = [entry.model_copy(deep=True) for entry in entries]
-            # 重建优先级映射：只保留当前矩阵中 priority > 0 的条目
-            profile.weapon_priorities = {
-                entry.weapon_id: entry.priority
-                for entry in profile.treasure_matrix
-                if entry.priority > 0
+
+            matrix_ids = {entry.weapon_id for entry in profile.treasure_matrix}
+            # 先保留未拥有武器的优先级，再用矩阵内条目的 priority 覆盖同名键。
+            merged = {
+                weapon_id: priority
+                for weapon_id, priority in profile.weapon_priorities.items()
+                if weapon_id not in matrix_ids
             }
+            merged.update(
+                {
+                    entry.weapon_id: entry.priority
+                    for entry in profile.treasure_matrix
+                    if entry.priority > 0
+                }
+            )
+            profile.weapon_priorities = merged
+            self._sync_priority_projection(profile)
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
 
@@ -326,14 +555,13 @@ class ProfileManager:
             collection = self._collection.model_copy(deep=True)
             profile = collection.get_active()
             entry = entry.model_copy(deep=True)
-            if entry.weapon_id in profile.weapon_priorities:
-                entry.priority = profile.weapon_priorities[entry.weapon_id]
-            elif entry.priority > 0:
+            if entry.priority > 0 and entry.weapon_id not in profile.weapon_priorities:
                 profile.weapon_priorities[entry.weapon_id] = entry.priority
             profile.treasure_matrix = [
                 e for e in profile.treasure_matrix if e.weapon_id != entry.weapon_id
             ]
             profile.treasure_matrix.append(entry)
+            self._sync_priority_projection(profile)
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
 
@@ -359,11 +587,11 @@ class ProfileManager:
                 incoming = incoming.model_copy(deep=True)
                 existing = existing_by_weapon_id.get(incoming.weapon_id)
                 if existing is None:
-                    if incoming.weapon_id in profile.weapon_priorities:
-                        incoming.priority = profile.weapon_priorities[
-                            incoming.weapon_id
-                        ]
-                    elif incoming.priority > 0:
+                    # 已有的手动优先级优先于扫描结果携带的值
+                    if (
+                        incoming.priority > 0
+                        and incoming.weapon_id not in profile.weapon_priorities
+                    ):
                         profile.weapon_priorities[incoming.weapon_id] = (
                             incoming.priority
                         )
@@ -386,20 +614,17 @@ class ProfileManager:
 
                 # 只在扫描到更高等级时自动关闭满级武器，避免无变更扫描覆盖用户选择。
                 if level_changed and (
-                    existing.affix1_level == 6
-                    and existing.affix2_level == 6
-                    and existing.affix3_level == 3
+                    existing.affix1_level == AFFIX1_MAX_LEVEL
+                    and existing.affix2_level == AFFIX2_MAX_LEVEL
+                    and existing.affix3_level == AFFIX3_MAX_LEVEL
                 ):
                     existing.include_in_calculation = False
 
                 if level_changed:
-                    if existing.priority > 0:
-                        profile.weapon_priorities[existing.weapon_id] = (
-                            existing.priority
-                        )
                     updated.append(existing)
 
             if added or updated:
+                self._sync_priority_projection(profile)
                 self._commit_collection_unlocked(collection)
 
             return TreasureMatrixSyncResult(
@@ -425,6 +650,31 @@ class ProfileManager:
             ]
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
+
+    def clear_profile_data(self, name: str | None = None) -> ProfileData:
+        """清空指定账号的宝藏基质数据（保留账号本身、名称、版本与总览过滤器）。
+
+        清空内容为 treasure_matrix 与 weapon_priorities，用于「数据有误、
+        全量重新扫描」的场景；不删除账号，也不重置武器总览过滤器等展示偏好。
+
+        Args:
+            name: 要清空的账号名称；None 表示清空当前激活账号。
+
+        Returns:
+            清空后的 ProfileData。
+
+        Raises:
+            ValueError: 如果指定的账号不存在。
+        """
+        with self._lock:
+
+            def _mutator(profile: ProfileData) -> None:
+                profile.treasure_matrix = []
+                profile.weapon_priorities = {}
+
+            result = self._update_active_profile_unlocked(_mutator, name=name)
+            logger.info("清空账号数据: {}", result.name)
+            return result
 
     def fix_weapon_id(self, old_weapon_id: str, new_weapon_id: str) -> None:
         """修正 profile 中错误的武器 ID（如名称 → 正确 ID）。
@@ -463,6 +713,38 @@ class ProfileManager:
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)
 
+    def update_switch_display_mode(self, mode: str) -> ProfileData:
+        """更新激活账号的"可切换"提示显示模式。
+
+        Args:
+            mode: 显示模式，'chip' | 'dot' | 'off'。
+
+        Returns:
+            更新后的 ProfileData。
+        """
+        with self._lock:
+
+            def _mutator(profile: ProfileData) -> None:
+                profile.switch_display_mode = mode
+
+            return self._update_active_profile_unlocked(_mutator)
+
+    def update_matrix_badge_display_mode(self, mode: str) -> ProfileData:
+        """更新激活账号的基质图标显示模式。
+
+        Args:
+            mode: 显示模式，'small' | 'medium' | 'off'。
+
+        Returns:
+            更新后的 ProfileData。
+        """
+        with self._lock:
+
+            def _mutator(profile: ProfileData) -> None:
+                profile.matrix_badge_display_mode = mode
+
+            return self._update_active_profile_unlocked(_mutator)
+
     def update_weapon_priority(self, weapon_id: str, priority: int) -> ProfileData:
         """更新单个武器优先级，未拥有宝藏基质的武器也会保存。
 
@@ -481,10 +763,6 @@ class ProfileManager:
             else:
                 profile.weapon_priorities.pop(weapon_id, None)
 
-            for entry in profile.treasure_matrix:
-                if entry.weapon_id == weapon_id:
-                    entry.priority = priority
-                    break
-
+            self._sync_priority_projection(profile)
             self._commit_collection_unlocked(collection)
             return profile.model_copy(deep=True)

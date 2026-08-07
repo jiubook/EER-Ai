@@ -2,6 +2,7 @@ from endfield_essence_recognizer.game_data.static_game_data import StaticGameDat
 from endfield_essence_recognizer.schemas.static_data import (
     EnergyAlluviumInfo,
     EnergyAlluviumListResponse,
+    MatrixIconResponse,
     RarityColorResponse,
     StatInfo,
     StatListResponse,
@@ -25,6 +26,9 @@ class StaticDataService:
         )
         self.group_icon_base_url = (
             "/api/assets/beyond/dynamicassets/gameplay/ui/sprites/wiki/groupicon/"
+        )
+        self.matrix_icon_base_url = (
+            "/api/assets/beyond/dynamicassets/gameplay/ui/sprites/itemicon/"
         )
         self.data = data
 
@@ -181,6 +185,45 @@ class StaticDataService:
             if essence:
                 essences.append(essence)
         return StatListResponse(items=essences)
+
+    def get_matrix_icons(self) -> MatrixIconResponse:
+        """
+        Get the mapping of matrix icon URLs.
+
+        Returns:
+            A MatrixIconResponse containing the essence background URL
+            and skill stat ID to icon URL mapping.
+        """
+        # 技能属性ID到资源文件名的映射
+        skill_icon_map = {
+            "gst_passive_break": "icon_break",
+            "gst_passive_burst": "icon_burst",
+            "gst_passive_combo": "icon_combo",
+            "gst_passive_crit": "icon_crit",
+            "gst_passive_force": "icon_force",
+            "gst_passive_heal": "icon_heal",
+            "gst_passive_keyword": "icon_key",
+            "gst_passive_magabn": "icon_magabn",
+            "gst_passive_phyabn": "icon_phyabn",
+            "gst_passive_smash": "icon_smash",
+            "gst_passive_spirit": "icon_spirit",
+            "gst_passive_tacafter": "icon_tacafter",
+            "gst_passive_tactic": "icon_tactic",
+            "gst_passive_ult": "icon_ult",
+        }
+
+        # 生成技能属性图标URL映射
+        skills = {}
+        for skill_id, icon_name in skill_icon_map.items():
+            icon_url = f"{self.matrix_icon_base_url}{icon_name}.png"
+            # 同时支持两种格式
+            skills[skill_id] = icon_url
+            skills[f"weapon.stat.{skill_id}"] = icon_url
+
+        return MatrixIconResponse(
+            essence_bg=f"{self.matrix_icon_base_url}item_gem_rarity_5.png",
+            skills=skills,
+        )
 
     def list_energy_alluviums(self) -> EnergyAlluviumListResponse:
         """

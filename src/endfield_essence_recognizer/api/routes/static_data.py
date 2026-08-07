@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from endfield_essence_recognizer.dependencies.services import get_static_data_service
 from endfield_essence_recognizer.schemas.static_data import (
     EnergyAlluviumListResponse,
+    MatrixIconResponse,
     RarityColorResponse,
     StatInfo,
     StatListResponse,
@@ -82,6 +83,16 @@ async def list_essences(
     List all available essences.
     """
     return service.list_essences()
+
+
+@router.get("/matrix_icons")
+async def get_matrix_icons(
+    service: StaticDataService = Depends(get_static_data_service),
+) -> MatrixIconResponse:
+    """
+    Get the mapping of matrix icon URLs.
+    """
+    return service.get_matrix_icons()
 
 
 @router.get("/energy_alluviums")

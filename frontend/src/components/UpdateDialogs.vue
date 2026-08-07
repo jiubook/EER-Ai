@@ -5,7 +5,9 @@
     <p><strong>当前版本：</strong>{{ currentVersion }}</p>
     <p><strong>最新版本：</strong>{{ updateInfo?.latestVersion }}</p>
     <p v-if="updateInfo?.packageType === 'incremental'">
-      <strong>更新方式：</strong>增量更新<span v-if="updateInfo?.size">（约 {{ formatSize(updateInfo.size) }}）</span>
+      <strong>更新方式：</strong>增量更新<span v-if="updateInfo?.size"
+        >（约 {{ formatSize(updateInfo.size) }}）</span
+      >
     </p>
     <template #actions>
       <v-btn class="ms-2" @click="hasNewVersionDialog = false">稍后提醒</v-btn>
@@ -51,7 +53,9 @@
         <div class="mb-4">
           <div class="d-flex justify-space-between mb-2">
             <span>{{ currentVersion }} → {{ updateInfo?.latestVersion }}</span>
-            <span v-if="totalKnown">{{ formatSize(downloadedSize) }} / {{ formatSize(totalSize) }}</span>
+            <span v-if="totalKnown"
+              >{{ formatSize(downloadedSize) }} / {{ formatSize(totalSize) }}</span
+            >
             <span v-else>{{ formatSize(downloadedSize) }} 已下载</span>
           </div>
           <v-progress-linear

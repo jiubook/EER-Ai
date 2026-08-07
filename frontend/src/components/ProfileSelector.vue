@@ -20,21 +20,46 @@
         <v-list-item-title>{{ name }}</v-list-item-title>
         <template #append>
           <div class="d-flex ga-1">
-            <v-btn
-              v-if="name !== 'default'"
-              icon="mdi-pencil"
-              size="x-small"
-              variant="text"
-              @click.stop="startRename(name)"
-            />
-            <v-btn
-              v-if="name !== 'default' && name !== activeProfileName"
-              color="error"
-              icon="mdi-delete"
-              size="x-small"
-              variant="text"
-              @click.stop="startDelete(name)"
-            />
+            <v-tooltip location="bottom" text="重命名账号">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  icon="mdi-pencil"
+                  size="x-small"
+                  variant="text"
+                  @click.stop="startRename(name)"
+                />
+              </template>
+            </v-tooltip>
+            <v-tooltip
+              location="bottom"
+              :text="name === defaultProfileName ? '默认账号不可删除' : '删除账号'"
+            >
+              <template #activator="{ props }">
+                <span v-bind="props">
+                  <v-btn
+                    :color="name === defaultProfileName ? undefined : 'error'"
+                    :disabled="name === defaultProfileName"
+                    icon="mdi-delete"
+                    size="x-small"
+                    variant="text"
+                    @click.stop="startDelete(name)"
+                  />
+                </span>
+              </template>
+            </v-tooltip>
+            <v-tooltip location="bottom" text="清空数据">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  color="error"
+                  icon="mdi-delete-outline"
+                  size="x-small"
+                  variant="outlined"
+                  @click.stop="startClearData(name)"
+                />
+              </template>
+            </v-tooltip>
           </div>
         </template>
       </v-list-item>
@@ -64,9 +89,7 @@
       <v-card-actions>
         <v-spacer />
         <v-btn @click="showNewProfileDialog = false">取消</v-btn>
-        <v-btn color="primary" :disabled="!newProfileName.trim()" @click="onCreate">
-          创建
-        </v-btn>
+        <v-btn color="primary" :disabled="!newProfileName.trim()" @click="onCreate"> 创建 </v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -87,9 +110,7 @@
       <v-card-actions>
         <v-spacer />
         <v-btn @click="showRenameDialog = false">取消</v-btn>
-        <v-btn color="primary" :disabled="!renameNewName.trim()" @click="onRename">
-          确认
-        </v-btn>
+        <v-btn color="primary" :disabled="!renameNewName.trim()" @click="onRename"> 确认 </v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -100,6 +121,9 @@
       <v-card-title class="text-error">确认删除</v-card-title>
       <v-card-text>
         确定要删除账号「{{ deleteTargetName }}」吗？此操作不可撤销。
+        <template v-if="deleteIsActive">
+          <br />该账号正在使用中，删除后将自动切换回默认账号「{{ defaultProfileName }}」。
+        </template>
       </v-card-text>
       <v-card-actions>
         <v-spacer />
@@ -109,22 +133,38 @@
     </v-card>
   </v-dialog>
 
-  <v-snackbar v-model="showError" color="error" timeout="4000">
-    {{ errorMessage }}
-  </v-snackbar>
+  <!-- 清空数据确认对话框 -->
+  <v-dialog v-model="showClearDataConfirm" max-width="440">
+    <v-card>
+      <v-card-title class="text-error">确认清空数据</v-card-title>
+      <v-card-text>
+        确定要清空账号「{{
+          clearDataTargetName
+        }}」的数据吗？账号会保留，但该账号下所有已扫描的宝藏基质与优先级设置都会被清空，此操作不可撤销。
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn @click="showClearDataConfirm = false">取消</v-btn>
+        <v-btn color="error" @click="onClearData">清空数据</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script lang="ts" setup>
 import { onMounted, ref } from 'vue'
 import { useProfiles } from '@/composables/useProfiles'
+import { useToast } from '@/composables/useToast'
 
 const {
   activeProfileName,
+  defaultProfileName,
   profileNames,
   fetchProfiles,
   switchProfile,
   renameProfile,
   deleteProfile,
+  clearProfileData,
 } = useProfiles()
 
 // 账号名称最大长度
@@ -135,20 +175,24 @@ const PROFILE_NAME_INVALID_RE = /[/\\\0\n\r\t]/
 const showNewProfileDialog = ref(false)
 const showRenameDialog = ref(false)
 const showDeleteConfirm = ref(false)
+const showClearDataConfirm = ref(false)
 const newProfileName = ref('')
 const renameNewName = ref('')
 const renameOldName = ref('')
 const deleteTargetName = ref('')
-const showError = ref(false)
-const errorMessage = ref('')
+const deleteIsActive = ref(false)
+const clearDataTargetName = ref('')
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback
-}
+const toast = useToast()
 
+/**
+ * 提示校验错误。
+ *
+ * 接口错误由 useProfiles 统一推送到全局提示，这里只负责本地校验的反馈，
+ * 否则同一个失败会弹两次。
+ */
 function notifyError(message: string) {
-  errorMessage.value = message
-  showError.value = true
+  toast.error(message)
 }
 
 /**
@@ -165,9 +209,8 @@ function validateProfileName(name: string): string | null {
 }
 
 onMounted(() => {
-  void fetchProfiles().catch((error: unknown) => {
-    notifyError(getErrorMessage(error, '获取账号列表失败'))
-  })
+  // 失败信息已由 useProfiles 推送到全局提示，这里只需吞掉 rejection
+  void fetchProfiles().catch(() => {})
 })
 
 /**
@@ -176,8 +219,8 @@ onMounted(() => {
 async function onSwitch(name: string) {
   try {
     await switchProfile(name)
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '切换失败'))
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 
@@ -195,8 +238,8 @@ async function onCreate() {
     await switchProfile(name)
     showNewProfileDialog.value = false
     newProfileName.value = ''
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '创建失败'))
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 
@@ -219,11 +262,16 @@ async function onRename() {
     notifyError(validationError)
     return
   }
+  // 名称未修改时直接关闭对话框，避免无意义的网络请求
+  if (newName === renameOldName.value) {
+    showRenameDialog.value = false
+    return
+  }
   try {
     await renameProfile(renameOldName.value, newName)
     showRenameDialog.value = false
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '重命名失败'))
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 
@@ -231,7 +279,10 @@ async function onRename() {
  * 开始删除账号。
  */
 function startDelete(name: string) {
+  // 默认账号的删除按钮已置灰禁用，此处防御性拦截
+  if (name === defaultProfileName.value) return
   deleteTargetName.value = name
+  deleteIsActive.value = name === activeProfileName.value
   showDeleteConfirm.value = true
 }
 
@@ -242,8 +293,29 @@ async function onDelete() {
   try {
     await deleteProfile(deleteTargetName.value)
     showDeleteConfirm.value = false
-  } catch (error: unknown) {
-    notifyError(getErrorMessage(error, '删除失败'))
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
+  }
+}
+
+/**
+ * 开始清空账号数据（账号保留，宝藏基质与优先级设置被清空）。
+ */
+function startClearData(name: string) {
+  clearDataTargetName.value = name
+  showClearDataConfirm.value = true
+}
+
+/**
+ * 执行清空数据操作。
+ */
+async function onClearData() {
+  try {
+    await clearProfileData(clearDataTargetName.value)
+    showClearDataConfirm.value = false
+    toast.success(`已清空账号「${clearDataTargetName.value}」的数据`)
+  } catch {
+    // 错误提示已由 useProfiles 统一推送
   }
 }
 </script>

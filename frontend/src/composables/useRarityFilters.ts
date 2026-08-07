@@ -53,7 +53,7 @@ export function useRarityFilters() {
           '4star': newValue.includes('4'),
           '5star': newValue.includes('5'),
           '6star': newValue.includes('6'),
-          'custom': newValue.includes('custom'),
+          custom: newValue.includes('custom'),
         })
       } catch {
         // 错误已由 useProfiles 的 lastError 处理

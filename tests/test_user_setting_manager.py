@@ -160,6 +160,86 @@ def test_update_from_user_setting(manager, settings_file):
     ] == ["model_update"]
 
 
+def test_ensure_custom_stat_ids_assigns_missing(manager):
+    """旧配置中缺失的自定义基质 ID 会被补齐，且顺序即迁移映射的下标。"""
+    manager.update_from_dict(
+        {
+            "treasure_essence_stats": [
+                {"name": "A", "attribute": "a1", "secondary": None, "skill": None},
+                {"name": "B", "attribute": "a2", "secondary": None, "skill": None},
+            ]
+        }
+    )
+
+    stats = manager.get_user_setting().treasure_essence_stats
+    ids = manager.get_custom_stat_ids()
+    assert all(s.id for s in stats)
+    assert len(set(ids)) == 2
+    assert ids == [stats[0].id, stats[1].id]
+
+
+def test_ensure_custom_stat_ids_preserves_existing(manager):
+    """已有 ID 不被改写：profile 中的引用依赖它保持稳定。"""
+    manager.update_from_dict(
+        {
+            "treasure_essence_stats": [
+                {"id": "fixed", "name": "A", "attribute": "a1"},
+            ]
+        }
+    )
+    assert manager.get_custom_stat_ids() == ["fixed"]
+
+    # 再次写入（例如用户改了名称）不应换 ID
+    manager.update_from_dict(
+        {
+            "treasure_essence_stats": [
+                {"id": "fixed", "name": "改名后", "attribute": "a1"},
+            ]
+        }
+    )
+    assert manager.get_custom_stat_ids() == ["fixed"]
+
+
+def test_ensure_custom_stat_ids_dedupes(manager):
+    """手工编辑造成的重复 ID 会被重新分配，避免两个条目互相顶替。"""
+    manager.update_from_dict(
+        {
+            "treasure_essence_stats": [
+                {"id": "dup", "name": "A"},
+                {"id": "dup", "name": "B"},
+            ]
+        }
+    )
+    ids = manager.get_custom_stat_ids()
+    assert len(set(ids)) == 2
+    assert ids[0] == "dup"
+
+
+def test_reset_to_default(manager, settings_file):
+    """测试 reset_to_default 将配置重置为默认值并保存到磁盘。"""
+    manager.update_from_dict(
+        {
+            "trash_weapon_ids": ["w1", "w2"],
+            "treasure_essence_stats": [
+                {"name": "自定义", "attribute": "atk", "secondary": None, "skill": None}
+            ],
+            "high_level_treasure_enabled": True,
+        }
+    )
+
+    returned = manager.reset_to_default()
+
+    # 返回值与内存均为默认配置
+    assert returned == UserSetting()
+    assert manager.get_user_setting() == UserSetting()
+    # 磁盘已落默认值
+    data = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert data["version"] == UserSetting._VERSION
+    assert data["trash_weapon_ids"] == []
+    assert data["treasure_essence_stats"] == []
+    assert data["high_level_treasure_enabled"] is False
+
+
 def test_update_from_dict_invalid_data(manager):
     """测试 update_from_dict 在提供无效数据时抛出异常。"""
     with pytest.raises(ValidationError):
@@ -277,6 +357,7 @@ def test_essence_stats_schema_stability():
     from endfield_essence_recognizer.schemas.user_setting import EssenceStats
 
     expected_fields = {
+        "id",
         "name",
         "attribute",
         "secondary",
