@@ -13,6 +13,7 @@ from endfield_essence_recognizer.dependencies import (
     default_user_setting_manager,
     get_event_service,
     get_log_service,
+    get_static_game_data,
 )
 from endfield_essence_recognizer.hotkey_entrypoints import bind_hotkeys
 from endfield_essence_recognizer.services.profile_manager import ProfileManager
@@ -59,6 +60,13 @@ def init_load_profiles():
     profile_manager.migrate_custom_stat_ids(
         default_user_setting_manager().get_custom_stat_ids()
     )
+    # 武器数据随游戏版本更新后，个别武器的 ID 可能变化（如中文 ID 规范为
+    # wpn_xxx）：按名称把失效引用改写为最新 ID，避免幽灵条目与重复条目。
+    static_data = get_static_game_data()
+    weapons_by_name = {
+        weapon.name: weapon.weapon_id for weapon in static_data.list_weapons()
+    }
+    profile_manager.migrate_stale_weapon_ids(weapons_by_name)
     set_profile_manager(profile_manager)
 
 
