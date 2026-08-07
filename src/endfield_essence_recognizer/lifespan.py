@@ -11,6 +11,7 @@ from endfield_essence_recognizer.core.config import ServerConfig, get_server_con
 from endfield_essence_recognizer.core.path import get_root_dir
 from endfield_essence_recognizer.dependencies import (
     default_user_setting_manager,
+    get_event_service,
     get_log_service,
 )
 from endfield_essence_recognizer.hotkey_entrypoints import bind_hotkeys
@@ -96,10 +97,11 @@ def init_mount_frontend_build(app: FastAPI, server_config: ServerConfig):
 async def lifespan(app: FastAPI):
     server_config = get_server_config()
     async with get_log_service().scope(server_config):
-        logger.success(f"Server configuration: {server_config.model_dump()}")
-        init_mount_frontend_build(app, server_config)
-        init_load_user_setting()
-        init_load_profiles()
-        log_welcome_message()
-        with bind_hotkeys(server_config):
-            yield
+        async with get_event_service().scope():
+            logger.success(f"Server configuration: {server_config.model_dump()}")
+            init_mount_frontend_build(app, server_config)
+            init_load_user_setting()
+            init_load_profiles()
+            log_welcome_message()
+            with bind_hotkeys(server_config):
+                yield

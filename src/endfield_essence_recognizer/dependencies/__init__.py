@@ -18,6 +18,7 @@ from .recognition import (
 )
 from .services import (
     get_audio_service,
+    get_event_service,
     get_log_service,
     get_scanner_service,
     get_screenshot_service,
@@ -47,6 +48,7 @@ __all__ = [
     "get_delivery_claimer_engine_dep",
     "get_delivery_job_reward_recognizer_dep",
     "get_delivery_scene_recognizer_dep",
+    "get_event_service",
     "get_game_window_manager",
     "get_lock_status_recognizer_dep",
     "get_log_service",

@@ -176,6 +176,15 @@ class ScannerService:
             logger.info(f"开始同步 {len(data_to_sync)} 把武器到宝藏基质配置")
             try:
                 self._sync_to_treasure_matrix(data_to_sync)
+                # 通知前端刷新宝藏基质/基质规划等依赖 profiles 的页面
+                from endfield_essence_recognizer.dependencies import (
+                    get_event_service,
+                )
+                from endfield_essence_recognizer.services.event_service import (
+                    EVENT_PROFILES_CHANGED,
+                )
+
+                get_event_service().publish({"type": EVENT_PROFILES_CHANGED})
             except Exception as e:
                 logger.error(f"同步扫描数据失败: {e}", exc_info=True)
         else:

@@ -8,6 +8,7 @@ from endfield_essence_recognizer.services.audio_service import (
     AudioService,
     build_audio_service_profile,
 )
+from endfield_essence_recognizer.services.event_service import EventService
 from endfield_essence_recognizer.services.log_service import LogService
 from endfield_essence_recognizer.services.scanner_service import ScannerService
 from endfield_essence_recognizer.services.screenshot_service import ScreenshotService
@@ -33,6 +34,11 @@ def get_scanner_service() -> ScannerService:
 @lru_cache
 def get_log_service() -> LogService:
     return LogService()
+
+
+@lru_cache
+def get_event_service() -> EventService:
+    return EventService()
 
 
 @lru_cache

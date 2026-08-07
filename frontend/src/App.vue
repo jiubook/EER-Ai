@@ -50,6 +50,7 @@ import ProfileSelector from '@/components/ProfileSelector.vue'
 import ToastHost from '@/components/ToastHost.vue'
 import UpdateDialogs from '@/components/UpdateDialogs.vue'
 import { useLogs } from '@/composables/useLogs'
+import { useProfilesEvents } from '@/composables/useProfilesEvents'
 import { useUpdateChecker } from '@/composables/useUpdateChecker'
 import { useStaticData } from '@/utils/gameData/staticData'
 
@@ -67,6 +68,9 @@ function getRouteIcon(routeItem: RouteRecordRaw): string {
 
 // 初始化日志 WebSocket 连接
 useLogs()
+
+// 订阅后端事件（扫描完成后自动刷新宝藏基质等页面数据）
+useProfilesEvents()
 
 // 检查更新
 const { checkForUpdates } = useUpdateChecker()
