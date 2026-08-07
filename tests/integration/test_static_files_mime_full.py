@@ -62,6 +62,7 @@ def temp_dist_dir(tmp_path: Path):
         "assets/logo.svg": "<svg></svg>",
         "assets/icon.png": "fake-png",
         "assets/photo.jpg": "fake-jpg",
+        "assets/photo.webp": "fake-webp",
         "assets/animation.gif": "fake-gif",
         "assets/data.json": '{"key":"value"}',
         "assets/config.xml": "<root/>",
@@ -119,6 +120,7 @@ MIME_CASES: list[tuple[str, str]] = [
     ("/assets/icon.png", "image/png"),
     ("/assets/photo.jpg", "image/jpeg"),
     ("/assets/animation.gif", "image/gif"),
+    ("/assets/photo.webp", "image/webp"),
     ("/favicon.ico", "image/x-icon"),  # 也可能是 image/vnd.microsoft.icon
     # --- 字体 ---
     ("/assets/fonts/inter-regular.woff2", "font/woff2"),

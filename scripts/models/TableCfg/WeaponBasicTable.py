@@ -1,6 +1,6 @@
 from typing import TypedDict
 
-from ...common import TranslationKey
+from ..common import TranslationKey
 
 
 class WeaponBasic(TypedDict):

@@ -5,6 +5,7 @@
  */
 
 import { computed, ref } from 'vue'
+import { useToast } from '@/composables/useToast'
 
 export interface TreasureMatrixEntry {
   weapon_id: string
@@ -25,14 +26,18 @@ export interface ProfileData {
     '4star': boolean
     '5star': boolean
     '6star': boolean
-    'custom': boolean
+    custom: boolean
   }
   weapon_priorities?: Record<string, number>
+  switch_display_mode?: 'chip' | 'dot' | 'off'
+  matrix_badge_display_mode?: 'small' | 'medium' | 'off'
 }
 
 export interface ProfileCollection {
   version: number
   active_profile: string
+  /** 默认账号的当前名称（默认账号可重命名，重命名后同步更新） */
+  default_profile?: string
   profiles: Record<string, ProfileData>
 }
 
@@ -73,6 +78,7 @@ interface BatchFarmingItemResult {
 const collection = ref<ProfileCollection>({
   version: 1,
   active_profile: 'default',
+  default_profile: 'default',
   profiles: {},
 })
 
@@ -82,13 +88,13 @@ const isLoaded = ref(false)
 const lastError = ref<string | null>(null)
 
 function applyActiveProfile(profile: ProfileData) {
-  const activeName = collection.value.active_profile
-  const profileName = profile.name || activeName
+  const profileName = profile.name || collection.value.active_profile
 
   // 写操作接口已经返回最新 ProfileData；直接更新本地账号快照，避免再拉取整份 profiles。
+  // 只覆盖对应账号的数据，不动 active_profile——切换账号是 switchProfile 的职责，
+  // 让写操作顺带改变"当前是哪个账号"会把一次保存变成一次隐式切换。
   collection.value = {
     ...collection.value,
-    active_profile: profileName,
     profiles: {
       ...collection.value.profiles,
       [profileName]: profile,
@@ -98,12 +104,26 @@ function applyActiveProfile(profile: ProfileData) {
   lastError.value = null
 }
 
+/** 仅供测试使用：重置模块级单例状态 */
+export function __resetProfilesStateForTests() {
+  collection.value = {
+    version: 1,
+    active_profile: 'default',
+    default_profile: 'default',
+    profiles: {},
+  }
+  isLoaded.value = false
+  lastError.value = null
+}
+
 function _handleError(context: string, error: unknown): never {
   const message = error instanceof Error ? error.message : String(error)
   const fullMessage = `${context}: ${message}`
-  // 生产环境使用统一的错误上报，而非 console.error
   lastError.value = fullMessage
-  throw error instanceof Error ? error : new Error(fullMessage)
+  // 同时推给全局提示：只写 lastError 而无人订阅，等于什么都没做。
+  useToast().error(fullMessage)
+  // 始终抛出包含上下文的新 Error，保留原始错误的 stack trace 以便排查。
+  throw new Error(fullMessage, { cause: error })
 }
 
 async function parseJsonResponse<T>(res: Response, fallbackMessage: string): Promise<T> {
@@ -119,11 +139,12 @@ async function parseJsonResponse<T>(res: Response, fallbackMessage: string): Pro
   }
 
   if (!res.ok) {
-    const detail = typeof body === 'object' && body !== null && 'detail' in body
-      ? String((body as { detail?: unknown }).detail)
-      : typeof body === 'string' && body
-        ? body
-        : fallbackMessage
+    const detail =
+      typeof body === 'object' && body !== null && 'detail' in body
+        ? String((body as { detail?: unknown }).detail)
+        : typeof body === 'string' && body
+          ? body
+          : fallbackMessage
     throw new Error(detail)
   }
 
@@ -132,6 +153,7 @@ async function parseJsonResponse<T>(res: Response, fallbackMessage: string): Pro
 
 export function useProfiles() {
   const activeProfileName = computed(() => collection.value.active_profile)
+  const defaultProfileName = computed(() => collection.value.default_profile ?? 'default')
   const activeProfile = computed(() => {
     const name = collection.value.active_profile
     return collection.value.profiles[name] ?? { version: 1, name, treasure_matrix: [] }
@@ -192,9 +214,35 @@ export function useProfiles() {
       if (!res.ok) {
         await parseJsonResponse<never>(res, 'Failed to delete profile')
       }
+      // 后端删除激活账号后会自动回退到默认账号；先乐观同步本地，
+      // 避免随后重新拉取失败时 active_profile 仍指向已删除的账号。
+      if (collection.value.active_profile === name) {
+        collection.value = {
+          ...collection.value,
+          active_profile: collection.value.default_profile ?? 'default',
+        }
+      }
       await fetchProfiles()
     } catch (error) {
       _handleError('删除账号失败', error)
+    }
+  }
+
+  async function clearProfileData(name?: string) {
+    try {
+      const res = await fetch('/api/profiles/clear_data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(name === undefined ? {} : { name }),
+      })
+      if (!res.ok) {
+        await parseJsonResponse<never>(res, 'Failed to clear profile data')
+      }
+      // 重新同步整份 collection：避免 applyActiveProfile 把 active_profile 误改成
+      // 被清空的账号，并刷新 treasureMatrix/activeProfile 等派生计算属性。
+      await fetchProfiles()
+    } catch (error) {
+      _handleError('清空账号数据失败', error)
     }
   }
 
@@ -205,7 +253,9 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entries }),
       })
-      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to update treasure matrix'))
+      applyActiveProfile(
+        await parseJsonResponse<ProfileData>(res, 'Failed to update treasure matrix'),
+      )
     } catch (error) {
       _handleError('更新宝藏基质失败', error)
     }
@@ -218,7 +268,9 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry),
       })
-      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to add treasure matrix entry'))
+      applyActiveProfile(
+        await parseJsonResponse<ProfileData>(res, 'Failed to add treasure matrix entry'),
+      )
     } catch (error) {
       _handleError('添加宝藏基质条目失败', error)
     }
@@ -231,7 +283,9 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weapon_id: weaponId }),
       })
-      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to remove treasure matrix entry'))
+      applyActiveProfile(
+        await parseJsonResponse<ProfileData>(res, 'Failed to remove treasure matrix entry'),
+      )
     } catch (error) {
       _handleError('移除宝藏基质条目失败', error)
     }
@@ -256,9 +310,7 @@ export function useProfiles() {
       )
       const failed = itemResults.filter((item) => item.error)
       if (failed.length > 0) {
-        lastError.value = failed
-          .map((item) => `${item.weapon_id}: ${item.error}`)
-          .join('\n')
+        lastError.value = failed.map((item) => `${item.weapon_id}: ${item.error}`).join('\n')
       } else {
         lastError.value = null
       }
@@ -279,7 +331,7 @@ export function useProfiles() {
     '4star': boolean
     '5star': boolean
     '6star': boolean
-    'custom': boolean
+    custom: boolean
   }) {
     try {
       const res = await fetch('/api/profiles/weapon_overview_filters', {
@@ -287,9 +339,41 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters }),
       })
-      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to update weapon overview filters'))
+      applyActiveProfile(
+        await parseJsonResponse<ProfileData>(res, 'Failed to update weapon overview filters'),
+      )
     } catch (error) {
       _handleError('更新武器总览过滤器失败', error)
+    }
+  }
+
+  async function updateSwitchDisplayMode(mode: 'chip' | 'dot' | 'off') {
+    try {
+      const res = await fetch('/api/profiles/switch_display_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+      applyActiveProfile(
+        await parseJsonResponse<ProfileData>(res, 'Failed to update switch display mode'),
+      )
+    } catch (error) {
+      _handleError('更新可切换提示显示模式失败', error)
+    }
+  }
+
+  async function updateMatrixBadgeDisplayMode(mode: 'small' | 'medium' | 'off') {
+    try {
+      const res = await fetch('/api/profiles/matrix_badge_display_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      })
+      applyActiveProfile(
+        await parseJsonResponse<ProfileData>(res, 'Failed to update matrix badge display mode'),
+      )
+    } catch (error) {
+      _handleError('更新基质图标显示模式失败', error)
     }
   }
 
@@ -300,7 +384,9 @@ export function useProfiles() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weapon_id: weaponId, priority }),
       })
-      applyActiveProfile(await parseJsonResponse<ProfileData>(res, 'Failed to update weapon priority'))
+      applyActiveProfile(
+        await parseJsonResponse<ProfileData>(res, 'Failed to update weapon priority'),
+      )
     } catch (error) {
       _handleError('更新武器优先级失败', error)
     }
@@ -311,6 +397,7 @@ export function useProfiles() {
     isLoaded,
     lastError,
     activeProfileName,
+    defaultProfileName,
     activeProfile,
     profileNames,
     treasureMatrix,
@@ -318,11 +405,14 @@ export function useProfiles() {
     switchProfile,
     renameProfile,
     deleteProfile,
+    clearProfileData,
     updateTreasureMatrix,
     addTreasureMatrixEntry,
     removeTreasureMatrixEntry,
     getBatchFarmingRecommendations,
     updateWeaponOverviewFilters,
+    updateSwitchDisplayMode,
+    updateMatrixBadgeDisplayMode,
     updateWeaponPriority,
   }
 }

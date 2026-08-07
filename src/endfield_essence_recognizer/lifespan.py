@@ -53,6 +53,10 @@ def init_load_profiles():
     profiles_file = get_root_dir() / "profiles.json"
     profile_manager = ProfileManager(profiles_file)
     profile_manager.load()
+    # 必须在用户配置加载之后执行：迁移依赖配置中自定义基质的顺序来解析旧下标。
+    profile_manager.migrate_custom_stat_ids(
+        default_user_setting_manager().get_custom_stat_ids()
+    )
     set_profile_manager(profile_manager)
 
 
@@ -68,6 +72,7 @@ def init_mount_frontend_build(app: FastAPI, server_config: ServerConfig):
     mimetypes.add_type("application/json", ".json")
     mimetypes.add_type("application/json", ".map")
     mimetypes.add_type("image/svg+xml", ".svg")
+    mimetypes.add_type("image/webp", ".webp")
     mimetypes.add_type("application/xml", ".xml")
     mimetypes.add_type("application/wasm", ".wasm")
     mimetypes.add_type("font/woff2", ".woff2")

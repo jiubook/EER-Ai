@@ -16,85 +16,80 @@
       <div class="d-flex align-center gap-2 mb-4">
         <span class="text-body-2 text-medium-emphasis">显示星级：</span>
         <v-chip-group v-model="selectedRarities" column multiple>
-          <v-chip
-            color="primary"
-            filter
-            size="small"
-            value="3"
-            variant="outlined"
-          >
-            3★
-          </v-chip>
-          <v-chip
-            color="primary"
-            filter
-            size="small"
-            value="4"
-            variant="outlined"
-          >
-            4★
-          </v-chip>
-          <v-chip
-            color="primary"
-            filter
-            size="small"
-            value="5"
-            variant="outlined"
-          >
-            5★
-          </v-chip>
-          <v-chip
-            color="primary"
-            filter
-            size="small"
-            value="6"
-            variant="outlined"
-          >
-            6★
-          </v-chip>
-          <v-chip
-            color="primary"
-            filter
-            size="small"
-            value="custom"
-            variant="outlined"
-          >
+          <v-chip color="primary" filter size="small" value="3" variant="outlined"> 3★ </v-chip>
+          <v-chip color="primary" filter size="small" value="4" variant="outlined"> 4★ </v-chip>
+          <v-chip color="primary" filter size="small" value="5" variant="outlined"> 5★ </v-chip>
+          <v-chip color="primary" filter size="small" value="6" variant="outlined"> 6★ </v-chip>
+          <v-chip color="primary" filter size="small" value="custom" variant="outlined">
             自定义
           </v-chip>
         </v-chip-group>
       </div>
 
-      <!-- 自定义基质重合检测按钮 -->
-      <v-btn
-        class="mb-4"
-        color="warning"
-        prepend-icon="mdi-swap-horizontal"
-        size="small"
-        variant="tonal"
-        @click="checkCustomOverlap"
-      >
-        检查自定义基质重合
-      </v-btn>
+      <!-- 自定义基质重合检测按钮 + 可切换提示模式 + 基质图标显示模式 -->
+      <div class="d-flex align-center ga-2 mb-4">
+        <v-btn
+          color="warning"
+          prepend-icon="mdi-swap-horizontal"
+          size="small"
+          variant="tonal"
+          @click="checkCustomOverlap"
+        >
+          检查自定义基质重合
+        </v-btn>
+        <v-btn
+          :prepend-icon="matrixBadgeModeIcons[matrixBadgeDisplayMode]"
+          size="small"
+          variant="tonal"
+          @click="toggleMatrixBadgeDisplayMode"
+        >
+          {{ matrixBadgeModeLabels[matrixBadgeDisplayMode] }}
+        </v-btn>
+        <v-btn
+          :prepend-icon="switchModeIcons[switchDisplayMode]"
+          size="small"
+          variant="tonal"
+          @click="toggleSwitchDisplayMode"
+        >
+          {{ switchModeLabels[switchDisplayMode] }}
+        </v-btn>
+      </div>
 
       <!-- 武器总览容器（包含连线层） -->
       <div ref="containerRef" class="weapon-overview-container">
         <!-- 连线层 -->
         <div class="connection-lines-layer">
-          <div
-            v-for="(line, index) in connectionLines"
-            :key="index"
-            class="connection-line"
-            :style="line.style"
-          />
+          <transition-group name="connection-line">
+            <div
+              v-for="line in connectionLines"
+              :key="line.targetId"
+              class="connection-line"
+              :style="line.style"
+            />
+          </transition-group>
         </div>
 
         <!-- 自定义基质区段 -->
-        <template v-if="showCustomSection && customMatrixEntries.length > 0">
+        <template v-if="showCustomSection">
           <div class="d-flex align-center mb-1 mt-3">
-            <v-icon class="me-2" color="#ff5a36">mdi-diamond-stone</v-icon>
+            <img v-if="essenceBgSrc" alt="" class="essence-icon-small me-2" :src="essenceBgSrc" />
             <h4>自定义基质</h4>
           </div>
           <div class="weapon-overview-grid">
+            <!-- [+] 新建按钮 -->
+            <div
+              aria-label="新建自定义基质"
+              class="weapon-overview-item"
+              role="button"
+              tabindex="0"
+              @click="showNewCustomDialog"
+              @keydown.enter="showNewCustomDialog"
+              @keydown.space.prevent="showNewCustomDialog"
+            >
+              <div class="weapon-add-button">
+                <v-icon color="grey" size="28">mdi-plus</v-icon>
+              </div>
+            </div>
             <div
               v-for="entry in customMatrixEntries"
               :key="entry.syntheticId"
@@ -116,7 +111,10 @@
                         'weapon-maxed': isWeaponMaxed(entry.syntheticId),
                       }"
                     >
-                      <custom-stat-icon :name="entry.displayName" />
+                      <custom-stat-icon
+                        :name="entry.displayName"
+                        :skill-stat-id="entry.skillStatId"
+                      />
 
                       <!-- 满级的彩虹边框 -->
                       <div v-if="isWeaponMaxed(entry.syntheticId)" class="rainbow-border" />
@@ -131,22 +129,18 @@
 
         <template v-for="wType in filteredWeaponTypes" :key="wType.id">
           <div class="d-flex align-center mb-1 mt-3">
-            <img
-              :alt="wType.name"
-              class="group-icon me-2"
-              :src="wType.iconUrl"
-            />
+            <img :alt="wType.name" class="group-icon me-2" :src="wType.iconUrl" />
             <h4>{{ wType.name }}</h4>
           </div>
           <div class="weapon-overview-grid">
             <div
-              v-for="weaponId in wType.weaponIds"
-              :key="weaponId"
+              v-for="weapon in wType.weapons"
+              :key="weapon.id"
               class="weapon-overview-item"
-              :data-weapon-id="weaponId"
-              @click="showWeaponDetail(weaponId)"
-              @contextmenu.prevent="toggleWeaponOwnership(weaponId)"
-              @mouseenter="handleWeaponMouseEnter(weaponId)"
+              :data-weapon-id="weapon.id"
+              @click="showWeaponDetail(weapon.id)"
+              @contextmenu.prevent="toggleWeaponOwnership(weapon.id)"
+              @mouseenter="handleWeaponMouseEnter(weapon.id)"
               @mouseleave="handleWeaponMouseLeave"
             >
               <!-- 武器悬浮面板：显示武器的三条基质属性 -->
@@ -156,24 +150,46 @@
                     <div
                       class="weapon-icon-wrapper"
                       :class="{
-                        'weapon-not-owned': !isWeaponOwned(weaponId),
-                        'weapon-maxed': isWeaponMaxed(weaponId),
-                        'switch-target-maxed': isSwitchable(weaponId) && isSwitchTargetMaxed(weaponId) && !isWeaponMaxed(weaponId),
+                        'weapon-not-owned': !weapon.owned,
+                        'weapon-maxed': weapon.maxed,
+                        'switch-target-maxed': weapon.switchTargetMaxed,
                       }"
                     >
-                      <item-icon :item-id="weaponId" show-item-name />
+                      <item-icon :item-id="weapon.id" show-item-name />
+
+                      <!-- 左上角：缩小版圆形基质图标（底板+技能属性叠加） -->
+                      <div
+                        v-if="matrixBadgeDisplayMode !== 'off'"
+                        class="weapon-matrix-badge"
+                        :class="{
+                          'weapon-matrix-badge--medium': matrixBadgeDisplayMode === 'medium',
+                        }"
+                      >
+                        <img
+                          v-if="essenceBgSrc"
+                          alt=""
+                          class="weapon-matrix-badge-bg"
+                          :src="essenceBgSrc"
+                        />
+                        <img
+                          v-if="weapon.skillIcon"
+                          alt=""
+                          class="weapon-matrix-badge-skill"
+                          :src="weapon.skillIcon"
+                        />
+                      </div>
 
                       <!-- 满级的彩虹边框 -->
-                      <div v-if="isWeaponMaxed(weaponId)" class="rainbow-border" />
+                      <div v-if="weapon.maxed" class="rainbow-border" />
                     </div>
                   </div>
                 </template>
-                <span>{{ getWeaponStatsText(weaponId) }}</span>
+                <span>{{ weapon.statsText }}</span>
               </v-tooltip>
 
-              <!-- 可切换标记放在灰色滤镜容器外，避免被 opacity/filter 叠加 -->
+              <!-- 可切换标记：根据模式显示标签/圆点/关闭 -->
               <v-chip
-                v-if="isSwitchable(weaponId) && !isWeaponMaxed(weaponId)"
+                v-if="switchDisplayMode === 'chip' && weapon.showSwitchHint"
                 class="switchable-badge"
                 color="warning"
                 size="x-small"
@@ -181,6 +197,10 @@
               >
                 可切换
               </v-chip>
+              <div
+                v-else-if="switchDisplayMode === 'dot' && weapon.showSwitchHint"
+                class="switch-dot"
+              />
             </div>
           </div>
         </template>
@@ -188,512 +208,203 @@
     </v-expansion-panel-text>
   </v-expansion-panel>
 
-  <!-- 武器详情弹窗 -->
-  <v-dialog v-model="detailDialog" max-width="600">
-    <v-card v-if="detailWeaponId">
-      <v-card-item>
-        <template #prepend>
-          <custom-stat-icon v-if="isCustomEntry(detailWeaponId)" hide-name :name="customEntryName || detailWeaponId" />
-          <item-icon v-else class="weapon-icon-detail" :item-id="detailWeaponId" />
-        </template>
-        <v-card-title>
-          <v-text-field
-            v-if="isCustomEntry(detailWeaponId)"
-            v-model="customEntryName"
-            density="compact"
-            hide-details
-            placeholder="自定义基质名称"
-            variant="underlined"
-            @blur="saveCustomEntryName"
-            @keydown.enter="saveCustomEntryName"
-          />
-          <template v-else>
-            {{ weaponsMap.get(detailWeaponId)?.name || detailWeaponId }}
-          </template>
-        </v-card-title>
-        <v-card-subtitle>{{ getWeaponStatsText(detailWeaponId) }}</v-card-subtitle>
-        <template #append>
-          <v-btn icon="mdi-close" variant="text" @click="detailDialog = false" />
-        </template>
-      </v-card-item>
-      <v-divider />
-      <v-card-text>
-        <!-- 当前状态 -->
-        <div class="mb-4">
-          <div class="text-subtitle-2 mb-1">当前基质等级</div>
-          <v-chip :color="isWeaponOwned(detailWeaponId) ? 'primary' : 'grey'" variant="flat">
-            {{ getMatrixLevelText(detailWeaponId) }}
-          </v-chip>
-          <v-chip
-            v-if="isWeaponMaxed(detailWeaponId)"
-            class="ml-2"
-            color="success"
-            size="small"
-            variant="flat"
-          >
-            已满级
-          </v-chip>
-        </div>
-
-        <!-- 优先级设置 -->
-        <div class="mb-4">
-          <div class="text-subtitle-2 mb-1">基质匹配优先级</div>
-          <div class="d-flex flex-wrap align-center ga-2 mb-2">
-            <v-chip
-              v-for="p in [1, 2, 3, 4, 5, 6, 7, 8, 9]"
-              :key="p"
-              :color="getWeaponPriority(detailWeaponId!) === p ? 'primary' : undefined"
-              size="small"
-              :variant="getWeaponPriority(detailWeaponId!) === p ? 'flat' : 'outlined'"
-              @click="setWeaponPriority(detailWeaponId!, p)"
-            >
-              {{ p }}
-            </v-chip>
-          </div>
-          <div class="text-caption text-medium-emphasis" style="line-height: 1.6">
-            当扫描到一个无暇基质同时匹配多把武器时，系统会按优先级将该基质分配给优先级最高的武器。<br />
-            默认使用武器稀有度作为优先级（6★=6, 5★=5, 4★=4, 3★=3）。<br />
-            手动设置 1-9 可覆盖默认值，数值越大越优先。<br />
-            已满级（6/6/3）的武器会被自动跳过。
-          </div>
-        </div>
-
-        <!-- 同类武器（自定义条目不显示） -->
-        <div v-if="!isCustomEntry(detailWeaponId) && getSameStatWeapons(detailWeaponId).length > 0">
-          <div class="text-subtitle-2 mb-2">同类属性武器</div>
-          <div class="d-flex flex-column ga-2">
-            <v-card
-              v-for="sameId in getSameStatWeapons(detailWeaponId)"
-              :key="sameId"
-              class="pa-2"
-              variant="outlined"
-            >
-              <div class="d-flex align-center justify-space-between">
-                <div class="d-flex align-center ga-2">
-                  <item-icon class="weapon-icon-same" :item-id="sameId" />
-                  <div>
-                    <div class="font-weight-bold text-body-2">
-                      {{ weaponsMap.get(sameId)?.name || sameId }}
-                    </div>
-                    <div class="text-caption text-medium-emphasis">
-                      {{ getMatrixLevelText(sameId) }}
-                      <span class="ml-1">优先级: {{ getWeaponPriority(sameId) }}</span>
-                    </div>
-                  </div>
-                </div>
-                <v-btn
-                  color="primary"
-                  size="small"
-                  variant="tonal"
-                  @click="swapMatrix(detailWeaponId!, sameId)"
-                >
-                  交换
-                </v-btn>
-              </div>
-            </v-card>
-          </div>
-        </div>
-        <div v-else-if="!isCustomEntry(detailWeaponId)" class="text-medium-emphasis text-caption">
-          没有其他武器与此武器共享相同属性组合。
-        </div>
-      </v-card-text>
-    </v-card>
-  </v-dialog>
+  <!-- 武器详情弹窗（含删除确认弹窗） -->
+  <weapon-detail-dialog v-model:weapon-id="detailWeaponId" />
 
   <!-- 自定义基质重合检测弹窗 -->
-  <v-dialog v-model="overlapDialog" max-width="700" persistent>
-    <v-card>
-      <v-card-title class="d-flex align-center">
-        <v-icon class="mr-2" color="warning">mdi-alert-circle-outline</v-icon>
-        自定义基质重合检测
-      </v-card-title>
-      <v-card-text>
-        <v-alert class="mb-4" type="info" variant="tonal">
-          以下自定义基质与内置武器的三个词条完全相同，可选择切换为内置武器。
-        </v-alert>
-        <div
-          v-for="(item, idx) in overlapItems"
-          :key="idx"
-          class="d-flex align-center mb-3 pa-3 border rounded flex-wrap"
-          style="gap: 8px"
-        >
-          <div class="overlap-icon-wrapper">
-            <custom-stat-icon hide-name :name="item.customName" small/>
-          </div>
-          <span class="font-weight-bold">{{ item.customName }}</span>
-          <v-icon size="small">mdi-arrow-left-right</v-icon>
-          <div class="overlap-icon-wrapper">
-            <item-icon class="weapon-icon-overlap" :item-id="item.matchedWeaponId" />
-          </div>
-          <span class="font-weight-bold">{{ item.matchedWeaponName }}</span>
-          <v-spacer />
-          <v-chip-group v-model="item.action" mandatory>
-            <v-chip filter size="small" value="ignore" variant="outlined">本次忽略</v-chip>
-            <v-chip filter size="small" value="suppress" variant="outlined">不再提示</v-chip>
-            <v-chip color="primary" filter size="small" value="switch" variant="outlined">切换</v-chip>
-          </v-chip-group>
-        </div>
-      </v-card-text>
-      <v-card-actions>
-        <v-spacer />
-        <v-btn @click="overlapDialog = false">取消</v-btn>
-        <v-btn color="primary" @click="confirmOverlapActions">确认</v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
+  <overlap-detection-dialog />
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
-import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
+import OverlapDetectionDialog from '@/components/OverlapDetectionDialog.vue'
+import WeaponDetailDialog from '@/components/WeaponDetailDialog.vue'
+import { useCustomStats } from '@/composables/useCustomStats'
+import { useOverlapDetection } from '@/composables/useOverlapDetection'
+import { useProfiles } from '@/composables/useProfiles'
 import { useRarityFilters } from '@/composables/useRarityFilters'
+import { useToast } from '@/composables/useToast'
+import { useWeaponConnectionLines } from '@/composables/useWeaponConnectionLines'
+import { useWeaponStats } from '@/composables/useWeaponStats'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { getGemTagName } from '@/utils/gameData/weapon'
+import { findCustomStat, getGemTagName } from '@/utils/gameData/weapon'
 
-const { weaponTypes, weaponsMap } = useStaticData()
-const {
-  activeProfile,
-  treasureMatrix,
-  addTreasureMatrixEntry,
-  removeTreasureMatrixEntry,
-  updateTreasureMatrix,
-  updateWeaponPriority,
-} = useProfiles()
+const { weaponTypes, weaponsMap, matrixIcons, isLoaded: isStaticDataLoaded } = useStaticData()
+const toast = useToast()
+const { activeProfile, updateSwitchDisplayMode, updateMatrixBadgeDisplayMode } = useProfiles()
 const { selectedRarities } = useRarityFilters()
 
-// 武器详情弹窗
-const detailDialog = ref(false)
+// 使用 composables
+const {
+  matrixEntryByWeaponId,
+  ownedWeaponIds,
+  isWeaponOwned,
+  isWeaponMaxed,
+  isCustomEntry,
+  getSameStatWeapons,
+  isSwitchable,
+  isSwitchTargetMaxed,
+} = useWeaponStats()
+
+const { customStats, customMatrixEntries, fetchCustomStats, toggleWeaponOwnership } =
+  useCustomStats()
+
+const { checkCustomOverlap: checkCustomOverlapBase } = useOverlapDetection()
+
+const {
+  containerRef,
+  connectionLines,
+  hoveredWeaponId,
+  handleWeaponMouseEnter: handleWeaponMouseEnterBase,
+  handleWeaponMouseLeave,
+  setupResizeListener,
+} = useWeaponConnectionLines()
+
+// 可切换提示显示模式：'chip'=大号提示(默认), 'dot'=小橙点, 'off'=关闭
+type SwitchDisplayMode = 'chip' | 'dot' | 'off'
+const switchDisplayMode = ref<SwitchDisplayMode>(
+  (activeProfile.value.switch_display_mode ?? 'chip') as SwitchDisplayMode,
+)
+const switchModeLabels: Record<SwitchDisplayMode, string> = {
+  chip: '切换提示：标签',
+  dot: '切换提示：圆点',
+  off: '切换提示：关闭',
+}
+const switchModeIcons: Record<SwitchDisplayMode, string> = {
+  chip: 'mdi-tag-outline',
+  dot: 'mdi-circle-small',
+  off: 'mdi-eye-off-outline',
+}
+function toggleSwitchDisplayMode() {
+  const next: SwitchDisplayMode =
+    switchDisplayMode.value === 'chip' ? 'dot' : switchDisplayMode.value === 'dot' ? 'off' : 'chip'
+  const previous = switchDisplayMode.value
+  switchDisplayMode.value = next
+  updateSwitchDisplayMode(next).catch(() => {
+    // 保存失败要退回原值，否则界面显示的模式与实际持久化的不一致，
+    // 下次进入页面又会莫名其妙地变回去。
+    // toast 已由 _handleError 统一弹出，此处不再重复。
+    switchDisplayMode.value = previous
+  })
+}
+
+// 切换账号时同步显示模式
+watch(
+  () => activeProfile.value.switch_display_mode,
+  (mode) => {
+    if (mode && mode !== switchDisplayMode.value) {
+      switchDisplayMode.value = mode
+    }
+  },
+)
+
+// 基质图标显示模式：'small'=小号(默认), 'medium'=中号(2倍), 'off'=关闭
+type MatrixBadgeDisplayMode = 'small' | 'medium' | 'off'
+const matrixBadgeDisplayMode = ref<MatrixBadgeDisplayMode>(
+  (activeProfile.value.matrix_badge_display_mode ?? 'small') as MatrixBadgeDisplayMode,
+)
+const matrixBadgeModeLabels: Record<MatrixBadgeDisplayMode, string> = {
+  small: '基质图标：小号',
+  medium: '基质图标：中号',
+  off: '基质图标：关闭',
+}
+const matrixBadgeModeIcons: Record<MatrixBadgeDisplayMode, string> = {
+  small: 'mdi-circle-outline',
+  medium: 'mdi-circle-double',
+  off: 'mdi-eye-off-outline',
+}
+function toggleMatrixBadgeDisplayMode() {
+  const next: MatrixBadgeDisplayMode =
+    matrixBadgeDisplayMode.value === 'small'
+      ? 'medium'
+      : matrixBadgeDisplayMode.value === 'medium'
+        ? 'off'
+        : 'small'
+  const previous = matrixBadgeDisplayMode.value
+  matrixBadgeDisplayMode.value = next
+  updateMatrixBadgeDisplayMode(next).catch(() => {
+    // toast 已由 _handleError 统一弹出，此处不再重复。
+    matrixBadgeDisplayMode.value = previous
+  })
+}
+
+// 切换账号时同步基质图标显示模式
+watch(
+  () => activeProfile.value.matrix_badge_display_mode,
+  (mode) => {
+    if (mode && mode !== matrixBadgeDisplayMode.value) {
+      matrixBadgeDisplayMode.value = mode
+    }
+  },
+)
+
+// 底板图片路径
+const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
+
+// --- 武器卡片辅助函数 ---
+
+/** 获取武器的技能属性图标 URL */
+function getWeaponSkillIcon(weaponId: string): string | null {
+  const found = findCustomStat(weaponId, customStats.value)
+  if (found) {
+    if (!found.stat.skill) return null
+    return matrixIcons.value.skills[found.stat.skill] || null
+  }
+  const weapon = weaponsMap.value.get(weaponId)
+  if (!weapon?.skillStatId) return null
+  return matrixIcons.value.skills[weapon.skillStatId] || null
+}
+
+// 武器详情弹窗（null=关闭，string=打开编辑该武器）
 const detailWeaponId = ref<string | null>(null)
 
-// --- 武器连线系统 ---
-
-/** 容器引用 */
-const containerRef = ref<HTMLElement | null>(null)
-
-/** 当前悬停的武器 ID */
-const hoveredWeaponId = ref<string | null>(null)
-
-/** 连线数据 */
-interface ConnectionLine {
-  style: {
-    left: string
-    top: string
-    width: string
-    transform: string
-    opacity: number
-  }
-}
-
-const connectionLines = ref<ConnectionLine[]>([])
-
-/** 获取武器图标元素位置 */
-function getWeaponElementPosition(weaponId: string): { x: number; y: number } | null {
-  const container = containerRef.value
-  if (!container) return null
-
-  const element = container.querySelector(`[data-weapon-id="${weaponId}"]`)
-  if (!element) return null
-
-  const containerRect = container.getBoundingClientRect()
-  const elementRect = element.getBoundingClientRect()
-
-  return {
-    x: elementRect.left - containerRect.left + elementRect.width / 2,
-    y: elementRect.top - containerRect.top + elementRect.height / 2,
-  }
-}
-
-/** 计算两点之间的距离和角度 */
-function calculateLine(
-  startX: number,
-  startY: number,
-  endX: number,
-  endY: number,
-): { length: number; angle: number } {
-  const dx = endX - startX
-  const dy = endY - startY
-  const length = Math.hypot(dx, dy)
-  const angle = Math.atan2(dy, dx) * (180 / Math.PI)
-  return { length, angle }
-}
-
 /** 更新连线 */
-function updateConnectionLines() {
-  if (!hoveredWeaponId.value) {
-    connectionLines.value = []
-    return
-  }
-
-  const startPos = getWeaponElementPosition(hoveredWeaponId.value)
-  if (!startPos) {
-    connectionLines.value = []
-    return
-  }
-
-  const sameWeapons = getSameStatWeapons(hoveredWeaponId.value)
-  const newLines: ConnectionLine[] = []
-
-  for (const targetId of sameWeapons) {
-    const endPos = getWeaponElementPosition(targetId)
-    if (!endPos) continue
-
-    const { length, angle } = calculateLine(
-      startPos.x,
-      startPos.y,
-      endPos.x,
-      endPos.y,
-    )
-
-    newLines.push({
-      style: {
-        left: `${startPos.x}px`,
-        top: `${startPos.y}px`,
-        width: `${length}px`,
-        transform: `rotate(${angle}deg)`,
-        opacity: 1,
-      },
-    })
-  }
-
-  connectionLines.value = newLines
-}
-
 /** 鼠标进入武器 */
 function handleWeaponMouseEnter(weaponId: string) {
-  hoveredWeaponId.value = weaponId
-  updateConnectionLines()
-}
-
-/** 鼠标离开武器 */
-function handleWeaponMouseLeave() {
-  hoveredWeaponId.value = null
-  connectionLines.value = []
+  handleWeaponMouseEnterBase(weaponId, getSameStatWeapons(weaponId))
 }
 
 // 监听窗口大小变化，更新连线位置
 onMounted(() => {
-  window.addEventListener('resize', updateConnectionLines)
+  setupResizeListener(() => {
+    if (!hoveredWeaponId.value) return []
+    return getSameStatWeapons(hoveredWeaponId.value)
+  })
 })
 
-onUnmounted(() => {
-  window.removeEventListener('resize', updateConnectionLines)
-  connectionLines.value = []
-})
-
-// --- 自定义基质相关 ---
-
-/** 自定义宝藏基质属性配置列表 */
-const customStats = ref<Array<{ name: string; attribute: string | null; secondary: string | null; skill: string | null; no_prompt_switch?: boolean }>>([])
-
-// --- 自定义基质与内置武器重合检测 ---
-
-interface OverlapItem {
-  customIndex: number
-  customName: string
-  customWeaponId: string
-  matchedWeaponId: string
-  matchedWeaponName: string
-  action: 'ignore' | 'suppress' | 'switch'
-}
-
-const overlapItems = ref<OverlapItem[]>([])
-const overlapDialog = ref(false)
-
-/** 从后端获取配置中的自定义宝藏基质属性列表 */
-async function fetchCustomStats() {
-  try {
-    const res = await fetch('/api/config')
-    const config = await res.json()
-    customStats.value = config.treasure_essence_stats || []
-  } catch (error) {
-    console.error('获取自定义宝藏基质配置失败:', error)
-  }
-}
-
-/** 判断是否为自定义基质条目（weapon_id 以 custom_stat_ 开头） */
-function isCustomEntry(weaponId: string | null): boolean {
-  return weaponId?.startsWith('custom_stat_') ?? false
-}
-
-/** 自定义基质条目列表，用于武器总览展示 */
-const customMatrixEntries = computed(() => {
-  return customStats.value
-    .map((stat, index) => ({
-      syntheticId: `custom_stat_${index}`,
-      displayName: stat.name || `自定义基质 ${index + 1}`,
-      index,
-    }))
-})
-
-/** 是否显示自定义基质区段（当 6★ 筛选激活时显示） */
+/** 是否显示自定义基质区段（勾选了「自定义」筛选时显示） */
 const showCustomSection = computed(() => selectedRarities.value.includes('custom'))
 
-/** 自定义条目编辑中的名称 */
-const customEntryName = ref('')
-
-// 弹窗打开时，如果是自定义条目，加载其名称
-watch([detailDialog, detailWeaponId], () => {
-  if (detailDialog.value && isCustomEntry(detailWeaponId.value)) {
-    const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
-    customEntryName.value = customStats.value[index]?.name || ''
-  }
-})
-
-/** 保存自定义条目名称到配置和 profile */
-async function saveCustomEntryName() {
-  if (!isCustomEntry(detailWeaponId.value)) return
-  const index = Number.parseInt(detailWeaponId.value!.replace('custom_stat_', ''), 10)
-  if (customStats.value[index]) {
-    customStats.value[index].name = customEntryName.value
-    await postCustomStatsUpdate()
-    // 同步更新 profile 中的 weapon_name
-    const entry = matrixEntryByWeaponId.value.get(detailWeaponId.value!)
-    if (entry) {
-      entry.weapon_name = customEntryName.value
-      await updateTreasureMatrix([...treasureMatrix.value])
-    }
-  }
+/** 打开新建自定义基质弹窗 */
+function showNewCustomDialog() {
+  detailWeaponId.value = '__new_custom__'
 }
 
-/** 将自定义宝藏基质配置保存到后端 */
-async function postCustomStatsUpdate() {
+/** 检查自定义基质重合 */
+async function checkCustomOverlap() {
   try {
-    const res = await fetch('/api/config')
-    const currentConfig = await res.json()
-    currentConfig.treasure_essence_stats = customStats.value
-    await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(currentConfig),
-    })
+    await checkCustomOverlapBase(customStats.value, matrixEntryByWeaponId.value)
   } catch (error) {
-    console.error('保存自定义宝藏基质配置失败:', error)
+    toast.reportError('重合检测失败', error)
   }
-}
-
-/**
- * 检查自定义基质与内置武器的词条重合
- * 匹配规则：三个槽位完全相等（含 null 对 null）
- * 检查范围：所有 config 中配置的自定义基质，无论是否在 profiles 中拥有
- */
-function checkCustomOverlap() {
-  const items: OverlapItem[] = []
-  for (let i = 0; i < customStats.value.length; i++) {
-    const stat = customStats.value[i]
-    if (!stat) continue
-    // 跳过已勾选"不再提示"的
-    if (stat.no_prompt_switch) continue
-    // 跳过属性全为空的条目（已被切换清空）
-    if (!stat.attribute && !stat.secondary && !stat.skill) continue
-
-    const syntheticId = `custom_stat_${i}`
-
-    // 遍历所有内置武器，查找三词条完全匹配
-    for (const [weaponId, weapon] of weaponsMap.value.entries()) {
-      if (
-        weapon.attributeStatId === stat.attribute &&
-        weapon.secondaryStatId === stat.secondary &&
-        weapon.skillStatId === stat.skill
-      ) {
-        items.push({
-          customIndex: i,
-          customName: stat.name || `自定义基质 ${i + 1}`,
-          customWeaponId: syntheticId,
-          matchedWeaponId: weaponId,
-          matchedWeaponName: weapon.name,
-          action: 'ignore',
-        })
-      }
-    }
-  }
-  if (items.length === 0) return
-  overlapItems.value = items
-  overlapDialog.value = true
-}
-
-/** 确认重合操作 */
-async function confirmOverlapActions() {
-  // 记录需要删除的自定义基质索引
-  const indicesToDelete: number[] = []
-
-  for (const item of overlapItems.value) {
-    if (item.action === 'ignore') continue
-
-    const stat = customStats.value[item.customIndex]
-    if (!stat) continue
-
-    if (item.action === 'suppress') {
-      stat.no_prompt_switch = true
-      await postCustomStatsUpdate()
-    }
-
-    if (item.action === 'switch') {
-      // 切换 weapon_id，保留 affix 等级，优先级用武器稀有度默认值（不手动设置）
-      const entry = matrixEntryByWeaponId.value.get(item.customWeaponId)
-      if (entry) {
-        const weapon = weaponsMap.value.get(item.matchedWeaponId)
-        const newEntries = treasureMatrix.value
-          .filter((e) => e.weapon_id !== item.customWeaponId)
-          .concat({
-            weapon_id: item.matchedWeaponId,
-            weapon_name: weapon?.name || item.matchedWeaponName,
-            affix1_level: entry.affix1_level,
-            affix2_level: entry.affix2_level,
-            affix3_level: entry.affix3_level,
-            include_in_calculation: entry.include_in_calculation,
-            // priority 不设置，使用武器稀有度默认值
-          })
-        await updateTreasureMatrix(newEntries)
-      }
-      indicesToDelete.push(item.customIndex)
-    }
-  }
-
-  // 从大到小排序删除，避免索引偏移问题
-  indicesToDelete.sort((a, b) => b - a)
-  for (const index of indicesToDelete) {
-    customStats.value.splice(index, 1)
-  }
-
-  // 更新 treasure_matrix 中所有引用后续自定义基质的索引
-  if (indicesToDelete.length > 0) {
-    const updatedTreasureMatrix = treasureMatrix.value.map((e) => {
-      if (e.weapon_id.startsWith('custom_stat_')) {
-        const currentIndex = Number.parseInt(e.weapon_id.replace('custom_stat_', ''), 10)
-        // 计算删除后的新索引
-        let newIndex = currentIndex
-        for (const deletedIndex of indicesToDelete) {
-          if (currentIndex > deletedIndex) {
-            newIndex--
-          }
-        }
-        if (newIndex !== currentIndex) {
-          return { ...e, weapon_id: `custom_stat_${newIndex}` }
-        }
-      }
-      return e
-    })
-    await updateTreasureMatrix(updatedTreasureMatrix)
-    await postCustomStatsUpdate()
-  }
-
-  overlapDialog.value = false
-  await fetchCustomStats()
 }
 
 onMounted(async () => {
   await fetchCustomStats()
-  checkCustomOverlap()
+  // 重合检测要比对内置武器词条，必须等静态数据就绪，
+  // 否则 weaponsMap 为空会让检测静默地一无所获。
+  if (isStaticDataLoaded.value) {
+    void checkCustomOverlap()
+  } else {
+    const stop = watch(isStaticDataLoaded, (loaded) => {
+      if (!loaded) return
+      stop()
+      void checkCustomOverlap()
+    })
+  }
 })
-
-const matrixEntryByWeaponId = computed(
-  () => new Map(treasureMatrix.value.map((entry) => [entry.weapon_id, entry])),
-)
-
-// 武器总览会为每个图标多次判断拥有/满级状态，用 Set/Map 避免重复扫描 treasureMatrix。
-const ownedWeaponIds = computed(() => new Set(matrixEntryByWeaponId.value.keys()))
 
 const totalCount = computed(() =>
   weaponTypes.value.reduce((sum, wType) => sum + wType.weaponIds.length, 0),
@@ -702,11 +413,14 @@ const totalCount = computed(() =>
 const ownedCount = computed(() => ownedWeaponIds.value.size)
 
 // 过滤后的武器类型列表
+//
+// 每个格子要用到的派生状态在这里一次算好：模板里的函数调用不会被 Vue 缓存，
+// 同一个值在 v-if 和绑定里各调一次就会算两遍。
 const filteredWeaponTypes = computed(() => {
   return weaponTypes.value
     .map((wType) => ({
       ...wType,
-      weaponIds: wType.weaponIds
+      weapons: wType.weaponIds
         .filter((weaponId) => {
           const weapon = weaponsMap.value.get(weaponId)
           if (!weapon) return false
@@ -718,55 +432,30 @@ const filteredWeaponTypes = computed(() => {
           const wb = weaponsMap.value.get(b)
           if (wa && wb) return wb.rarity - wa.rarity
           return 0
+        })
+        .map((weaponId) => {
+          const maxed = isWeaponMaxed(weaponId)
+          const switchable = isSwitchable(weaponId)
+          return {
+            id: weaponId,
+            owned: isWeaponOwned(weaponId),
+            maxed,
+            switchable,
+            switchTargetMaxed: switchable && isSwitchTargetMaxed(weaponId) && !maxed,
+            showSwitchHint: switchable && !maxed,
+            skillIcon: getWeaponSkillIcon(weaponId),
+            statsText: getWeaponStatsText(weaponId),
+          }
         }),
     }))
-    .filter((wType) => wType.weaponIds.length > 0)
+    .filter((wType) => wType.weapons.length > 0)
 })
-
-function isWeaponOwned(weaponId: string): boolean {
-  return ownedWeaponIds.value.has(weaponId)
-}
-
-function isWeaponMaxed(weaponId: string): boolean {
-  const entry = matrixEntryByWeaponId.value.get(weaponId)
-  return (
-    entry !== undefined &&
-    entry.affix1_level === 6 &&
-    entry.affix2_level === 6 &&
-    entry.affix3_level === 3
-  )
-}
-
-async function toggleWeaponOwnership(weaponId: string) {
-  if (isWeaponOwned(weaponId)) {
-    await removeTreasureMatrixEntry(weaponId)
-  } else {
-    // 自定义条目使用配置中的名称，普通武器使用 weaponsMap 中的名称
-    let weaponName: string
-    if (isCustomEntry(weaponId)) {
-      const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
-      weaponName = customStats.value[index]?.name || `自定义基质 ${index + 1}`
-    } else {
-      const weapon = weaponsMap.value.get(weaponId)
-      weaponName = weapon?.name || weaponId
-    }
-    await addTreasureMatrixEntry({
-      weapon_id: weaponId,
-      weapon_name: weaponName,
-      affix1_level: 1,
-      affix2_level: 1,
-      affix3_level: 1,
-      include_in_calculation: true,
-    })
-  }
-}
 
 /**
  * 显示武器详情弹窗（左键点击）
  */
 function showWeaponDetail(weaponId: string) {
   detailWeaponId.value = weaponId
-  detailDialog.value = true
 }
 
 /**
@@ -775,16 +464,16 @@ function showWeaponDetail(weaponId: string) {
  */
 function getWeaponStatsText(weaponId: string): string {
   // 自定义条目：从配置中读取属性
-  if (isCustomEntry(weaponId)) {
-    const index = Number.parseInt(weaponId.replace('custom_stat_', ''), 10)
-    const stat = customStats.value[index]
-    if (!stat) return '自定义基质'
+  const found = findCustomStat(weaponId, customStats.value)
+  if (found) {
+    const { stat } = found
     const parts: string[] = []
     if (stat.attribute) parts.push(getGemTagName(stat.attribute))
     if (stat.secondary) parts.push(getGemTagName(stat.secondary))
     if (stat.skill) parts.push(getGemTagName(stat.skill))
     return parts.join('、') || '自定义基质'
   }
+  if (isCustomEntry(weaponId)) return '自定义基质'
 
   const weapon = weaponsMap.value.get(weaponId)
   if (!weapon) return '未知武器'
@@ -801,177 +490,6 @@ function getWeaponStatsText(weaponId: string): string {
   }
 
   return parts.join('、') || '无属性'
-}
-
-/**
- * 获取同类武器（相同属性组合）
- * 自定义条目没有真实武器数据，返回空数组
- */
-function getSameStatWeapons(weaponId: string): string[] {
-  if (isCustomEntry(weaponId)) return []
-  const weapon = weaponsMap.value.get(weaponId)
-  if (!weapon) return []
-  const sameWeapons: string[] = []
-  for (const [id, w] of weaponsMap.value.entries()) {
-    if (
-      id !== weaponId &&
-      w.attributeStatId === weapon.attributeStatId &&
-      w.secondaryStatId === weapon.secondaryStatId &&
-      w.skillStatId === weapon.skillStatId
-    ) {
-      sameWeapons.push(id)
-    }
-  }
-  return sameWeapons
-}
-
-/**
- * 判断武器是否"可切换"：存在同属性、更高优先级、且已拥有的武器
- */
-function isSwitchable(weaponId: string): boolean {
-  const myPriority = getWeaponPriority(weaponId)
-  const sameWeapons = getSameStatWeapons(weaponId)
-  return sameWeapons.some(
-    (id) => isWeaponOwned(id) && getWeaponPriority(id) >= myPriority,
-  )
-}
-
-/**
- * 获取可切换的目标武器是否满级（用于灰色呼吸动画）
- */
-function isSwitchTargetMaxed(weaponId: string): boolean {
-  const myPriority = getWeaponPriority(weaponId)
-  const sameWeapons = getSameStatWeapons(weaponId)
-  return sameWeapons.some(
-    (id) =>
-      isWeaponOwned(id)
-      && getWeaponPriority(id) >= myPriority
-      && isWeaponMaxed(id),
-  )
-}
-
-/**
- * 获取武器的基质等级文本
- */
-function getMatrixLevelText(weaponId: string): string {
-  const entry = matrixEntryByWeaponId.value.get(weaponId)
-  if (!entry) return '未配置'
-  return `+${entry.affix1_level} / +${entry.affix2_level} / +${entry.affix3_level}`
-}
-
-/**
- * 获取用户手动设置的优先级（0 表示未设置）
- */
-function getUserPriority(weaponId: string): number {
-  const profilePriority = activeProfile.value.weapon_priorities?.[weaponId]
-  if (profilePriority && profilePriority > 0) return profilePriority
-  const entry = matrixEntryByWeaponId.value.get(weaponId)
-  return entry?.priority || 0
-}
-
-/**
- * 获取武器的有效优先级（未设置时使用稀有度）
- * 自定义条目默认优先级为 6（等同于 6★）
- */
-function getWeaponPriority(weaponId: string): number {
-  const userP = getUserPriority(weaponId)
-  if (userP > 0) return userP
-  // 自定义条目默认优先级为 6
-  if (isCustomEntry(weaponId)) return 6
-  const weapon = weaponsMap.value.get(weaponId)
-  return weapon ? weapon.rarity : 0
-}
-
-function getEffectivePriorityForSwap(weaponId: string, entry?: TreasureMatrixEntry): number {
-  const userPriority = getUserPriority(weaponId) || entry?.priority || 0
-  if (userPriority > 0) return userPriority
-  const weapon = weaponsMap.value.get(weaponId)
-  return weapon ? weapon.rarity : 0
-}
-
-/**
- * 设置武器优先级
- */
-async function setWeaponPriority(weaponId: string, priority: number) {
-  const entry = matrixEntryByWeaponId.value.get(weaponId)
-  if (entry) {
-    entry.priority = priority
-  }
-  await updateWeaponPriority(weaponId, priority)
-}
-
-/**
- * 交换两把武器的基质数据
- */
-async function swapMatrix(weaponAId: string, weaponBId: string) {
-  const entries = treasureMatrix.value.map((entry) => ({ ...entry }))
-  const entryA = entries.find((e) => e.weapon_id === weaponAId)
-  const entryB = entries.find((e) => e.weapon_id === weaponBId)
-
-  const weaponA = weaponsMap.value.get(weaponAId)
-  const weaponB = weaponsMap.value.get(weaponBId)
-
-  const hasA = !!entryA
-  const hasB = !!entryB
-
-  if (!hasA && !hasB) return
-
-  const priorityA = getEffectivePriorityForSwap(weaponAId, entryA)
-  const priorityB = getEffectivePriorityForSwap(weaponBId, entryB)
-
-  if (hasA && !hasB) {
-    // A有基质、B无基质 → A移除、B添加A的数据
-    const nextEntries = entries
-      .filter((entry) => entry.weapon_id !== weaponAId)
-      .concat({
-        ...entryA!,
-        weapon_id: weaponBId,
-        weapon_name: weaponB?.name || weaponBId,
-        priority: priorityA,
-      })
-    await updateTreasureMatrix(nextEntries)
-    await updateWeaponPriority(weaponAId, priorityB)
-    await updateWeaponPriority(weaponBId, priorityA)
-  } else if (!hasA && hasB) {
-    // A无基质、B有基质 → A添加B的数据、B移除
-    const nextEntries = entries
-      .filter((entry) => entry.weapon_id !== weaponBId)
-      .concat({
-        ...entryB!,
-        weapon_id: weaponAId,
-        weapon_name: weaponA?.name || weaponAId,
-        priority: priorityB,
-      })
-    await updateTreasureMatrix(nextEntries)
-    await updateWeaponPriority(weaponAId, priorityB)
-    await updateWeaponPriority(weaponBId, priorityA)
-  } else {
-    // 两者都有基质，交换等级、计算开关和有效优先级
-    const matrixA = {
-      affix1: entryA!.affix1_level,
-      affix2: entryA!.affix2_level,
-      affix3: entryA!.affix3_level,
-      includeInCalculation: entryA!.include_in_calculation,
-    }
-    entryA!.affix1_level = entryB!.affix1_level
-    entryA!.affix2_level = entryB!.affix2_level
-    entryA!.affix3_level = entryB!.affix3_level
-    entryA!.include_in_calculation = entryB!.include_in_calculation
-    entryA!.priority = priorityB
-
-    entryB!.affix1_level = matrixA.affix1
-    entryB!.affix2_level = matrixA.affix2
-    entryB!.affix3_level = matrixA.affix3
-    entryB!.include_in_calculation = matrixA.includeInCalculation
-    entryB!.priority = priorityA
-
-    await updateTreasureMatrix(entries)
-    await updateWeaponPriority(weaponAId, priorityB)
-    await updateWeaponPriority(weaponBId, priorityA)
-  }
-
-  // 关闭弹窗
-  detailDialog.value = false
 }
 </script>
 
@@ -1002,8 +520,6 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   height: 2px;
   background-color: rgb(24, 103, 192);
   transform-origin: 0 50%;
-  opacity: 0;
-  transition: opacity 0.2s ease;
 
   &::before {
     content: '';
@@ -1016,16 +532,43 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
     border-radius: 50%;
     box-shadow: 0 0 8px rgb(24, 103, 192);
   }
+}
 
-  &[style*="opacity: 1"] {
-    opacity: 1;
-  }
+// 淡入淡出交给 transition-group：此前靠 [style*="opacity: 1"] 匹配内联样式，
+// 而元素一创建 opacity 就是 1，那套写法实际上从未产生过淡入效果。
+.connection-line-enter-active,
+.connection-line-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.connection-line-enter-from,
+.connection-line-leave-to {
+  opacity: 0;
 }
 
 .weapon-overview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr));
   gap: 0.5rem;
+}
+
+.weapon-add-button {
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  border: 2px dashed rgba(var(--v-theme-on-surface), 0.25);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+
+  &:hover {
+    border-color: rgba(var(--v-theme-primary), 0.6);
+    background: rgba(var(--v-theme-primary), 0.05);
+  }
 }
 
 .weapon-overview-item {
@@ -1048,6 +591,7 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
     opacity 0.15s,
     filter 0.15s;
   border-radius: 6px;
+  overflow: hidden;
 
   // 未拥有：灰色滤镜必须作用于上级容器，标记作为兄弟节点避免被叠加影响
   &.weapon-not-owned {
@@ -1066,34 +610,81 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   }
 }
 
-.weapon-icon-detail {
-  width: 3rem !important;
-  height: 3rem !important;
+// 左上角缩小版圆形基质图标（底板+技能叠加）
+.weapon-matrix-badge {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  overflow: hidden;
+  z-index: 5;
+  pointer-events: none;
+  border: 1.5px solid rgba(255, 255, 255, 0);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+
+  // 中号模式：2倍大小
+  &--medium {
+    width: 2.4rem;
+    height: 2.4rem;
+    top: -5.3px;
+    left: -5.3px;
+    z-index: 5;
+  }
 }
 
-.weapon-icon-same {
-  width: 2rem !important;
-  height: 2rem !important;
-  flex-shrink: 0;
+.weapon-matrix-badge-bg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
 }
 
-.weapon-icon-overlap {
-  width: 2rem !important;
-  height: 2rem !important;
-  flex-shrink: 0;
+.weapon-matrix-badge-skill {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+  transform: translate(5%, -5%);
 }
 
-.overlap-icon-wrapper {
-  width: 2rem;
-  height: 2rem;
-  flex-shrink: 0;
+// 可切换小橙点（通知 badge 样式）
+.switch-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ff7100;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow: 0 0 4px rgba(255, 113, 0, 0.6);
 }
 
 .rainbow-border {
   position: absolute;
   inset: -3px;
   border-radius: 8px;
-  background: linear-gradient(45deg, #FFF, #ff4ada, #ff4e4e, #ff9832, #ff0, #0f0, #00ffff, #79a0fd, #d46eff, #ff8df0, #FFF);
+  background: linear-gradient(
+    45deg,
+    #fff,
+    #ff4ada,
+    #ff4e4e,
+    #ff9832,
+    #ff0,
+    #0f0,
+    #00ffff,
+    #79a0fd,
+    #d46eff,
+    #ff8df0,
+    #fff
+  );
   background-size: 400% 400%;
   animation: rainbow-rotate 3s linear infinite;
   z-index: -1;
@@ -1142,7 +733,7 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   top: -6px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 3;
+  z-index: 6;
   pointer-events: none;
   font-size: 0.55rem !important;
   height: 14px !important;

@@ -6,23 +6,42 @@ WeaponBasicTable.json, ItemTable.json) and transforms them into
 a new schema suitable for the app.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
-import os
-from typing import Any, Literal, TypedDict
+from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from typing import Any, Literal
+
+    from .models import (
+        GemTable,
+        GemTagIdTable,
+        I18nTextTable,
+        ItemTable,
+        LevelLoadingTable,
+        RarityColorTable,
+        SkillPatchTable,
+        TranslationKey,
+        WeaponBasicTable,
+        WikiEntryDataTable,
+        WikiEntryTable,
+        WikiGroupTable,
+        WorldEnergyPointGroupTable,
+        WorldEnergyPointTable,
+    )
 
 
-class TranslationKey(TypedDict):
-    id: str | int
-    text: str
-
-
-def get_cn_text(data: TranslationKey, i18n_table: dict[str, str]) -> str:
-    """获取中文翻译，如果没有则返回默认文本"""
-    text_id = str(data.get("id", ""))
-    if text_id in i18n_table:
-        return i18n_table[text_id]
-    return data.get("text", "")
+def get_translation(
+    text_data: TranslationKey, language: str, i18n_text_tables: dict[str, I18nTextTable]
+) -> str:
+    """
+    获取指定语言的翻译文本
+    """
+    str_text_id = str(text_data["id"])
+    return i18n_text_tables[language][str_text_id]
 
 
 type WeaponTypeEnum = Literal[
@@ -34,47 +53,84 @@ type WeaponTypeEnum = Literal[
 ]
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Transform raw game data to a new schema."
-    )
+class EnergyAlluvium(TypedDict):
+    battleId: str
+    battleName: str
+    imageUrl: str
+    secondaryStats: list[str]
+    skillStats: list[str]
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+
     parser.add_argument(
         "input_dir",
-        type=str,
+        type=Path,
         help="Path to input TableCfg directory (containing json files).",
     )
-    parser.add_argument("output_dir", type=str, help="Path to output directory.")
+    parser.add_argument(
+        "output_dir",
+        nargs="?",
+        default=Path("resources/data/v2"),
+        type=Path,
+        help="Path to output directory.",
+    )
     parser.add_argument(
         "--dry-run", action="store_true", help="Do not write files, only print stats."
     )
     parser.add_argument("--debug", action="store_true", help="Print debug information.")
+
+    return parser
+
+
+def main():
+    parser = build_argument_parser()
     args = parser.parse_args()
 
-    input_dir = args.input_dir
-    output_dir = args.output_dir
+    input_dir: Path = args.input_dir
+    output_dir: Path = args.output_dir
 
-    def load_table(name: str) -> Any:
-        path = os.path.join(input_dir, f"{name}.json")
-        if not os.path.exists(path):
-            # Try without .json if input_dir might be pointing to a different structure
-            path = os.path.join(input_dir, name)
+    def load_table_cfg(name: str) -> Any:
+        path = input_dir / f"{name}.json"
         with open(path, encoding="utf-8") as f:
             return json.load(f)
 
+    def save_json(name: str, obj: Any):
+        path = output_dir / f"{name}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2, sort_keys=True)
+        print(f"Saved {path.resolve()}")
+
     print(f"Loading tables from {input_dir}...")
-    weapon_basic_table = load_table("WeaponBasicTable")
-    item_table = load_table("ItemTable")
-    stat_table = load_table("GemTable")
-    stat_tag_id_table = load_table("GemTagIdTable")
-    skill_patch_table = load_table("SkillPatchTable")
-    wiki_group_table = load_table("WikiGroupTable")
-    wiki_entry_table = load_table("WikiEntryTable")
-    wiki_entry_data_table = load_table("WikiEntryDataTable")
-    i18n_table_cn = load_table("I18nTextTable_CN")
 
-    rarity_color_table = load_table("RarityColorTable")
+    gem_table: GemTable = load_table_cfg("GemTable")
+    gem_tag_id_table: GemTagIdTable = load_table_cfg("GemTagIdTable")
+    item_table: ItemTable = load_table_cfg("ItemTable")
+    level_loading_table: LevelLoadingTable = load_table_cfg("LevelLoadingTable")
+    rarity_color_table: RarityColorTable = load_table_cfg("RarityColorTable")
+    skill_patch_table: SkillPatchTable = load_table_cfg("SkillPatchTable")
+    weapon_basic_table: WeaponBasicTable = load_table_cfg("WeaponBasicTable")
+    wiki_entry_data_table: WikiEntryDataTable = load_table_cfg("WikiEntryDataTable")
+    wiki_entry_table: WikiEntryTable = load_table_cfg("WikiEntryTable")
+    wiki_group_table: WikiGroupTable = load_table_cfg("WikiGroupTable")
+    world_energy_point_group_table: WorldEnergyPointGroupTable = load_table_cfg(
+        "WorldEnergyPointGroupTable"
+    )
+    world_energy_point_table: WorldEnergyPointTable = load_table_cfg(
+        "WorldEnergyPointTable"
+    )
 
-    # 1. Transform WeaponType
+    i18n_text_table_cn: I18nTextTable = load_table_cfg("I18nTextTable_CN")
+    i18n_text_tables: dict[str, I18nTextTable] = {"CN": i18n_text_table_cn}
+
+    def get_cn_text(text_data: TranslationKey) -> str:
+        """
+        获取中文翻译文本
+        """
+        return get_translation(text_data, "CN", i18n_text_tables)
+
+    # Transform WeaponType
     print("Transforming WeaponType...")
     weapon_types = {}
     item_to_weapon_type_id = {}
@@ -108,7 +164,7 @@ def main():
         wiki_group_id = group.get("groupId")
         # use a enum for weapon type id, which is more stable
         weapon_type_id, sort_order = get_weapon_type_enum(wiki_group_id)
-        name = get_cn_text(group.get("groupName", {}), i18n_table_cn)
+        name = get_cn_text(group.get("groupName", {}))
 
         weapon_types[weapon_type_id] = {
             "weapon_type_id": weapon_type_id,
@@ -126,13 +182,13 @@ def main():
                 if entry_data and "refItemId" in entry_data:
                     item_to_weapon_type_id[entry_data["refItemId"]] = weapon_type_id
 
-    # 2. Transform EssenceStat
+    # Transform EssenceStat
     print("Transforming EssenceStat...")
     essence_stats = {}
     term_type_map = {0: "ATTRIBUTE", 1: "SECONDARY", 2: "SKILL"}
 
-    for stat_term_id, stat_data in stat_table.items():
-        name = get_cn_text(stat_data.get("tagName", {}), i18n_table_cn)
+    for stat_term_id, stat_data in gem_table.items():
+        name = get_cn_text(stat_data.get("tagName", {}))
         stat_type = term_type_map.get(stat_data.get("termType"), "UNKNOWN")
 
         essence_stats[stat_term_id] = {
@@ -195,7 +251,7 @@ def main():
                 f"    Warning: Raw Type {raw_type} maps to multiple Wiki Weapon Types: {wiki_types}"
             )
 
-    # 3. Transform Weapon
+    # Transform Weapon
     print("Transforming Weapon...")
     weapons = {}
     for weapon_id, basic_data in weapon_basic_table.items():
@@ -203,15 +259,19 @@ def main():
         if not item_data:
             continue
 
-        name = get_cn_text(item_data.get("name", {}), i18n_table_cn)
+        name = get_cn_text(item_data.get("name", {}))
         raw_type = basic_data.get("weaponType", -1)
         weapon_type_id = item_to_weapon_type_id.get(weapon_id, -2)
 
-        rarity = item_data.get("rarity", 0)
+        rarity_str = item_data.get("rarity", 0)
 
         # Resolve skills
         skill_ids = basic_data.get("weaponSkillList", [])
-        resolved_skills = {"stat1_id": None, "stat2_id": None, "stat3_id": None}
+        resolved_skills: dict[str, str | None] = {
+            "stat1_id": None,
+            "stat2_id": None,
+            "stat3_id": None,
+        }
 
         for skill_id in skill_ids:
             patch_bundle = skill_patch_table.get(skill_id, {}).get(
@@ -225,11 +285,11 @@ def main():
             if not tag_id:
                 continue
 
-            stat_term_id = stat_tag_id_table.get(tag_id)
+            stat_term_id = gem_tag_id_table.get(tag_id)
             if not stat_term_id:
                 continue
 
-            stat_data = stat_table.get(stat_term_id)
+            stat_data = gem_table.get(stat_term_id)
             if not stat_data:
                 continue
 
@@ -246,41 +306,56 @@ def main():
             "name": name,
             # "type": raw_type, # we don't need this raw type
             "weapon_type": weapon_type_id,
-            "rarity": rarity,
+            "rarity": rarity_str,
             "icon_id": item_data.get("iconId"),
             **resolved_skills,
         }
 
-    # transform rarity colors
-    print("Transforming Rarity Colors...")
-    # preserve the original mapping structure:
-    # "1": {"color": "FFFFFF", "rarity": 1}, ...
-    rarity_colors = {}
-    for rarity, raw_data in rarity_color_table.items():
-        try:
-            r_int = int(rarity)
-            r_color = raw_data.get("color", None)
-            if r_color is None:
-                print(f"  Warning: Rarity {rarity} has no color defined.")
-                continue
-            rarity_colors[r_int] = {
-                "rarity": r_int,
-                "color": f"#{r_color}",
-            }
-        except ValueError:
-            print(f"  Warning: Rarity {rarity} is not a valid integer.")
-            continue
-    # print summary of rarity colors
-    print("Rarity Colors:")
-    for rarity, color_info in rarity_colors.items():
-        print(f"  Rarity {rarity}: Color {color_info['color']}")
+    # Transfrom energy alluviums
+    energy_alluviums: dict[str, EnergyAlluvium] = {}
+    for group_id, group in world_energy_point_group_table.items():
+        world_level_map = group["worldLevel2GameMechanicsIdMap"]
 
-    # 4. Output
+        # 取最高世界等级对应的 mechanicsId，其 gameName 即为 “重度能量淤积点·xxx”
+        max_world_level = max(map(int, world_level_map.keys()))
+        last_mechanics_id = world_level_map[str(max_world_level)]
+        energy_point = world_energy_point_table[last_mechanics_id]
+
+        secondary_stats = group["secAttrTermIds"]
+        skill_stats = group["skillTermIds"]
+
+        # 通过 levelId 从 LevelLoadingTable 获取背景图文件名
+        level_id = energy_point["levelId"]
+        loading_entry = level_loading_table[level_id]
+        bg_name = loading_entry["bgNameGroup"][0]
+        image_url = f"https://cos.yituliu.cn/endfield/endfielddata/assets/beyond/dynamicassets/gameplay/ui/sprites/loading/{bg_name}.webp"
+
+        energy_alluviums[group_id] = {
+            "battleId": group_id,
+            "battleName": get_cn_text(energy_point["gameName"]),
+            "imageUrl": image_url,
+            "secondaryStats": secondary_stats,
+            "skillStats": skill_stats,
+        }
+
+    # Transform rarity colors
+    print("Transforming Rarity Colors...")
+    rarity_colors = {}
+    for rarity_str, rarity_color_data in rarity_color_table.items():
+        rarity = rarity_color_data["rarity"]
+        color_without_hash = rarity_color_data["color"]
+        rarity_colors[rarity_str] = {
+            "rarity": rarity,
+            "color": f"#{color_without_hash}",  # prepend `#` to color code
+        }
+
+    # Output
     print("\nResults Summary:")
-    print(f"  WeaponTypes: {len(weapon_types)}")
-    print(f"  EssenceStats: {len(essence_stats)}")
-    print(f"  Weapons:     {len(weapons)}")
-    print(f"  RarityColors: {len(rarity_colors)}")
+    print(f"  WeaponTypes:     {len(weapon_types)}")
+    print(f"  EssenceStats:    {len(essence_stats)}")
+    print(f"  Weapons:         {len(weapons)}")
+    print(f"  EnergyAlluviums: {len(energy_alluviums)}")
+    print(f"  RarityColors:    {len(rarity_colors)}")
 
     if args.debug:
         import pprint
@@ -291,25 +366,21 @@ def main():
         pprint.pprint(essence_stats)
         print("\nWeapons:")
         pprint.pprint(weapons)
+        print("\nEnergyAlluviums:")
+        pprint.pprint(energy_alluviums)
         print("\nRarityColors:")
         pprint.pprint(rarity_colors)
 
     if args.dry_run:
         print("\nDry run active. No files written.")
-        print("Would write to directory:", os.path.abspath(output_dir))
+        print("Would write to directory:", output_dir.resolve())
     else:
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        def save_json(name: str, data: dict):
-            path = os.path.join(output_dir, f"{name}.json")
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
-            print(f"Saved {path}")
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         save_json("WeaponType", weapon_types)
         save_json("EssenceStat", essence_stats)
         save_json("Weapon", weapons)
+        save_json("EnergyAlluviums", energy_alluviums)
         save_json("RarityColor", rarity_colors)
 
 

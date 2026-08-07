@@ -111,3 +111,45 @@ class StatListResponse(BaseModel):
 
 class RarityColorResponse(BaseModel):
     colors: dict[int, str] = Field(description="稀有度到颜色代码的映射")
+
+
+class MatrixIconResponse(BaseModel):
+    essence_bg: str = Field(description="基质底板图片的URL")
+    skills: dict[str, str] = Field(description="技能属性ID到图标URL的映射")
+
+    model_config = ConfigDict(
+        alias_generator=AliasGenerator(
+            validation_alias=to_camel,
+            serialization_alias=to_camel,
+        ),
+        populate_by_name=True,
+    )
+
+
+class EnergyAlluviumInfo(BaseModel):
+    battle_id: str = Field(description="战斗的唯一标识符")
+    battle_name: str = Field(description="战斗的中文显示名称")
+    image_url: str | None = Field(default=None, description="背景图片的 URL")
+    secondary_stats: list[StatId] = Field(description="可刷出的次属性词条 ID 列表")
+    skill_stats: list[StatId] = Field(description="可刷出的技能词条 ID 列表")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=AliasGenerator(
+            validation_alias=to_camel,
+            serialization_alias=to_camel,
+        ),
+        populate_by_name=True,
+    )
+
+
+class EnergyAlluviumListResponse(BaseModel):
+    items: list[EnergyAlluviumInfo] = Field(description="能量淤积点列表")
+
+    model_config = ConfigDict(
+        alias_generator=AliasGenerator(
+            validation_alias=to_camel,
+            serialization_alias=to_camel,
+        ),
+        populate_by_name=True,
+    )

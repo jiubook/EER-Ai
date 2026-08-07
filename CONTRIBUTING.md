@@ -274,7 +274,18 @@ npm run lint
 
 # 自动修复
 npm run lint:fix
+
+# 检查代码格式
+npm run format:check
 ```
+
+6. **运行测试**
+
+```bash
+npm run test
+```
+
+前端单元测试使用 [Vitest](https://vitest.dev/)，测试文件位于 `frontend/src/**/__tests__/` 目录（目前覆盖 `useProfiles` 等组合式函数）。新增或修改前端状态逻辑时请同步补充对应测试。
 
 ### 完整开发流程
 
@@ -353,14 +364,14 @@ uv run python scripts/generate_manifest.py --dist-dir dist/endfield-essence-reco
 如有需要，按以下顺序更新游戏数据文件：
 
 1. **更新模板匹配模板** — 如有新版本游戏界面变更，需要更新模板匹配所用的截图模板。
+
 2. **更新武器 / 基质数据** — 使用数据转换脚本更新游戏数据：
    ```bash
-   uv run .\scripts\transform_weapon_data.py ...\TableCfg .\resources\data\v2
+   uv run .\scripts\transform_weapon_data.py ...\TableCfg
    ```
    该脚本会读取原始游戏数据，生成 JSON 文件。
+
 3. **更新武器图片**
-4. **更新能量淤积点数据** — 更新前端静态 JSON 文件 `frontend/src/assets/json/energyAlluviums.json`。
-5. **更新能量淤积点i18n数据** — 更新前端静态 JSON 文件 `frontend/src/assets/json/zh-CN-weapons.json`。
 
 ### 2. 更新版本号并提交
 

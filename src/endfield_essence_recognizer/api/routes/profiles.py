@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
@@ -18,6 +18,8 @@ from endfield_essence_recognizer.core.farming_calculator import (
 )
 from endfield_essence_recognizer.dependencies import get_static_game_data
 from endfield_essence_recognizer.schemas.profile import (
+    CUSTOM_ID_PREFIX,
+    LEGACY_CUSTOM_ID_PREFIX,
     ProfileCollection,
     ProfileData,
     TreasureMatrixEntry,
@@ -44,6 +46,13 @@ def set_profile_manager(manager: ProfileManager) -> None:
     """设置全局账号管理器实例。"""
     global _profile_manager
     _profile_manager = manager
+
+
+def _is_custom_stat_id(weapon_id: str) -> bool:
+    """判断 weapon_id 是否指向自定义基质（兼容迁移前的旧格式）。"""
+    return weapon_id.startswith(CUSTOM_ID_PREFIX) or weapon_id.startswith(
+        LEGACY_CUSTOM_ID_PREFIX
+    )
 
 
 # --- 账号 CRUD ---
@@ -117,6 +126,27 @@ async def delete_profile(
     try:
         manager.delete_profile(request.name)
         return {"status": "ok"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class ClearProfileDataRequest(BaseModel):
+    """清空账号数据请求体。"""
+
+    name: str | None = None
+
+
+@router.post("/clear_data")
+async def clear_profile_data(
+    request: ClearProfileDataRequest | None = None,
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> ProfileData:
+    """清空账号的宝藏基质数据（不删除账号）。
+
+    name 为空时清空当前激活账号的数据。
+    """
+    try:
+        return manager.clear_profile_data(request.name if request else None)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -253,7 +283,7 @@ async def get_batch_farming_recommendations(
         weapon = static_data.get_weapon(item.weapon_id)
         if weapon:
             weapon_name = weapon.name
-        elif item.weapon_id.startswith("custom_stat_"):
+        elif _is_custom_stat_id(item.weapon_id):
             weapon_name = item.weapon_id
         else:
             results.append(
@@ -288,6 +318,95 @@ async def get_batch_farming_recommendations(
     return results
 
 
+# --- 等级比较 ---
+
+
+class CompareLevelsItem(BaseModel):
+    """单组等级比较请求。"""
+
+    current_levels: tuple[int, int, int] = Field(
+        description="当前基质的三个词条等级",
+    )
+    existing_levels: tuple[int, int, int] = Field(
+        description="已保存基质的三个词条等级",
+    )
+    stat_types: list[str | None] = Field(
+        default=["ATTRIBUTE", "SECONDARY", "SKILL"],
+        min_length=3,
+        max_length=3,
+        description="各槽位的词条类型（ATTRIBUTE/SECONDARY/SKILL/null）",
+    )
+
+    @field_validator("stat_types")
+    @classmethod
+    def validate_stat_types(cls, value: list[str | None]) -> list[str | None]:
+        """校验词条类型是否合法。"""
+        valid_types = {"ATTRIBUTE", "SECONDARY", "SKILL", None}
+        for i, stat_type in enumerate(value):
+            if stat_type not in valid_types:
+                raise ValueError(
+                    f"未知词条类型: {stat_type}，槽位 {i} 可选: {[t for t in valid_types if t is not None]} 或 null"
+                )
+        return value
+
+
+class CompareLevelsRequest(BaseModel):
+    """批量等级比较请求体。"""
+
+    items: list[CompareLevelsItem] = Field(max_length=100)
+    mode: str = Field(
+        default="sequential",
+        description="比较模式：sequential/sum/grease/weighted_sum",
+    )
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        """校验比较模式是否合法。"""
+        from endfield_essence_recognizer.schemas.user_setting import KeepBestMode
+
+        try:
+            KeepBestMode(value)
+        except ValueError as err:
+            raise ValueError(
+                f"未知比较模式: {value}，可选: {[m.value for m in KeepBestMode]}"
+            ) from err
+        return value
+
+
+class CompareLevelsResponse(BaseModel):
+    """批量等级比较响应。"""
+
+    results: list[int] = Field(
+        description="每组的比较结果：1（当前更优）/ 0（相等）/ -1（当前更差）",
+    )
+
+
+@router.post("/compare_levels")
+async def post_compare_levels(request: CompareLevelsRequest) -> CompareLevelsResponse:
+    """批量比较等级，返回每组的比较结果。"""
+    from endfield_essence_recognizer.core.scanner.evaluate import compare_levels
+    from endfield_essence_recognizer.game_data.models.v2 import StatType
+    from endfield_essence_recognizer.schemas.user_setting import KeepBestMode
+
+    mode = KeepBestMode(request.mode)
+    stat_type_map = {
+        "ATTRIBUTE": StatType.ATTRIBUTE,
+        "SECONDARY": StatType.SECONDARY,
+        "SKILL": StatType.SKILL,
+    }
+    results: list[int] = []
+    for item in request.items:
+        parsed_types: list[StatType | None] = [
+            stat_type_map.get(t) if t else None for t in item.stat_types
+        ]
+        result = compare_levels(
+            item.current_levels, item.existing_levels, mode, parsed_types
+        )
+        results.append(result)
+    return CompareLevelsResponse(results=results)
+
+
 # --- 武器总览过滤器 ---
 
 
@@ -318,6 +437,60 @@ async def update_weapon_overview_filters(
 ) -> ProfileData:
     """更新当前激活账号的武器总览过滤器配置。"""
     return manager.update_weapon_overview_filters(request.filters)
+
+
+VALID_SWITCH_MODES: Final = {"chip", "dot", "off"}
+
+
+class UpdateSwitchDisplayModeRequest(BaseModel):
+    """更新"可切换"提示显示模式的请求体。"""
+
+    mode: str
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        if value not in VALID_SWITCH_MODES:
+            raise ValueError(
+                f"未知显示模式: {value}，可选: {sorted(VALID_SWITCH_MODES)}"
+            )
+        return value
+
+
+@router.post("/switch_display_mode")
+async def update_switch_display_mode(
+    request: UpdateSwitchDisplayModeRequest,
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> ProfileData:
+    """更新当前激活账号的"可切换"提示显示模式。"""
+    return manager.update_switch_display_mode(request.mode)
+
+
+VALID_MATRIX_BADGE_MODES: Final = {"small", "medium", "off"}
+
+
+class UpdateMatrixBadgeDisplayModeRequest(BaseModel):
+    """更新基质图标显示模式的请求体。"""
+
+    mode: str
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, value: str) -> str:
+        if value not in VALID_MATRIX_BADGE_MODES:
+            raise ValueError(
+                f"未知显示模式: {value}，可选: {sorted(VALID_MATRIX_BADGE_MODES)}"
+            )
+        return value
+
+
+@router.post("/matrix_badge_display_mode")
+async def update_matrix_badge_display_mode(
+    request: UpdateMatrixBadgeDisplayModeRequest,
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> ProfileData:
+    """更新当前激活账号的基质图标显示模式。"""
+    return manager.update_matrix_badge_display_mode(request.mode)
 
 
 class UpdateWeaponPriorityRequest(BaseModel):

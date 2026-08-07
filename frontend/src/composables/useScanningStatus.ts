@@ -41,7 +41,7 @@ function stopStatusPolling() {
 export function useScanningStatus(enabled?: boolean) {
   // 从 localStorage 读取 默认禁用
   const storedEnabled = localStorage.getItem('scanningStatusPollingEnabled')
-  pollingEnabled = enabled ?? (storedEnabled === 'true')
+  pollingEnabled = enabled ?? storedEnabled === 'true'
 
   if (pollingEnabled) {
     startStatusPolling()

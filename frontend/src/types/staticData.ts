@@ -39,10 +39,29 @@ export interface RarityColorResponse {
   colors: Record<number, string>
 }
 
+export interface MatrixIconResponse {
+  essenceBg: string
+  skills: Record<string, string>
+}
+
+export interface EnergyAlluviumInfo {
+  battleId: string
+  battleName: string
+  imageUrl?: string
+  secondaryStats: string[]
+  skillStats: string[]
+}
+
+export interface EnergyAlluviumListResponse {
+  items: EnergyAlluviumInfo[]
+}
+
 export interface StaticDataState {
   weaponsMap: Map<string, WeaponInfo>
   weaponTypes: WeaponTypeInfo[]
   essencesMap: Map<string, EssenceInfo>
   rarityColors: Record<number, string>
+  matrixIcons: MatrixIconResponse
+  energyAlluviums: EnergyAlluviumInfo[]
   isLoaded: boolean
 }

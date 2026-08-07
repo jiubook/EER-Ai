@@ -280,14 +280,7 @@
                   color="primary"
                   icon="mdi-plus"
                   variant="text"
-                  @click="
-                    treasureEssenceStats.splice(index, 0, {
-                      name: '',
-                      attribute: null,
-                      secondary: null,
-                      skill: null,
-                    })
-                  "
+                  @click="treasureEssenceStats.splice(index, 0, newCustomStat())"
                 />
                 <v-btn
                   color="error"
@@ -325,14 +318,7 @@
               <v-btn
                 color="primary"
                 prepend-icon="mdi-plus"
-                @click="
-                  treasureEssenceStats.push({
-                    name: '',
-                    attribute: null,
-                    secondary: null,
-                    skill: null,
-                  })
-                "
+                @click="treasureEssenceStats.push(newCustomStat())"
               >
                 添加自定义宝藏基质
               </v-btn>
@@ -345,14 +331,7 @@
                 color="primary"
                 icon="mdi-plus"
                 variant="text"
-                @click="
-                  treasureEssenceStats.push({
-                    name: '',
-                    attribute: null,
-                    secondary: null,
-                    skill: null,
-                  })
-                "
+                @click="treasureEssenceStats.push(newCustomStat())"
               />
             </v-col>
           </v-row>
@@ -368,13 +347,10 @@
             <v-radio label="当作无瑕基质并继续操作" value="process" />
             <v-radio label="跳过它并继续操作" value="skip" />
             <v-radio label="结束本次扫描" value="stop" />
-            <v-radio
-              label="仅高等级判定（只按高等级词条，不匹配武器）"
-              value="high_level_only"
-            />
+            <v-radio label="仅高等级判定（只按高等级词条，不匹配武器）" value="high_level_only" />
           </v-radio-group>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-          "仅高等级判定"会使用最上方"启用高等级基质属性词条判定"的设置，启用"与无瑕基质区分设置"后可单独设置。
+            "仅高等级判定"会使用最上方"启用高等级基质属性词条判定"的设置，启用"与无瑕基质区分设置"后可单独设置。
           </v-alert>
 
           <!-- 非无瑕基质高等级判定设置 -->
@@ -564,7 +540,7 @@
             </v-col>
           </v-row>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-          "按武器划分"时建议保留数为 1 ；"按基质划分"时的数量若超过了武器数，多余基质不保存到本地。
+            "按武器划分"时建议保留数为 1 ；"按基质划分"时的数量若超过了武器数，多余基质不保存到本地。
           </v-alert>
 
           <!-- 新增：非降级原则过滤（仅按武器划分时可用） -->
@@ -579,7 +555,8 @@
                 label="非降级原则过滤（过滤无法升级武器已有基质的矩阵）"
               />
               <v-alert border="start" class="mt-2" type="info" variant="tonal">
-                启用后，每个词条都 ≥ 旧等级才会被保留。无法升级任何匹配武器的将视为养成材料。此选项在"留大弃小"规则前生效。
+                启用后，每个词条都 ≥
+                旧等级才会被保留。无法升级任何匹配武器的将视为养成材料。此选项在"留大弃小"规则前生效。
               </v-alert>
             </v-col>
           </v-row>
@@ -818,7 +795,7 @@
             </v-col>
           </v-row>
           <v-alert border="start" class="mb-4" type="info" variant="tonal">
-          在网络通畅时，请尽量使用"GitHub Release"中"GitHub 官方"选项，以降低一图流的cdn流量压力。
+            在网络通畅时，请尽量使用"GitHub Release"中"GitHub 官方"选项，以降低一图流的cdn流量压力。
           </v-alert>
         </v-expansion-panel-text>
       </v-expansion-panel>
@@ -838,7 +815,12 @@ import ItemIcon from '@/components/ItemIcon.vue'
 import { setScanningStatusPolling, useScanningStatus } from '@/composables/useScanningStatus'
 import { useUpdateMirrors } from '@/composables/useUpdateMirrors'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { getGemTagName, getStatsForWeapon } from '@/utils/gameData/weapon'
+import {
+  createCustomStatId,
+  type CustomStat,
+  getGemTagName,
+  getStatsForWeapon,
+} from '@/utils/gameData/weapon'
 
 const theme = useTheme()
 const { weaponTypes, weaponsMap, rarityColors, essencesMap } = useStaticData()
@@ -863,18 +845,23 @@ const allSkillStats = computed(() =>
     .map((e) => e.id),
 )
 
-interface EssenceStat {
-  /** 自定义显示名称，用于武器总览页面展示 */
-  name?: string
-  attribute: string | null
-  secondary: string | null
-  skill: string | null
+// 自定义基质类型统一使用 CustomStat（含稳定 id），不再在本页另立一份定义
+
+/** 新建一个自定义基质，创建时即分配稳定 ID */
+function newCustomStat(): CustomStat {
+  return {
+    id: createCustomStatId(),
+    name: '',
+    attribute: null,
+    secondary: null,
+    skill: null,
+  }
 }
 
 type TreasureMatchMode = 'only' | 'all' | 'any' | 'sum'
 
 const selectedWeaponIds = ref<string[]>([])
-const treasureEssenceStats = ref<EssenceStat[]>([])
+const treasureEssenceStats = ref<CustomStat[]>([])
 const treasureAction = ref('lock')
 const trashAction = ref('unlock')
 const nonFiveStarBehavior = ref('process')
@@ -1017,7 +1004,7 @@ function isTypePartiallySelected(groupId: string): boolean {
 const config = computed(() => {
   const proxyUrl = updateProxyEnabled.value ? `http://127.0.0.1:${updateProxyPort.value}` : ''
   return {
-    version: 7,
+    version: 8,
     trash_weapon_ids: notSelectedWeaponIds.value,
     treasure_essence_stats: treasureEssenceStats.value,
     treasure_essence_match_mode: 'all' as const,
