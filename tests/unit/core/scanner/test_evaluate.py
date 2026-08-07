@@ -408,6 +408,29 @@ def test_evaluate_by_weapon_custom_matrix_claimed_first(
     assert "wpn_a" not in get_updated_weapon_ids()
 
 
+def test_evaluate_custom_matrix_logs_unified_weapon_format(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """自定义基质命中时，日志与内置武器统一为"完美契合武器…"，自定义显示为"名称（自定义基质）"。"""
+    default_settings.treasure_essence_stats = [
+        EssenceStats(id="abc", name="自定义X", attribute="A", secondary="B", skill="C")
+    ]
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert "完美契合武器" in result.log_message
+    assert "自定义X（自定义基质）" in result.log_message
+    assert "wpn_a" in result.log_message
+    assert "符合自定义基质" not in result.log_message
+    assert "custom:abc" in result.matched_weapons
+    assert "wpn_a" in result.matched_weapons
+
+
 def test_evaluate_by_weapon_custom_matrix_cap_falls_back_to_weapon(
     mock_static_game_data, default_settings, default_essence_data
 ):

@@ -1188,24 +1188,55 @@ def evaluate_essence(
         static_game_data.find_weapons_by_stats(weapon_attr, weapon_sec, weapon_skill)
     )
 
+    def format_weapon_description(weapon_id: str) -> str:
+        """格式化武器描述：内置武器如`名称（稀有度★ 类型）`，自定义基质如`名称（自定义基质）`。"""
+        if weapon_id.startswith(CUSTOM_ID_PREFIX):
+            custom_display = _custom_stat_display(setting, weapon_id)
+            return f"<fg #FF7100><bold>{custom_display}（自定义基质）</></>"
+        weapon = static_game_data.get_weapon(weapon_id)
+        if not weapon:
+            return f"<bold>{weapon_id}</>"
+
+        weapon_type = static_game_data.get_weapon_type(weapon.weapon_type)
+        type_name = weapon_type.name if weapon_type else "未知类型"
+
+        rarity_color = static_game_data.get_rarity_color(weapon.rarity)
+        return f"<fg {rarity_color}><bold>{weapon.name}（{weapon.rarity}★ {type_name}）</></>"
+
     # 尝试匹配用户自定义的宝藏基质条件
     for treasure_stat in setting.treasure_essence_stats:
         if _matches_treasure_stats(
             treasure_stat, stats, stat_types, setting.treasure_essence_match_mode
         ):
-            # 显示自定义基质名称，使用橙色（六星颜色）
-            custom_name = treasure_stat.name or "未命名"
             # 自定义基质优先于内置武器认领：把 custom:{id} 加入候选，由分组逻辑排在最前。
             # 自定义基质视作一把独立武器，参与按武器划分的上限（自定义与内置武器各计各的）。
             candidate_ids = set(matched_weapon_ids)
             if treasure_stat.id:
                 candidate_ids.add(f"{CUSTOM_ID_PREFIX}{treasure_stat.id}")
+            # 日志与内置武器分支统一为"完美契合武器…"格式：自定义基质显示为"名称（自定义基质）"，
+            # 内置武器仅展示未被拦截的（被拦截的武器不会接收该基质）。
+            non_trash_ids = candidate_ids - set(setting.trash_weapon_ids)
+            if non_trash_ids:
+                weapon_descriptions = [
+                    format_weapon_description(wid)
+                    for wid in _order_candidate_ids(
+                        non_trash_ids, weapon_priority_order
+                    )
+                ]
+                weapons_description_str = "、".join(weapon_descriptions)
+                log_message = f"这个基质是<green><bold><underline>宝藏</></></>，它完美契合武器{weapons_description_str}{high_level_info}。"
+            else:
+                # 无 id 的自定义基质且未匹配内置武器：没有候选可列，回退为直接说明原因
+                custom_name = treasure_stat.name or "未命名"
+                log_message = f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合自定义基质 <fg #FF7100><bold>{custom_name}</></> 的条件{high_level_info}。"
             return _apply_same_type_treasure_limit(
                 data,
                 setting,
                 EvaluationResult(
                     quality=EssenceQuality.TREASURE,
-                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合自定义基质 <fg #FF7100><bold>{custom_name}</></> 的条件{high_level_info}。",
+                    log_message=log_message,
+                    matched_weapons=non_trash_ids,
+                    matched_weapons_all_blocked=False,
                     is_high_level=is_high_level_treasure,
                 ),
                 matched_weapon_ids=candidate_ids,
@@ -1237,18 +1268,6 @@ def evaluate_essence(
 
     # 检查匹配到的武器中，是否有不在 trash_weapon_ids 中的
     non_trash_weapon_ids = matched_weapon_ids - set(setting.trash_weapon_ids)
-
-    def format_weapon_description(weapon_id: str) -> str:
-        """格式化武器描述，如`名称（稀有度★ 类型）`"""
-        weapon = static_game_data.get_weapon(weapon_id)
-        if not weapon:
-            return f"<bold>{weapon_id}</>"
-
-        weapon_type = static_game_data.get_weapon_type(weapon.weapon_type)
-        type_name = weapon_type.name if weapon_type else "未知类型"
-
-        rarity_color = static_game_data.get_rarity_color(weapon.rarity)
-        return f"<fg {rarity_color}><bold>{weapon.name}（{weapon.rarity}★ {type_name}）</></>"
 
     if non_trash_weapon_ids:
         # 只要有一个匹配武器未被拦截，就是宝藏

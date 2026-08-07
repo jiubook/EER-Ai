@@ -580,6 +580,11 @@ function getWeaponStatsText(weaponId: string): string {
   &:hover .weapon-icon-wrapper {
     transform: scale(1.05);
   }
+
+  // 彩虹环仅悬停时显示
+  &:hover .rainbow-border {
+    opacity: 1;
+  }
 }
 
 .weapon-icon-wrapper {
@@ -669,8 +674,8 @@ function getWeaponStatsText(weaponId: string): string {
 
 .rainbow-border {
   position: absolute;
-  inset: -3px;
-  border-radius: 8px;
+  inset: 0;
+  border-radius: 6px;
   background: linear-gradient(
     45deg,
     #fff,
@@ -687,8 +692,20 @@ function getWeaponStatsText(weaponId: string): string {
   );
   background-size: 400% 400%;
   animation: rainbow-rotate 3s linear infinite;
-  z-index: -1;
+  z-index: 1;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  // 只露出 2px 渐变环：mask 挖空中间，避免渐变覆盖图标与名称
+  padding: 2px;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
 }
 
 @keyframes rainbow-rotate {
