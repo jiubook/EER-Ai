@@ -8,7 +8,7 @@ import type { TreasureMatrixEntry } from '@/composables/useProfiles'
 import { computed } from 'vue'
 import { useProfiles } from '@/composables/useProfiles'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { isCustomStatId } from '@/utils/gameData/weapon'
+import { buildStatKey, isCustomStatId } from '@/utils/gameData/weapon'
 
 /** 各词条的最大等级，与后端 schemas/profile.py 的 le 约束保持一致 */
 export const AFFIX_MAX_LEVEL = [6, 6, 3] as const
@@ -34,7 +34,7 @@ export function useWeaponStats() {
   const weaponIdsByStatKey = computed(() => {
     const index = new Map<string, string[]>()
     for (const [id, weapon] of weaponsMap.value.entries()) {
-      const key = `${weapon.attributeStatId}|${weapon.secondaryStatId}|${weapon.skillStatId}`
+      const key = buildStatKey(weapon.attributeStatId, weapon.secondaryStatId, weapon.skillStatId)
       const bucket = index.get(key)
       if (bucket) {
         bucket.push(id)
@@ -116,7 +116,7 @@ export function useWeaponStats() {
     if (isCustomEntry(weaponId)) return []
     const weapon = weaponsMap.value.get(weaponId)
     if (!weapon) return []
-    const key = `${weapon.attributeStatId}|${weapon.secondaryStatId}|${weapon.skillStatId}`
+    const key = buildStatKey(weapon.attributeStatId, weapon.secondaryStatId, weapon.skillStatId)
     const bucket = weaponIdsByStatKey.value.get(key)
     if (!bucket) return []
     return bucket.filter((id) => id !== weaponId)
