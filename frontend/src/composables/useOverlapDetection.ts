@@ -63,16 +63,22 @@ export function useOverlapDetection() {
    * 同一个自定义基质可能同时匹配多把武器（同属性组合的武器在游戏里很常见），
    * 这些匹配会聚合进同一条记录 —— 每个基质至多产生一条待决策项，
    * 使"移除/切换"这类针对基质本身的操作不会被重复执行。
+   *
+   * 「不再提示」标记只约束自动检测（进入宝藏基质页面时弹出）：手动点击
+   * 「检查自定义基质重合」时传 `includeSuppressed: true`，已标记的条目
+   * 仍然显示，否则用户一旦误选就再也无法通过界面找回。
    */
   function checkCustomOverlap(
     customStats: CustomStat[],
     matrixEntryByWeaponId: ReadonlyMap<string, TreasureMatrixEntry>,
+    options: { includeSuppressed?: boolean } = {},
   ) {
+    const { includeSuppressed = false } = options
     const items: OverlapItem[] = []
     for (const [i, stat] of customStats.entries()) {
       if (!stat) continue
-      // 跳过已勾选"不再提示"的
-      if (stat.no_prompt_switch) continue
+      // 跳过已勾选"不再提示"的（仅自动检测遵守该标记，手动检测带上它们）
+      if (!includeSuppressed && stat.no_prompt_switch) continue
       // 跳过属性全为空的条目（已被切换清空）
       if (!stat.attribute && !stat.secondary && !stat.skill) continue
 

@@ -99,7 +99,22 @@
               <span>删除自定义基质，并将其等级与优先级转移给内置武器</span>
             </v-tooltip>
             <v-chip filter size="small" value="ignore" variant="outlined">本次忽略</v-chip>
-            <v-chip filter size="small" value="suppress" variant="outlined">不再提示</v-chip>
+            <v-tooltip location="top" open-delay="0" transition="none">
+              <template #activator="{ props: tooltipProps }">
+                <v-chip
+                  v-bind="tooltipProps"
+                  filter
+                  size="small"
+                  value="suppress"
+                  variant="outlined"
+                  >不再提示</v-chip
+                >
+              </template>
+              <span>
+                仅关闭进入宝藏基质页面时的自动重合检测弹窗。<br />
+                手动点击「武器总览 → 检查自定义基质重合」仍会显示该条目
+              </span>
+            </v-tooltip>
           </v-chip-group>
         </div>
       </v-card-text>

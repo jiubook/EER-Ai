@@ -436,8 +436,19 @@ function showNewCustomDialog() {
   detailWeaponId.value = '__new_custom__'
 }
 
-/** 检查自定义基质重合 */
+/** 检查自定义基质重合（手动触发：无视「不再提示」标记，已标记的条目也要显示） */
 async function checkCustomOverlap() {
+  try {
+    await checkCustomOverlapBase(customStats.value, matrixEntryByWeaponId.value, {
+      includeSuppressed: true,
+    })
+  } catch (error) {
+    toast.reportError('重合检测失败', error)
+  }
+}
+
+/** 进入页面时的自动重合检测：尊重「不再提示」标记，已标记的条目不弹窗 */
+async function checkCustomOverlapAuto() {
   try {
     await checkCustomOverlapBase(customStats.value, matrixEntryByWeaponId.value)
   } catch (error) {
@@ -450,12 +461,12 @@ onMounted(async () => {
   // 重合检测要比对内置武器词条，必须等静态数据就绪，
   // 否则 weaponsMap 为空会让检测静默地一无所获。
   if (isStaticDataLoaded.value) {
-    void checkCustomOverlap()
+    void checkCustomOverlapAuto()
   } else {
     const stop = watch(isStaticDataLoaded, (loaded) => {
       if (!loaded) return
       stop()
-      void checkCustomOverlap()
+      void checkCustomOverlapAuto()
     })
   }
 })

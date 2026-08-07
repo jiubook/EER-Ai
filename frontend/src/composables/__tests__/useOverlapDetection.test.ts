@@ -11,6 +11,7 @@ import type { TreasureMatrixEntry } from '../useProfiles'
 
 import type { CustomStat } from '@/utils/gameData/weapon'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useStaticData } from '@/utils/gameData/staticData'
 import { toCustomStatId } from '@/utils/gameData/weapon'
 import { __resetOverlapStateForTests, useOverlapDetection } from '../useOverlapDetection'
 import { __resetProfilesStateForTests } from '../useProfiles'
@@ -62,6 +63,9 @@ function stubFetch() {
         text: async () =>
           JSON.stringify({ version: 1, name: 'default', treasure_matrix: submitted.matrix }),
       } as unknown as Response
+    }
+    if (url === '/api/profiles/compare_levels') {
+      return { ok: true, status: 200, json: async () => ({ results: [] }) } as unknown as Response
     }
     throw new Error(`未预期的请求: ${url}`)
   })
@@ -251,6 +255,68 @@ describe('confirmOverlapActions', () => {
 
     expect(result).toEqual({ deletedIds: [], suppressedIds: [] })
     expect(submitted.stats).toBeNull()
+    expect(submitted.matrix).toBeNull()
+  })
+})
+
+describe('checkCustomOverlap', () => {
+  beforeEach(() => {
+    __resetOverlapStateForTests()
+    // 用与 makeStat 相同的词条填充静态数据，让自定义基质能匹配到内置武器
+    const { weaponsMap } = useStaticData()
+    weaponsMap.value = new Map([
+      [
+        'w1',
+        {
+          id: 'w1',
+          name: 'W1',
+          iconUrl: '',
+          rarity: 5,
+          attributeStatId: 'atk',
+          secondaryStatId: 'def',
+          skillStatId: 'ult',
+        },
+      ],
+    ])
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('自动检测跳过已标记「不再提示」的条目', async () => {
+    const submitted = stubFetch()
+    const { overlapDialog, overlapItems, checkCustomOverlap } = useOverlapDetection()
+    const customStats = [makeStat('a', '甲'), { ...makeStat('b', '乙'), no_prompt_switch: true }]
+
+    await checkCustomOverlap(customStats, new Map())
+
+    expect(overlapDialog.value).toBe(true)
+    expect(overlapItems.value.map((i) => i.customStatId)).toEqual(['a'])
+    expect(submitted.matrix).toBeNull()
+  })
+
+  it('全部条目都已标记时自动检测不弹窗', () => {
+    // 该分支在请求前返回，无需 stub fetch
+    const { overlapDialog, overlapItems, checkCustomOverlap } = useOverlapDetection()
+    const customStats = [{ ...makeStat('b', '乙'), no_prompt_switch: true }]
+
+    checkCustomOverlap(customStats, new Map())
+
+    expect(overlapDialog.value).toBe(false)
+    expect(overlapItems.value).toEqual([])
+  })
+
+  it('手动检测（includeSuppressed）仍显示已标记「不再提示」的条目', async () => {
+    const submitted = stubFetch()
+    const { overlapDialog, overlapItems, checkCustomOverlap } = useOverlapDetection()
+    const suppressed = { ...makeStat('b', '乙'), no_prompt_switch: true }
+    const customStats = [makeStat('a', '甲'), suppressed]
+
+    await checkCustomOverlap(customStats, new Map(), { includeSuppressed: true })
+
+    expect(overlapDialog.value).toBe(true)
+    expect(overlapItems.value.map((i) => i.customStatId)).toEqual(['a', 'b'])
     expect(submitted.matrix).toBeNull()
   })
 })
