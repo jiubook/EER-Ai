@@ -62,11 +62,15 @@ def init_load_profiles():
     )
     # 武器数据随游戏版本更新后，个别武器的 ID 可能变化（如中文 ID 规范为
     # wpn_xxx）：按名称把失效引用改写为最新 ID，避免幽灵条目与重复条目。
-    static_data = get_static_game_data()
-    weapons_by_name = {
-        weapon.name: weapon.weapon_id for weapon in static_data.list_weapons()
-    }
-    profile_manager.migrate_stale_weapon_ids(weapons_by_name)
+    # 静态数据缺失/损坏时跳过迁移，迁移失败不应阻断服务启动。
+    try:
+        static_data = get_static_game_data()
+        weapons_by_name = {
+            weapon.name: weapon.weapon_id for weapon in static_data.list_weapons()
+        }
+        profile_manager.migrate_stale_weapon_ids(weapons_by_name)
+    except Exception as exc:
+        logger.warning(f"静态数据不可用，跳过武器 ID 迁移: {exc}")
     set_profile_manager(profile_manager)
 
 

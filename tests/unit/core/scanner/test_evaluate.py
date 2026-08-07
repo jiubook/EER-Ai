@@ -666,6 +666,148 @@ def test_evaluate_no_weapon_worse_level_trashes_with_clear_message(
     assert default_settings._same_type_treasure_counts.get(("A", "B", "C"), 0) == 0
 
 
+def test_evaluate_no_weapon_worse_level_trashes_without_keep_best(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """无匹配武器 + 关闭留大弃小：更差基质同样拒绝，不认领也不消耗配额。"""
+    default_settings.same_type_keep_best = False
+    default_settings.treasure_essence_stats = [
+        EssenceStats(attribute="A", secondary="B", skill="C")
+    ]
+    _reset_scan_state(default_settings)
+    default_settings._same_type_best_levels[("A", "B", "C")] = (3, 3, 3)
+    default_essence_data.levels = [2, 2, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TRASH
+    assert "低于已保存" in result.log_message
+    assert default_settings._same_type_treasure_counts.get(("A", "B", "C"), 0) == 0
+
+
+def test_evaluate_by_stat_claim_writes_weapon_count_for_sync(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按基质划分：认领武器时同步写入按武器的计数，供引擎按 weapon_id 同步。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_STAT
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    # 共享计数（属性组合）与按武器计数同时记录
+    assert default_settings._same_type_treasure_counts[("A", "B", "C")] == 1
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 1
+
+
+def test_evaluate_by_stat_reclaim_same_weapon_increments_weapon_count(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按基质划分 + 关闭留大弃小：同一武器再次认领时按武器计数累加。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_STAT
+    default_settings.same_type_keep_best = False
+    default_settings.same_type_treasure_limit = 2
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    second = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert second.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_treasure_counts[("A", "B", "C")] == 2
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 2
+
+
+def test_evaluate_by_weapon_limit_includes_existing_entries(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按武器划分：存量条数占用限额名额，多出的同类型标记为养成材料（总保有量语义）。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_WEAPON
+    default_settings.same_type_treasure_limit = 1
+    _reset_scan_state(default_settings)
+    # 模拟 profile 已保存 1 枚 (1,1,1)：存量计入限额名额
+    default_settings._same_type_treasure_counts["wpn_a"] = 1
+    default_settings._same_type_best_levels["wpn_a"] = (1, 1, 1)
+    default_settings._same_type_equal_skips["wpn_a"] = 1
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    first = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    second = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    # 第一枚是存量本身（相等跳过不重复计数），第二枚多出的超限
+    assert first.quality == EssenceQuality.TREASURE
+    assert second.quality == EssenceQuality.TRASH
+    assert "达到设置上限" in second.log_message
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 1
+
+
+def test_evaluate_by_stat_limit_includes_existing_entries(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按基质划分：存量条数占用限额名额，多出的同类型标记为养成材料（总保有量语义）。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_STAT
+    default_settings.same_type_treasure_limit = 1
+    _reset_scan_state(default_settings)
+    default_settings._same_type_treasure_counts[("A", "B", "C")] = 1
+    default_settings._same_type_best_levels["wpn_a"] = (1, 1, 1)
+    default_settings._same_type_equal_skips["wpn_a"] = 1
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    first = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    second = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert first.quality == EssenceQuality.TREASURE
+    assert second.quality == EssenceQuality.TRASH
+    assert "达到设置上限" in second.log_message
+    assert default_settings._same_type_treasure_counts[("A", "B", "C")] == 1
+
+
+def test_evaluate_by_weapon_limit_still_allows_new_claims_with_quota(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按武器划分：存量未满限额时仍可新增认领，总保有量不超过限额。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_WEAPON
+    default_settings.same_type_treasure_limit = 3
+    _reset_scan_state(default_settings)
+    # 模拟 profile 已保存 2 枚 (1,1,1)：存量 2/3
+    default_settings._same_type_treasure_counts["wpn_a"] = 2
+    default_settings._same_type_best_levels["wpn_a"] = (1, 1, 1)
+    default_settings._same_type_equal_skips["wpn_a"] = 2
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    results = [
+        evaluate_essence(
+            default_essence_data, default_settings, mock_static_game_data, **kwargs
+        ).quality
+        for _ in range(4)
+    ]
+
+    assert results == [
+        EssenceQuality.TREASURE,  # 存量 1（相等跳过）
+        EssenceQuality.TREASURE,  # 存量 2（相等跳过）
+        EssenceQuality.TREASURE,  # 新增认领 3/3
+        EssenceQuality.TRASH,  # 超出总保有量
+    ]
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 3
+
+
 def _reset_scan_state(settings: UserSetting) -> None:
     """模拟引擎扫描开始前的状态重置。"""
     reset_scan_claims()

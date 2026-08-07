@@ -665,8 +665,8 @@ def _apply_stat_group_limit(
 ) -> EvaluationResult:
     """按基质分组（属性组合相同即为同类型）的限制逻辑。
 
-    stat_key 做共享计数器（同一属性组合共享配额），weapon_id 做最佳等级记录
-    （同步到引擎时需要按武器查找）。
+    stat_key 做共享计数器（同一属性组合共享配额），weapon_id 做最佳等级与
+    按武器计数记录（同步到引擎时需要按武器查找）。
 
     Args:
         mode: 等级比较方式，仅在 keep_best=True 时生效。
@@ -686,21 +686,18 @@ def _apply_stat_group_limit(
             )
             return _make_trash_by_limit(evaluation, count, limit)
         # 无匹配武器时，仍用 stat_key 更新（自定义基质场景）
-        if keep_best:
-            best = setting._same_type_best_levels.get(stat_key)
-            if (
-                best is not None
-                and _level_cmp(current_levels, best, mode, stat_types) <= 0
-            ):
+        best = setting._same_type_best_levels.get(stat_key)
+        if best is not None:
+            cmp = _level_cmp(current_levels, best, mode, stat_types)
+            # 与 _claim_by_limit 对齐：劣于已保存最佳等级的一律拒绝，
+            # 避免更差基质覆盖已保存等级或消耗配额（与 keep_best 无关）。
+            if cmp < 0:
+                return _make_trash_by_worse_level(evaluation)
+            if keep_best and cmp == 0:
                 skip = setting._same_type_equal_skips.get(stat_key, 0)
                 if skip > 0:
                     setting._same_type_equal_skips[stat_key] = skip - 1
                     return evaluation
-                if (
-                    best is not None
-                    and _level_cmp(current_levels, best, mode, stat_types) < 0
-                ):
-                    return _make_trash_by_worse_level(evaluation)
         setting._same_type_treasure_counts[stat_key] = count + 1
         best = setting._same_type_best_levels.get(stat_key)
         if best is None or _level_cmp(current_levels, best, mode, stat_types) > 0:
@@ -799,6 +796,11 @@ def _apply_stat_group_limit(
                 )
                 continue
             setting._same_type_treasure_counts[stat_key] = count + 1
+            # 同时按武器记录计数：引擎同步循环按 weapon_id 查计数，
+            # 只写 stat_key 的话 BY_STAT 下武器计数永远同步不到引擎。
+            setting._same_type_treasure_counts[weapon_id] = (
+                setting._same_type_treasure_counts.get(weapon_id, 0) + 1
+            )
             setting._same_type_best_levels[weapon_id] = current_levels
             _updated_this_scan.add(weapon_id)
             logger.debug(

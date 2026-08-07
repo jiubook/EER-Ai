@@ -26,7 +26,10 @@ from endfield_essence_recognizer.core.scanner.engine import (
     DraggableScannerEngine,
     ScannerEngine,
 )
-from endfield_essence_recognizer.schemas.user_setting import UserSetting
+from endfield_essence_recognizer.schemas.user_setting import (
+    EssenceStats,
+    UserSetting,
+)
 from endfield_essence_recognizer.services.user_setting_manager import UserSettingManager
 
 
@@ -620,3 +623,108 @@ def test_gap_detection_filters_noise_by_spacing(
     assert result is not None
     # 噪声暗带被过滤，偏移仍由有效暗带决定
     assert abs(result - offset) <= 1
+
+
+def _make_same_type_engine(
+    mock_scanner_context, mock_user_setting_manager, mock_profile, treasure_matrix
+):
+    """构造已注入 mock profile 数据的 ScannerEngine。"""
+    from endfield_essence_recognizer.core.scanner.engine import ScannerEngine
+
+    profile_manager = MagicMock()
+    profile_manager.get_active_profile.return_value = SimpleNamespace(
+        treasure_matrix=treasure_matrix
+    )
+
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    return engine, profile_manager
+
+
+def test_init_same_type_levels_counts_existing_entries(
+    monkeypatch, mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """初始化同类型状态：存量条数计入限额名额（总保有量语义）。"""
+    from endfield_essence_recognizer.api.routes import profiles as profiles_routes
+    from endfield_essence_recognizer.schemas.profile import TreasureMatrixEntry
+
+    engine, profile_manager = _make_same_type_engine(
+        mock_scanner_context,
+        mock_user_setting_manager,
+        mock_profile,
+        [
+            TreasureMatrixEntry(
+                weapon_id="wpn_sword_0001",
+                weapon_name="测试武器",
+                affix1_level=3,
+                affix2_level=3,
+                affix3_level=3,
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_sword_0001",
+                weapon_name="测试武器",
+                affix1_level=3,
+                affix2_level=3,
+                affix3_level=3,
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_lance_0001",
+                weapon_name="测试长枪",
+                affix1_level=2,
+                affix2_level=2,
+                affix3_level=1,
+            ),
+        ],
+    )
+    monkeypatch.setattr(profiles_routes, "get_profile_manager", lambda: profile_manager)
+
+    user_setting = UserSetting()
+    engine._init_same_type_levels_from_profile(user_setting)
+
+    # 每把武器：计数 = 存量条数，最佳等级 = 组内最高，相等跳过名额 = 等于最佳的数量
+    assert user_setting._same_type_treasure_counts["wpn_sword_0001"] == 2
+    assert user_setting._same_type_best_levels["wpn_sword_0001"] == (3, 3, 3)
+    assert user_setting._same_type_equal_skips["wpn_sword_0001"] == 2
+    assert user_setting._same_type_treasure_counts["wpn_lance_0001"] == 1
+    assert user_setting._same_type_best_levels["wpn_lance_0001"] == (2, 2, 1)
+    assert user_setting._same_type_equal_skips["wpn_lance_0001"] == 1
+
+
+def test_init_same_type_levels_custom_entries_feed_stat_key_counts(
+    monkeypatch, mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """自定义基质条目的存量按配置属性组合计入 stat_key 计数（BY_STAT 总保有量）。"""
+    from endfield_essence_recognizer.api.routes import profiles as profiles_routes
+    from endfield_essence_recognizer.schemas.profile import TreasureMatrixEntry
+
+    engine, profile_manager = _make_same_type_engine(
+        mock_scanner_context,
+        mock_user_setting_manager,
+        mock_profile,
+        [
+            TreasureMatrixEntry(
+                weapon_id="custom:abc",
+                weapon_name="自定义X",
+                affix1_level=2,
+                affix2_level=1,
+                affix3_level=1,
+            )
+        ],
+    )
+    monkeypatch.setattr(profiles_routes, "get_profile_manager", lambda: profile_manager)
+
+    user_setting = UserSetting()
+    user_setting.treasure_essence_stats = [
+        EssenceStats(id="abc", name="自定义X", attribute="A", secondary="B", skill="C")
+    ]
+    engine._init_same_type_levels_from_profile(user_setting)
+
+    # 自定义条目既计入自身 weapon_id，也按配置的属性组合计入 stat_key
+    assert user_setting._same_type_treasure_counts["custom:abc"] == 1
+    assert user_setting._same_type_treasure_counts[("A", "B", "C")] == 1
+    assert user_setting._same_type_best_levels[("A", "B", "C")] == (2, 1, 1)
