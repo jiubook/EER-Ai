@@ -24,6 +24,7 @@ class Action(StrEnum):
     UNLOCK_AND_UNDEPRECATE = "unlock_and_undeprecate"
     DEPRECATE_IF_NOT_LOCKED = "deprecate_if_not_locked"
     LOCK_IF_NOT_DEPRECATED = "lock_if_not_deprecated"
+    DEPRECATE_IF_MISSING_STATS = "deprecate_if_missing_stats"
 
 
 class NonFiveStarBehavior(StrEnum):

@@ -1072,7 +1072,7 @@ def _apply_same_type_treasure_limit(
         setting.same_type_group_mode == SameTypeGroupMode.BY_WEAPON
         and matched_weapon_ids
     ):
-        return _apply_weapon_group_limit(
+        result = _apply_weapon_group_limit(
             setting,
             evaluation,
             matched_weapon_ids,
@@ -1085,10 +1085,11 @@ def _apply_same_type_treasure_limit(
             weapon_priority_order,
             static_game_data,
         )
+        return result
 
     # 默认按基质分组（包括自定义基质匹配和无匹配武器的情况）
     stat_key = tuple(data.stats)
-    return _apply_stat_group_limit(
+    result = _apply_stat_group_limit(
         setting,
         evaluation,
         stat_key,
@@ -1102,6 +1103,7 @@ def _apply_same_type_treasure_limit(
         weapon_priority_order,
         static_game_data,
     )
+    return result
 
 
 def evaluate_essence(
