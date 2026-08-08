@@ -229,7 +229,13 @@ import { useToast } from '@/composables/useToast'
 import { useWeaponConnectionLines } from '@/composables/useWeaponConnectionLines'
 import { useWeaponStats } from '@/composables/useWeaponStats'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { findCustomStat, getGemTagName } from '@/utils/gameData/weapon'
+import {
+  buildStatKey,
+  findCustomStat,
+  getGemTagName,
+  getStatsForWeapon,
+  toCustomStatId,
+} from '@/utils/gameData/weapon'
 
 const { weaponTypes, weaponsMap, matrixIcons, isLoaded: isStaticDataLoaded } = useStaticData()
 const toast = useToast()
@@ -360,17 +366,65 @@ function getWeaponSkillIcon(weaponId: string): string | null {
 // 武器详情弹窗（null=关闭，string=打开编辑该武器）
 const detailWeaponId = ref<string | null>(null)
 
+/**
+ * 计算指定武器的属性组合键。
+ *
+ * 自定义条目从配置读取（attribute/secondary/skill），内置武器从静态数据
+ * 读取（attributeStatId/secondaryStatId/skillStatId），两类共用 buildStatKey
+ * 生成的同一格式，才能互相匹配。
+ */
+function getWeaponStatKey(weaponId: string): string {
+  const found = findCustomStat(weaponId, customStats.value)
+  if (found) {
+    return buildStatKey(found.stat.attribute, found.stat.secondary, found.stat.skill)
+  }
+  const stats = getStatsForWeapon(weaponId)
+  return buildStatKey(stats.attribute, stats.secondary, stats.skill)
+}
+
+/**
+ * 计算与指定武器属性组合相同的内置武器 ID 列表（不含自身）。
+ *
+ * 内置武器之间的匹配走 getSameStatWeapons（useWeaponStats 的索引）；
+ * 自定义基质没有被该索引收录，需要按属性组合键扫描 weaponsMap 补齐。
+ */
+function getSameStatBuiltinWeaponIds(weaponId: string): string[] {
+  if (!isCustomEntry(weaponId)) return getSameStatWeapons(weaponId)
+  const key = getWeaponStatKey(weaponId)
+  const matches: string[] = []
+  for (const [id, weapon] of weaponsMap.value.entries()) {
+    if (buildStatKey(weapon.attributeStatId, weapon.secondaryStatId, weapon.skillStatId) === key) {
+      matches.push(id)
+    }
+  }
+  return matches
+}
+
+/** 计算与指定武器属性组合相同的自定义基质 ID 列表（不含自身） */
+function getSameStatCustomWeaponIds(weaponId: string): string[] {
+  const key = getWeaponStatKey(weaponId)
+  return customStats.value
+    .filter((stat) => toCustomStatId(stat) !== weaponId)
+    .filter((stat) => buildStatKey(stat.attribute, stat.secondary, stat.skill) === key)
+    .map((stat) => toCustomStatId(stat))
+}
+
+/** 获取连线目标：内置同类武器 + 相同属性组合的自定义基质 */
+function getConnectionTargets(weaponId: string): string[] {
+  return [...getSameStatBuiltinWeaponIds(weaponId), ...getSameStatCustomWeaponIds(weaponId)]
+}
+
 /** 更新连线 */
 /** 鼠标进入武器 */
 function handleWeaponMouseEnter(weaponId: string) {
-  handleWeaponMouseEnterBase(weaponId, getSameStatWeapons(weaponId))
+  handleWeaponMouseEnterBase(weaponId, getConnectionTargets(weaponId))
 }
 
 // 监听窗口大小变化，更新连线位置
 onMounted(() => {
   setupResizeListener(() => {
     if (!hoveredWeaponId.value) return []
-    return getSameStatWeapons(hoveredWeaponId.value)
+    return getConnectionTargets(hoveredWeaponId.value)
   })
 })
 
@@ -382,8 +436,19 @@ function showNewCustomDialog() {
   detailWeaponId.value = '__new_custom__'
 }
 
-/** 检查自定义基质重合 */
+/** 检查自定义基质重合（手动触发：无视「不再提示」标记，已标记的条目也要显示） */
 async function checkCustomOverlap() {
+  try {
+    await checkCustomOverlapBase(customStats.value, matrixEntryByWeaponId.value, {
+      includeSuppressed: true,
+    })
+  } catch (error) {
+    toast.reportError('重合检测失败', error)
+  }
+}
+
+/** 进入页面时的自动重合检测：尊重「不再提示」标记，已标记的条目不弹窗 */
+async function checkCustomOverlapAuto() {
   try {
     await checkCustomOverlapBase(customStats.value, matrixEntryByWeaponId.value)
   } catch (error) {
@@ -396,12 +461,12 @@ onMounted(async () => {
   // 重合检测要比对内置武器词条，必须等静态数据就绪，
   // 否则 weaponsMap 为空会让检测静默地一无所获。
   if (isStaticDataLoaded.value) {
-    void checkCustomOverlap()
+    void checkCustomOverlapAuto()
   } else {
     const stop = watch(isStaticDataLoaded, (loaded) => {
       if (!loaded) return
       stop()
-      void checkCustomOverlap()
+      void checkCustomOverlapAuto()
     })
   }
 })
@@ -580,6 +645,11 @@ function getWeaponStatsText(weaponId: string): string {
   &:hover .weapon-icon-wrapper {
     transform: scale(1.05);
   }
+
+  // 彩虹环仅悬停时显示
+  &:hover .rainbow-border {
+    opacity: 1;
+  }
 }
 
 .weapon-icon-wrapper {
@@ -669,8 +739,8 @@ function getWeaponStatsText(weaponId: string): string {
 
 .rainbow-border {
   position: absolute;
-  inset: -3px;
-  border-radius: 8px;
+  inset: 0;
+  border-radius: 6px;
   background: linear-gradient(
     45deg,
     #fff,
@@ -687,8 +757,20 @@ function getWeaponStatsText(weaponId: string): string {
   );
   background-size: 400% 400%;
   animation: rainbow-rotate 3s linear infinite;
-  z-index: -1;
+  z-index: 1;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  // 只露出 2px 渐变环：mask 挖空中间，避免渐变覆盖图标与名称
+  padding: 2px;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
 }
 
 @keyframes rainbow-rotate {

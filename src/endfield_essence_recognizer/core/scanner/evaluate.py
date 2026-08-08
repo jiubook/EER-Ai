@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from itertools import accumulate
+from typing import Literal
 
 from loguru import logger
 
@@ -11,6 +12,7 @@ from endfield_essence_recognizer.core.scanner.models import (
 )
 from endfield_essence_recognizer.game_data.models.v2 import StatType
 from endfield_essence_recognizer.game_data.static_game_data import StaticGameData
+from endfield_essence_recognizer.schemas.profile import CUSTOM_ID_PREFIX
 from endfield_essence_recognizer.schemas.user_setting import (
     EssenceStats,
     KeepBestMode,
@@ -45,6 +47,44 @@ def get_updated_weapon_ids() -> set[str]:
 def get_cascade_updated_weapon_ids() -> set[str]:
     """获取本轮扫描中级联更新了 best levels 的武器 ID（仅等级，无计数）。"""
     return _cascade_updated_this_scan.copy()
+
+
+def _order_candidate_ids(
+    matched_weapon_ids: set[str],
+    weapon_priority_order: list[str] | None,
+) -> list[str]:
+    """排序候选 ID：自定义基质优先，其余按武器优先级（无优先级时按 ID 排序）。
+
+    自定义基质与内置武器同时命中时，基质优先保存到自定义条目（视作独立武器），
+    自定义达到上限后再回退到内置武器。
+    """
+    custom_ids = sorted(
+        wid for wid in matched_weapon_ids if wid.startswith(CUSTOM_ID_PREFIX)
+    )
+    if not custom_ids:
+        if weapon_priority_order:
+            return [wid for wid in weapon_priority_order if wid in matched_weapon_ids]
+        return sorted(matched_weapon_ids)
+    custom_set = set(custom_ids)
+    if weapon_priority_order:
+        rest = [
+            wid
+            for wid in weapon_priority_order
+            if wid in matched_weapon_ids and wid not in custom_set
+        ]
+    else:
+        rest = sorted(wid for wid in matched_weapon_ids if wid not in custom_set)
+    return custom_ids + rest
+
+
+def _custom_stat_display(setting: UserSetting, key: str) -> str | None:
+    """返回自定义基质的显示名称；非自定义 ID 返回 None。"""
+    if not key.startswith(CUSTOM_ID_PREFIX):
+        return None
+    for treasure_stat in setting.treasure_essence_stats:
+        if treasure_stat.id and f"{CUSTOM_ID_PREFIX}{treasure_stat.id}" == key:
+            return treasure_stat.name or "未命名"
+    return key
 
 
 # StatType → 对应 EssenceStats / 阈值配置中的字段名
@@ -134,6 +174,22 @@ def _stat_display_name(static_game_data: StaticGameData, stat_id: str | None) ->
         return "未知属性"
     stat = static_game_data.get_stat(stat_id)
     return stat.name if stat is not None else stat_id
+
+
+def _format_stat_key(
+    stat_key: tuple[str | None, ...], static_game_data: StaticGameData | None
+) -> str:
+    """格式化属性组合为可读字符串，如 '攻击提升(stat1)、暴击率提升(stat2)、附术(stat3)'。"""
+    if not static_game_data:
+        return str(stat_key)
+    parts = []
+    for stat_id in stat_key:
+        name = _stat_display_name(static_game_data, stat_id)
+        if stat_id is not None:
+            parts.append(f"{name}({stat_id})")
+        else:
+            parts.append(name)
+    return "、".join(parts)
 
 
 def _format_high_level_info(
@@ -487,6 +543,20 @@ def _make_trash_by_limit(
     )
 
 
+def _make_trash_by_worse_level(evaluation: EvaluationResult) -> EvaluationResult:
+    """构造因等级劣于已保存最佳（数量上限未满）而标记为养成材料的结果。"""
+    return EvaluationResult(
+        quality=EssenceQuality.TRASH,
+        log_message=(
+            "这个基质是<red><bold><underline>养成材料</></></>，"
+            "因为它的等级低于已保存的最佳基质，不会被接收。"
+        ),
+        matched_weapons=evaluation.matched_weapons,
+        matched_weapons_all_blocked=True,
+        is_high_level=evaluation.is_high_level,
+    )
+
+
 def _claim_as_owned(
     setting: UserSetting,
     key: tuple[str | None, ...] | str,
@@ -512,7 +582,9 @@ def _claim_as_owned(
     cmp = _level_cmp(current_levels, best, mode, stat_types)
     if cmp > 0:
         setting._same_type_best_levels[key] = current_levels
-        if isinstance(key, str) and key.startswith("wpn_"):
+        if isinstance(key, str) and (
+            key.startswith("wpn_") or key.startswith(CUSTOM_ID_PREFIX)
+        ):
             _updated_this_scan.add(key)
         skip = setting._same_type_equal_skips.get(key, 0)
         if skip > 0:
@@ -587,26 +659,200 @@ def _apply_stat_group_limit(
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
     stat_types: list[StatType | None] | None = None,
     matched_weapon_ids: set[str] | None = None,
+    weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
+    weapon_priority_order: list[str] | None = None,
+    static_game_data: StaticGameData | None = None,
 ) -> EvaluationResult:
     """按基质分组（属性组合相同即为同类型）的限制逻辑。
+
+    stat_key 做共享计数器（同一属性组合共享配额），weapon_id 做最佳等级与
+    按武器计数记录（同步到引擎时需要按武器查找）。
 
     Args:
         mode: 等级比较方式，仅在 keep_best=True 时生效。
         stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
-        matched_weapon_ids: 匹配的武器 ID 集合，用于同步更新追踪。
+        matched_weapon_ids: 匹配的武器 ID 集合。
+        weapon_essence_levels: 各武器当前基质等级，用于非降级原则过滤。
+        weapon_priority_order: 武器优先级排序（高优先级在前），用于决定分配顺序。
+        static_game_data: 静态游戏数据，用于日志显示。
     """
-    if keep_best and _claim_as_owned(
-        setting, stat_key, current_levels, mode, stat_types
-    ):
+    # 按优先级排序武器
+    stat_label = _format_stat_key(stat_key, static_game_data)
+    if not matched_weapon_ids:
+        count = setting._same_type_treasure_counts.get(stat_key, 0)
+        if count >= limit:
+            logger.debug(
+                f"[数量上限] 属性组合 [{stat_label}] 已达上限 {count}/{limit}，标记为养成材料"
+            )
+            return _make_trash_by_limit(evaluation, count, limit)
+        # 无匹配武器时，仍用 stat_key 更新（自定义基质场景）
+        best = setting._same_type_best_levels.get(stat_key)
+        if best is not None:
+            cmp = _level_cmp(current_levels, best, mode, stat_types)
+            # 与 _claim_by_limit 对齐：劣于已保存最佳等级的一律拒绝，
+            # 避免更差基质覆盖已保存等级或消耗配额（与 keep_best 无关）。
+            if cmp < 0:
+                return _make_trash_by_worse_level(evaluation)
+            if keep_best and cmp == 0:
+                skip = setting._same_type_equal_skips.get(stat_key, 0)
+                if skip > 0:
+                    setting._same_type_equal_skips[stat_key] = skip - 1
+                    return evaluation
+        setting._same_type_treasure_counts[stat_key] = count + 1
+        best = setting._same_type_best_levels.get(stat_key)
+        if best is None or _level_cmp(current_levels, best, mode, stat_types) > 0:
+            setting._same_type_best_levels[stat_key] = current_levels
         return evaluation
-    if _claim_by_limit(setting, stat_key, current_levels, limit, mode, stat_types):
-        # 认领成功时，将匹配的武器加入更新集合，确保计数和等级同步到引擎
-        if matched_weapon_ids:
-            for weapon_id in matched_weapon_ids:
-                _updated_this_scan.add(weapon_id)
-        return evaluation
+
+    weapon_ids = _order_candidate_ids(matched_weapon_ids, weapon_priority_order)
+
+    # 武器名称显示工具
+    def _display(wid: str) -> str:
+        custom_display = _custom_stat_display(setting, wid)
+        if custom_display is not None:
+            return custom_display
+        if static_game_data:
+            weapon = static_game_data.get_weapon(wid)
+            if weapon:
+                return f"{weapon.name}({wid})"
+        return wid
+
+    # 非降级原则过滤
+    if weapon_essence_levels and setting.same_type_non_downgrade_filter:
+        upgradeable_ids = []
+        for wid in weapon_ids:
+            existing = weapon_essence_levels.get(wid)
+            if existing is None:
+                upgradeable_ids.append(wid)
+            elif (
+                current_levels[0] >= existing[0]
+                and current_levels[1] >= existing[1]
+                and current_levels[2] >= existing[2]
+            ):
+                upgradeable_ids.append(wid)
+            else:
+                logger.debug(
+                    f"[非降级] 武器 {_display(wid)} 已保存等级 {existing}，"
+                    f"基质等级 {current_levels}，不满足非降级原则，过滤"
+                )
+        weapon_ids = upgradeable_ids
+
+    if not weapon_ids:
+        return EvaluationResult(
+            quality=EssenceQuality.TRASH,
+            log_message=(
+                "这个基质是<red><bold><underline>养成材料</></></>，"
+                "因为它无法升级任何匹配武器的已有基质（不满足非降级原则）。"
+            ),
+            matched_weapons=evaluation.matched_weapons,
+            matched_weapons_all_blocked=True,
+            is_high_level=evaluation.is_high_level,
+        )
+
+    # 用 stat_key 做共享计数器检查上限
     count = setting._same_type_treasure_counts.get(stat_key, 0)
-    logger.debug(f"[数量上限] {stat_key} 已达上限 {count}/{limit}，标记为养成材料")
+    stat_label = _format_stat_key(stat_key, static_game_data)
+
+    for weapon_id in weapon_ids:
+        # 留大弃小：用 weapon_id 检查（同步时需要按武器查找）
+        if keep_best:
+            best = setting._same_type_best_levels.get(weapon_id)
+            if (
+                best is not None
+                and _level_cmp(current_levels, best, mode, stat_types) == 0
+            ):
+                skip = setting._same_type_equal_skips.get(weapon_id, 0)
+                if skip > 0:
+                    setting._same_type_equal_skips[weapon_id] = skip - 1
+                    logger.debug(
+                        f"[留大弃小] 武器 {_display(weapon_id)} 基质等级 {current_levels} "
+                        f"等于已保存 {best}，认领（剩余跳过名额: {skip - 1}）"
+                    )
+                    return evaluation
+            if (
+                best is not None
+                and _level_cmp(current_levels, best, mode, stat_types) > 0
+            ):
+                setting._same_type_best_levels[weapon_id] = current_levels
+                _updated_this_scan.add(weapon_id)
+                logger.debug(
+                    f"[留大弃小] 武器 {_display(weapon_id)} 基质等级 {current_levels} "
+                    f"优于已保存 {best}，认领并提升阈值"
+                )
+                return evaluation
+
+        # 数量上限：用 stat_key 做共享计数，用 weapon_id 记录最佳等级
+        if count < limit:
+            # 与 BY_WEAPON 的 _claim_by_limit 对齐：劣于该武器已保存的最佳等级时
+            # 跳过该武器，避免更差基质覆盖已保存的更高等级（profile 降级）。
+            best = setting._same_type_best_levels.get(weapon_id)
+            if (
+                best is not None
+                and _level_cmp(current_levels, best, mode, stat_types) < 0
+            ):
+                logger.debug(
+                    f"[数量上限] 武器 {_display(weapon_id)} 已保存等级 {best}，"
+                    f"基质等级 {current_levels} 更差，跳过"
+                )
+                continue
+            setting._same_type_treasure_counts[stat_key] = count + 1
+            # 同时按武器记录计数：引擎同步循环按 weapon_id 查计数，
+            # 只写 stat_key 的话 BY_STAT 下武器计数永远同步不到引擎。
+            setting._same_type_treasure_counts[weapon_id] = (
+                setting._same_type_treasure_counts.get(weapon_id, 0) + 1
+            )
+            setting._same_type_best_levels[weapon_id] = current_levels
+            _updated_this_scan.add(weapon_id)
+            logger.debug(
+                f"[数量上限] 属性组合 [{stat_label}] 武器 {_display(weapon_id)} "
+                f"认领基质等级 {current_levels}，当前计数 {count + 1}/{limit}"
+            )
+            return evaluation
+
+    # 真实武器都已认领过，但共享计数还没到 limit → 用虚拟武器接收
+    # 虚拟武器支持留大弃小，但不落盘（不加入 _updated_this_scan）。
+    # 已认领虚拟槽（index 0..count-1）只允许更优等级覆盖，更差/相等跳过；
+    # 配额未满时，index == count 的空闲槽用于新认领。
+    for v_idx in range(count + 1):
+        virtual_key = f"_virtual_{stat_key}_{v_idx}"
+        if v_idx < count:
+            if keep_best:
+                best = setting._same_type_best_levels.get(virtual_key)
+                if best is not None:
+                    cmp = _level_cmp(current_levels, best, mode, stat_types)
+                    if cmp == 0:
+                        # 等级相等，虚拟武器无跳过名额，跳过
+                        continue
+                    if cmp > 0:
+                        setting._same_type_best_levels[virtual_key] = current_levels
+                        logger.debug(
+                            f"[留大弃小] 属性组合 [{stat_label}] 虚拟基质 #{v_idx + 1} "
+                            f"等级 {current_levels} 优于已保存 {best}，认领并提升阈值"
+                        )
+                        return evaluation
+                    # 更差：跳过该虚拟槽，避免覆盖已保存的更高等级（与真实武器分支对齐）
+                    logger.debug(
+                        f"[留大弃小] 属性组合 [{stat_label}] 虚拟基质 #{v_idx + 1} "
+                        f"已保存等级 {best}，基质等级 {current_levels} 更差，跳过"
+                    )
+            continue
+        if count >= limit:
+            break
+        # 分配给新虚拟武器
+        setting._same_type_treasure_counts[stat_key] = count + 1
+        setting._same_type_best_levels[virtual_key] = current_levels
+        logger.debug(
+            f"[数量上限] 属性组合 [{stat_label}] 虚拟基质 #{v_idx + 1} "
+            f"认领等级 {current_levels}，当前计数 {count + 1}/{limit}"
+        )
+        return evaluation
+
+    # 所有配额都已用完
+    logger.debug(
+        f"[数量上限] 属性组合 [{stat_label}] "
+        f"所有可选武器 {', '.join(_display(w) for w in weapon_ids)} "
+        f"均已达上限 {limit}，标记为养成材料"
+    )
     return _make_trash_by_limit(evaluation, count, limit)
 
 
@@ -653,6 +899,7 @@ def _apply_weapon_group_limit(
     weapon_essence_levels: dict[str, tuple[int, int, int]] | None = None,
     weapon_priority_order: list[str] | None = None,
     static_game_data: StaticGameData | None = None,
+    exhausted_policy: Literal["trash", "keep"] = "trash",
 ) -> EvaluationResult:
     """按武器分组（每把武器独立计数）的限制逻辑。
 
@@ -661,14 +908,16 @@ def _apply_weapon_group_limit(
         stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
         weapon_essence_levels: 各武器当前基质等级，用于非降级原则过滤。
         weapon_priority_order: 武器优先级排序（高优先级在前），用于决定分配顺序。
+        exhausted_policy: 认领耗尽（或非降级过滤后无可用武器）时的处理方式：
+            "trash" 标记为养成材料；"keep" 保留原判定结果（不落盘，用于限制关闭时）。
     """
-    if weapon_priority_order:
-        weapon_ids = [w for w in weapon_priority_order if w in matched_weapon_ids]
-    else:
-        weapon_ids = sorted(matched_weapon_ids)
+    weapon_ids = _order_candidate_ids(matched_weapon_ids, weapon_priority_order)
 
     # 武器名称显示工具：输出 "武器名称(武器ID)" 格式
     def _display(wid: str) -> str:
+        custom_display = _custom_stat_display(setting, wid)
+        if custom_display is not None:
+            return custom_display
         if static_game_data:
             weapon = static_game_data.get_weapon(wid)
             if weapon:
@@ -709,6 +958,11 @@ def _apply_weapon_group_limit(
         weapon_ids = upgradeable_ids
 
     if not weapon_ids:
+        if exhausted_policy == "keep":
+            logger.debug(
+                "[非降级] 所有匹配武器均不满足非降级原则，保留为宝藏基质（不落盘）"
+            )
+            return evaluation
         return EvaluationResult(
             quality=EssenceQuality.TRASH,
             log_message=(
@@ -756,6 +1010,12 @@ def _apply_weapon_group_limit(
             return evaluation
 
     # 所有匹配武器都已达上限
+    if exhausted_policy == "keep":
+        logger.debug(
+            f"[数量上限] 所有可选武器 {', '.join(_display(w) for w in weapon_ids)} "
+            "均已认领 1 枚，保留为宝藏基质（不落盘）"
+        )
+        return evaluation
     logger.debug(
         f"[数量上限] 所有可选武器 {', '.join(_display(w) for w in weapon_ids)} 均已达上限 {limit}，标记为养成材料"
     )
@@ -774,18 +1034,6 @@ def _apply_same_type_treasure_limit(
     if evaluation.quality != EssenceQuality.TREASURE:
         return evaluation
 
-    # 当限制功能关闭时，仍需将匹配的武器加入更新集合，确保扫描结果同步到引擎
-    if not setting.same_type_treasure_limit_enabled:
-        if matched_weapon_ids:
-            for weapon_id in matched_weapon_ids:
-                _updated_this_scan.add(weapon_id)
-        return evaluation
-
-    limit = setting.same_type_treasure_limit
-    keep_best = setting.same_type_keep_best
-    mode = (
-        setting.same_type_keep_best_mode
-    )  # 留大弃小的等级比较方式（依次比对/和值比对/冷却脂消耗/概率和值）
     current_levels = (
         data.levels[0] or 1,
         data.levels[1] or 1,
@@ -793,6 +1041,32 @@ def _apply_same_type_treasure_limit(
     )
     # 传递词条类型，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表
     stat_types = data.stat_types
+
+    # 限制关闭时：仍按武器分配规则记录（每把武器上限 1 枚），认领的落盘，
+    # 分配不到武器的（耗尽/非降级过滤/无匹配武器）保留为宝藏基质，不落盘。
+    if not setting.same_type_treasure_limit_enabled:
+        if matched_weapon_ids:
+            return _apply_weapon_group_limit(
+                setting,
+                evaluation,
+                matched_weapon_ids,
+                current_levels,
+                limit=1,
+                keep_best=setting.same_type_keep_best,
+                mode=setting.same_type_keep_best_mode,
+                stat_types=stat_types,
+                weapon_essence_levels=weapon_essence_levels,
+                weapon_priority_order=weapon_priority_order,
+                static_game_data=static_game_data,
+                exhausted_policy="keep",
+            )
+        return evaluation
+
+    limit = setting.same_type_treasure_limit
+    keep_best = setting.same_type_keep_best
+    mode = (
+        setting.same_type_keep_best_mode
+    )  # 留大弃小的等级比较方式（依次比对/和值比对/冷却脂消耗/概率和值）
 
     if (
         setting.same_type_group_mode == SameTypeGroupMode.BY_WEAPON
@@ -824,6 +1098,9 @@ def _apply_same_type_treasure_limit(
         mode,
         stat_types,
         matched_weapon_ids,
+        weapon_essence_levels,
+        weapon_priority_order,
+        static_game_data,
     )
 
 
@@ -913,22 +1190,58 @@ def evaluate_essence(
         static_game_data.find_weapons_by_stats(weapon_attr, weapon_sec, weapon_skill)
     )
 
+    def format_weapon_description(weapon_id: str) -> str:
+        """格式化武器描述：内置武器如`名称（稀有度★ 类型）`，自定义基质如`名称（自定义基质）`。"""
+        if weapon_id.startswith(CUSTOM_ID_PREFIX):
+            custom_display = _custom_stat_display(setting, weapon_id)
+            return f"<fg #FF7100><bold>{custom_display}（自定义基质）</></>"
+        weapon = static_game_data.get_weapon(weapon_id)
+        if not weapon:
+            return f"<bold>{weapon_id}</>"
+
+        weapon_type = static_game_data.get_weapon_type(weapon.weapon_type)
+        type_name = weapon_type.name if weapon_type else "未知类型"
+
+        rarity_color = static_game_data.get_rarity_color(weapon.rarity)
+        return f"<fg {rarity_color}><bold>{weapon.name}（{weapon.rarity}★ {type_name}）</></>"
+
     # 尝试匹配用户自定义的宝藏基质条件
     for treasure_stat in setting.treasure_essence_stats:
         if _matches_treasure_stats(
             treasure_stat, stats, stat_types, setting.treasure_essence_match_mode
         ):
-            # 显示自定义基质名称，使用橙色（六星颜色）
-            custom_name = treasure_stat.name or "未命名"
+            # 自定义基质优先于内置武器认领：把 custom:{id} 加入候选，由分组逻辑排在最前。
+            # 自定义基质视作一把独立武器，参与按武器划分的上限（自定义与内置武器各计各的）。
+            candidate_ids = set(matched_weapon_ids)
+            if treasure_stat.id:
+                candidate_ids.add(f"{CUSTOM_ID_PREFIX}{treasure_stat.id}")
+            # 日志与内置武器分支统一为"完美契合武器…"格式：自定义基质显示为"名称（自定义基质）"，
+            # 内置武器仅展示未被拦截的（被拦截的武器不会接收该基质）。
+            non_trash_ids = candidate_ids - set(setting.trash_weapon_ids)
+            if non_trash_ids:
+                weapon_descriptions = [
+                    format_weapon_description(wid)
+                    for wid in _order_candidate_ids(
+                        non_trash_ids, weapon_priority_order
+                    )
+                ]
+                weapons_description_str = "、".join(weapon_descriptions)
+                log_message = f"这个基质是<green><bold><underline>宝藏</></></>，它完美契合武器{weapons_description_str}{high_level_info}。"
+            else:
+                # 无 id 的自定义基质且未匹配内置武器：没有候选可列，回退为直接说明原因
+                custom_name = treasure_stat.name or "未命名"
+                log_message = f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合自定义基质 <fg #FF7100><bold>{custom_name}</></> 的条件{high_level_info}。"
             return _apply_same_type_treasure_limit(
                 data,
                 setting,
                 EvaluationResult(
                     quality=EssenceQuality.TREASURE,
-                    log_message=f"这个基质是<green><bold><underline>宝藏</></></>，因为它符合自定义基质 <fg #FF7100><bold>{custom_name}</></> 的条件{high_level_info}。",
+                    log_message=log_message,
+                    matched_weapons=non_trash_ids,
+                    matched_weapons_all_blocked=False,
                     is_high_level=is_high_level_treasure,
                 ),
-                matched_weapon_ids=matched_weapon_ids,
+                matched_weapon_ids=candidate_ids,
                 weapon_essence_levels=weapon_essence_levels,
                 weapon_priority_order=weapon_priority_order,
                 static_game_data=static_game_data,
@@ -957,18 +1270,6 @@ def evaluate_essence(
 
     # 检查匹配到的武器中，是否有不在 trash_weapon_ids 中的
     non_trash_weapon_ids = matched_weapon_ids - set(setting.trash_weapon_ids)
-
-    def format_weapon_description(weapon_id: str) -> str:
-        """格式化武器描述，如`名称（稀有度★ 类型）`"""
-        weapon = static_game_data.get_weapon(weapon_id)
-        if not weapon:
-            return f"<bold>{weapon_id}</>"
-
-        weapon_type = static_game_data.get_weapon_type(weapon.weapon_type)
-        type_name = weapon_type.name if weapon_type else "未知类型"
-
-        rarity_color = static_game_data.get_rarity_color(weapon.rarity)
-        return f"<fg {rarity_color}><bold>{weapon.name}（{weapon.rarity}★ {type_name}）</></>"
 
     if non_trash_weapon_ids:
         # 只要有一个匹配武器未被拦截，就是宝藏

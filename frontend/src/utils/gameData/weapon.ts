@@ -39,6 +39,20 @@ export function getStatsForWeapon(weaponId: string): EssenceStat {
   }
 }
 
+/**
+ * 构造「属性组合」索引键。
+ *
+ * 内置武器（attributeStatId/secondaryStatId/skillStatId）与自定义基质
+ * （attribute/secondary/skill）共用同一格式，两类条目才能互相匹配。
+ */
+export function buildStatKey(
+  attribute: string | null,
+  secondary: string | null,
+  skill: string | null,
+): string {
+  return `${attribute}|${secondary}|${skill}`
+}
+
 /** 自定义基质配置类型 */
 export interface CustomStat {
   /**

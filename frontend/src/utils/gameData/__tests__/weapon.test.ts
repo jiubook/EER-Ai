@@ -9,6 +9,7 @@ import type { CustomStat } from '../weapon'
 
 import { describe, expect, it } from 'vitest'
 import {
+  buildStatKey,
   createCustomStatId,
   CUSTOM_ID_PREFIX,
   fallbackCustomStatName,
@@ -99,6 +100,21 @@ describe('createCustomStatId', () => {
   it('生成的 ID 可被 findCustomStat 正确检索', () => {
     const stat = makeStat(createCustomStatId(), '新建')
     expect(findCustomStat(toCustomStatId(stat), [stat])?.stat.name).toBe('新建')
+  })
+})
+
+describe('buildStatKey', () => {
+  it('内置武器与自定义基质的同类字段生成相同键', () => {
+    // 连线层用该键把自定义基质与内置武器互相匹配，格式必须一致
+    expect(buildStatKey('gem_attr', 'gem_sec', 'gem_skill')).toBe('gem_attr|gem_sec|gem_skill')
+  })
+
+  it('空属性用 null 占位，仍能与内置武器的空字段匹配', () => {
+    expect(buildStatKey(null, 'gem_sec', null)).toBe('null|gem_sec|null')
+  })
+
+  it('不同顺序/不同值生成不同键', () => {
+    expect(buildStatKey('a', 'b', 'c')).not.toBe(buildStatKey('a', 'c', 'b'))
   })
 })
 

@@ -176,6 +176,15 @@ class ScannerService:
             logger.info(f"开始同步 {len(data_to_sync)} 把武器到宝藏基质配置")
             try:
                 self._sync_to_treasure_matrix(data_to_sync)
+                # 通知前端刷新宝藏基质/基质规划等依赖 profiles 的页面
+                from endfield_essence_recognizer.dependencies import (
+                    get_event_service,
+                )
+                from endfield_essence_recognizer.services.event_service import (
+                    EVENT_PROFILES_CHANGED,
+                )
+
+                get_event_service().publish({"type": EVENT_PROFILES_CHANGED})
             except Exception as e:
                 logger.error(f"同步扫描数据失败: {e}", exc_info=True)
         else:
@@ -301,14 +310,25 @@ class ScannerService:
                 get_profile_manager,
             )
             from endfield_essence_recognizer.dependencies import (
+                default_user_setting_manager,
                 get_static_game_data,
             )
             from endfield_essence_recognizer.schemas.profile import (
+                CUSTOM_ID_PREFIX,
                 TreasureMatrixEntry,
             )
 
             profile_manager = get_profile_manager()
             static_data = get_static_game_data()
+
+            # 自定义基质 ID → 显示名称，用于落盘缓存与日志展示
+            custom_names = {
+                f"{CUSTOM_ID_PREFIX}{ts.id}": (ts.name or "未命名")
+                for ts in default_user_setting_manager()
+                .get_user_setting()
+                .treasure_essence_stats
+                if ts.id
+            }
 
             logger.info("获取到 profile_manager 和 static_data")
 
@@ -316,7 +336,12 @@ class ScannerService:
             for weapon_id, levels in weapon_levels.items():
                 logger.debug(f"处理武器 {weapon_id}, 等级: {levels}")
                 weapon = static_data.get_weapon(weapon_id)
-                weapon_name = weapon.name if weapon else weapon_id
+                if weapon:
+                    weapon_name = weapon.name
+                elif weapon_id.startswith(CUSTOM_ID_PREFIX):
+                    weapon_name = custom_names.get(weapon_id, weapon_id)
+                else:
+                    weapon_name = weapon_id
 
                 # 新增满级武器默认不参与计算，避免扫描后把已毕业武器加入刷取建议。
                 is_maxed = levels[0] == 6 and levels[1] == 6 and levels[2] == 3
@@ -335,26 +360,37 @@ class ScannerService:
 
             def log_synced_entry(entry: TreasureMatrixEntry, *, is_added: bool) -> None:
                 """统一输出新增/更新日志，避免两处格式漂移。"""
-                weapon = static_data.get_weapon(entry.weapon_id)
-                rarity_color = (
-                    static_data.get_rarity_color(weapon.rarity) if weapon else "#FFFFFF"
-                )
-                weapon_type = (
-                    static_data.get_weapon_type(weapon.weapon_type) if weapon else None
-                )
-                type_name = weapon_type.name if weapon_type else "未知类型"
-                rarity_label = f"{weapon.rarity}★ {type_name}" if weapon else type_name
-                weapon_name = entry.weapon_name or (
-                    weapon.name if weapon else entry.weapon_id
-                )
+                if entry.weapon_id.startswith(CUSTOM_ID_PREFIX):
+                    # 自定义基质沿用扫描日志的橙色（六星色）样式
+                    weapon_text = (
+                        f"<fg #FF7100><bold>{entry.weapon_name or entry.weapon_id}"
+                        "（自定义基质）</></>"
+                    )
+                else:
+                    weapon = static_data.get_weapon(entry.weapon_id)
+                    rarity_color = (
+                        static_data.get_rarity_color(weapon.rarity)
+                        if weapon
+                        else "#FFFFFF"
+                    )
+                    weapon_type = (
+                        static_data.get_weapon_type(weapon.weapon_type)
+                        if weapon
+                        else None
+                    )
+                    type_name = weapon_type.name if weapon_type else "未知类型"
+                    rarity_label = (
+                        f"{weapon.rarity}★ {type_name}" if weapon else type_name
+                    )
+                    weapon_name = entry.weapon_name or (
+                        weapon.name if weapon else entry.weapon_id
+                    )
+                    weapon_text = f"<fg {rarity_color}><bold>{weapon_name}（{rarity_label}）</></>"
                 level_text = _format_levels(
                     entry.affix1_level,
                     entry.affix2_level,
                     entry.affix3_level,
                     static_data,
-                )
-                weapon_text = (
-                    f"<fg {rarity_color}><bold>{weapon_name}（{rarity_label}）</></>"
                 )
                 if is_added:
                     logger.opt(colors=True).info(

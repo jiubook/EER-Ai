@@ -381,15 +381,19 @@ class ScannerEngine:
             logger.debug("未能从账号配置初始化武器等级: {}", exc)
 
     def _init_same_type_levels_from_profile(self, user_setting: UserSetting) -> None:
-        """从 profile 初始化同类型最佳等级及“跳过名额”，用于留大弃小策略。
+        """从 profile 初始化同类型最佳等级、相等跳过名额与存量计数。
 
-        只初始化最佳等级（阈值）和相等跳过名额，不初始化数量上限计数：完整扫描时
-        遇到 profile 里已保存的那几枚基质会走“相等→跳过”，不会被当作多出来的重复品
-        而误判为养成材料；数量上限只统计扫描中真正新增的同类型基质。
+        限额语义为"总保有量"：profile 中已保存的条数计入数量上限名额
+        （计数初始化为存量），扫描中存量基质再次出现时走"相等→跳过"
+        （不重复计数、也不会被误判为养成材料）；新增基质只有在存量未达
+        上限时才能认领。按武器划分与按基质划分两套 key 都初始化，语义一致。
         """
         try:
             from endfield_essence_recognizer.api.routes.profiles import (
                 get_profile_manager,
+            )
+            from endfield_essence_recognizer.schemas.profile import (
+                CUSTOM_ID_PREFIX,
             )
 
             profile_manager = get_profile_manager()
@@ -398,6 +402,12 @@ class ScannerEngine:
             # 按分组键（武器分组用 weapon_id，基质分组用 stat_key）收集已保存的等级
             group_levels: dict[tuple[str | None, ...] | str, list[tuple]] = {}
             fixed_entries: list[tuple[str, str]] = []  # (旧 weapon_id, 新 weapon_id)
+            # 自定义基质条目的属性组合只存在于用户配置，静态数据查不到 → 先建映射
+            custom_stat_key_by_id: dict[str, tuple[str | None, ...]] = {
+                f"{CUSTOM_ID_PREFIX}{ts.id}": (ts.attribute, ts.secondary, ts.skill)
+                for ts in user_setting.treasure_essence_stats
+                if ts.id
+            }
             for entry in profile.treasure_matrix:
                 levels = (
                     entry.affix1_level,
@@ -408,13 +418,16 @@ class ScannerEngine:
                 if weapon_id != entry.weapon_id:
                     fixed_entries.append((entry.weapon_id, weapon_id))
                 group_levels.setdefault(weapon_id, []).append(levels)
-                weapon = self.ctx.static_game_data.get_weapon(weapon_id)
-                if weapon:
-                    stat_key = (
-                        weapon.stat1_id,
-                        weapon.stat2_id,
-                        weapon.stat3_id,
-                    )
+                stat_key = custom_stat_key_by_id.get(weapon_id)
+                if stat_key is None:
+                    weapon = self.ctx.static_game_data.get_weapon(weapon_id)
+                    if weapon:
+                        stat_key = (
+                            weapon.stat1_id,
+                            weapon.stat2_id,
+                            weapon.stat3_id,
+                        )
+                if stat_key is not None:
                     group_levels.setdefault(stat_key, []).append(levels)
 
             # 自动修正 profile 中错误的 weapon_id
@@ -452,6 +465,8 @@ class ScannerEngine:
                 user_setting._same_type_equal_skips[key] = sum(
                     1 for lv in levels_list if lv == best
                 )
+                # 存量条数计入数量上限名额：总保有量 = 存量 + 新增 ≤ limit
+                user_setting._same_type_treasure_counts[key] = len(levels_list)
         except Exception as exc:
             logger.debug("未能从账号配置初始化同类型最佳等级: {}", exc)
 

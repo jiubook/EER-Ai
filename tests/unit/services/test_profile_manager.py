@@ -775,6 +775,135 @@ def test_migrate_custom_stat_ids_no_custom_refs(profile_manager: ProfileManager)
     assert profile_manager.migrate_custom_stat_ids(["aaa"]) is False
 
 
+# --- 内置武器 ID 变更迁移 ---
+
+
+def _seed_stale_weapon_refs(manager: ProfileManager) -> None:
+    """写入一份含旧中文 ID 引用与正常引用的账号数据。"""
+    manager.update_treasure_matrix(
+        [
+            TreasureMatrixEntry(
+                weapon_id="曜夜的首演",
+                weapon_name="曜夜的首演",
+                affix1_level=5,
+                priority=6,
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_sword_0001",
+                weapon_name="测试武器",
+                affix1_level=2,
+                priority=3,
+            ),
+        ]
+    )
+
+
+def test_migrate_stale_weapon_ids_rewrites_by_name(profile_manager: ProfileManager):
+    """旧中文 ID 按缓存的武器名称改写为最新 ID。"""
+    profile_manager.load()
+    _seed_stale_weapon_refs(profile_manager)
+
+    changed = profile_manager.migrate_stale_weapon_ids(
+        {"曜夜的首演": "wpn_lance_0101", "测试武器": "wpn_sword_0001"}
+    )
+
+    profile = profile_manager.get_active_profile()
+    assert changed is True
+    assert [e.weapon_id for e in profile.treasure_matrix] == [
+        "wpn_lance_0101",
+        "wpn_sword_0001",
+    ]
+    # 优先级映射的 key 同步改写，值不变
+    assert profile.weapon_priorities == {"wpn_lance_0101": 6, "wpn_sword_0001": 3}
+
+
+def test_migrate_stale_weapon_ids_uses_id_as_name_fallback(
+    profile_manager: ProfileManager,
+):
+    """未缓存名称时，用旧 ID 本身当名称匹配（旧中文 ID 即武器名）。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [TreasureMatrixEntry(weapon_id="曜夜的首演", affix1_level=4)]
+    )
+
+    assert (
+        profile_manager.migrate_stale_weapon_ids({"曜夜的首演": "wpn_lance_0101"})
+        is True
+    )
+
+    profile = profile_manager.get_active_profile()
+    assert profile.treasure_matrix[0].weapon_id == "wpn_lance_0101"
+
+
+def test_migrate_stale_weapon_ids_keeps_unmatched_refs(
+    profile_manager: ProfileManager,
+):
+    """游戏中已不存在且名称对不上的引用保持原样，不丢弃用户数据。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [
+            TreasureMatrixEntry(
+                weapon_id="wpn_removed", weapon_name="旧武器", affix1_level=2
+            )
+        ]
+    )
+
+    assert profile_manager.migrate_stale_weapon_ids({}) is False
+
+    profile = profile_manager.get_active_profile()
+    assert profile.treasure_matrix[0].weapon_id == "wpn_removed"
+
+
+def test_migrate_stale_weapon_ids_skips_custom_refs(profile_manager: ProfileManager):
+    """自定义基质引用不属于本迁移范围，保持原样。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [
+            TreasureMatrixEntry(
+                weapon_id="custom:abc123", weapon_name="自定", affix1_level=3
+            )
+        ]
+    )
+
+    assert profile_manager.migrate_stale_weapon_ids({}) is False
+
+    profile = profile_manager.get_active_profile()
+    assert profile.treasure_matrix[0].weapon_id == "custom:abc123"
+
+
+def test_migrate_stale_weapon_ids_is_idempotent(profile_manager: ProfileManager):
+    """迁移可重复执行：第二次不再产生变更（每次启动都会调用）。"""
+    profile_manager.load()
+    _seed_stale_weapon_refs(profile_manager)
+    weapons_by_name = {"曜夜的首演": "wpn_lance_0101", "测试武器": "wpn_sword_0001"}
+
+    assert profile_manager.migrate_stale_weapon_ids(weapons_by_name) is True
+    before = profile_manager.get_active_profile().model_dump()
+
+    assert profile_manager.migrate_stale_weapon_ids(weapons_by_name) is False
+    assert profile_manager.get_active_profile().model_dump() == before
+
+
+def test_migrate_stale_weapon_ids_covers_all_profiles(
+    profile_manager: ProfileManager,
+):
+    """迁移覆盖全部账号，而不只是当前激活账号。"""
+    profile_manager.load()
+    profile_manager.switch_profile("alt")
+    _seed_stale_weapon_refs(profile_manager)
+    profile_manager.switch_profile("default")
+    _seed_stale_weapon_refs(profile_manager)
+
+    profile_manager.migrate_stale_weapon_ids({"曜夜的首演": "wpn_lance_0101"})
+
+    for name in ("default", "alt"):
+        ids = [
+            e.weapon_id
+            for e in profile_manager.get_collection().profiles[name].treasure_matrix
+        ]
+        assert ids == ["wpn_lance_0101", "wpn_sword_0001"]
+
+
 def test_remove_custom_stat_refs_cleans_all_profiles(profile_manager: ProfileManager):
     """清理自定义引用：覆盖全部账号的矩阵与优先级，普通武器不受影响。"""
     profile_manager.load()

@@ -246,6 +246,63 @@ class ProfileManager:
                 )
             return changed
 
+    def migrate_stale_weapon_ids(self, weapons_by_name: dict[str, str]) -> bool:
+        """把因武器 ID 变更而失效的内置武器引用改写为最新 ID。
+
+        武器数据随游戏版本更新后，个别武器的 `weapon_id` 可能变化（例如把
+        中文 ID 规范为 `wpn_xxx`）。profile 里以旧 ID 保存的引用在新数据中
+        查不到，会导致宝藏基质页条目被静默过滤、武器总览误判未拥有、扫描
+        在旧引用旁新增重复条目。
+
+        这里按武器名称把旧 ID 改写为新 ID——名称是条目里唯一稳定的标识：
+        先用缓存的 `weapon_name` 匹配，为空时退化为用旧 ID 本身当名称匹配
+        （旧中文 ID 通常就是武器名称）。匹配不到的名称保持原样，绝不丢弃
+        用户数据。自定义基质引用由 `migrate_custom_stat_ids` 处理，不在此列。
+
+        幂等：已是新 ID 的引用不受影响，可安全地在每次启动时调用。
+
+        Args:
+            weapons_by_name: 武器名称 -> 最新 weapon_id 的映射。
+
+        Returns:
+            是否发生了改写（调用方据此决定是否需要写盘）。
+        """
+        with self._lock:
+            collection = self._collection.model_copy(deep=True)
+            changed = False
+            valid_ids = set(weapons_by_name.values())
+
+            def resolve(weapon_id: str, weapon_name: str) -> str:
+                """返回该引用的最新 ID；无法确定时原样返回。"""
+                if (
+                    weapon_id in valid_ids
+                    or weapon_id.startswith(CUSTOM_ID_PREFIX)
+                    or weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX)
+                ):
+                    return weapon_id
+                candidate = weapon_name or weapon_id
+                return weapons_by_name.get(candidate, weapon_id)
+
+            for profile in collection.profiles.values():
+                for entry in profile.treasure_matrix:
+                    resolved = resolve(entry.weapon_id, entry.weapon_name)
+                    if resolved != entry.weapon_id:
+                        entry.weapon_id = resolved
+                        changed = True
+
+                new_priorities: dict[str, int] = {}
+                for weapon_id, priority in profile.weapon_priorities.items():
+                    resolved = resolve(weapon_id, "")
+                    if resolved != weapon_id:
+                        changed = True
+                    new_priorities[resolved] = priority
+                profile.weapon_priorities = new_priorities
+
+            if changed:
+                self._commit_collection_unlocked(collection)
+                logger.info("已将失效的内置武器引用迁移为最新 ID")
+            return changed
+
     def remove_custom_stat_refs(self) -> bool:
         """移除所有账号中对自定义基质的引用（配置被重置/清空后调用）。
 

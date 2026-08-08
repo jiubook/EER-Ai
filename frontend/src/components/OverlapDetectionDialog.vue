@@ -16,7 +16,7 @@
           class="d-flex align-center mb-3 pa-3 border rounded flex-wrap"
           style="gap: 8px"
         >
-          <v-tooltip location="top" open-delay="0">
+          <v-tooltip location="top" open-delay="0" transition="none">
             <template #activator="{ props: tooltipProps }">
               <div
                 v-bind="tooltipProps"
@@ -39,7 +39,7 @@
           <v-icon :color="compareColor(idx)" size="small">
             {{ compareIcon(idx) }}
           </v-icon>
-          <v-tooltip location="top" open-delay="0">
+          <v-tooltip location="top" open-delay="0" transition="none">
             <template #activator="{ props: tooltipProps }">
               <div
                 v-bind="tooltipProps"
@@ -62,7 +62,7 @@
             density="compact"
             hide-details
             :items="targetOptions(item)"
-            :label="`切换目标（${item.matchedWeaponIds.length} 把同词条武器）`"
+            :label="`共有${item.matchedWeaponIds.length}把同词条武器`"
             style="max-width: 260px"
             variant="outlined"
             @update:model-value="onTargetChanged"
@@ -70,14 +70,51 @@
 
           <v-spacer />
           <v-chip-group v-model="item.action" mandatory>
-            <v-chip color="error" filter size="small" value="delete" variant="outlined"
-              >移除</v-chip
-            >
-            <v-chip color="primary" filter size="small" value="switch" variant="outlined"
-              >切换</v-chip
-            >
+            <v-tooltip location="top" open-delay="0" transition="none">
+              <template #activator="{ props: tooltipProps }">
+                <v-chip
+                  v-bind="tooltipProps"
+                  color="error"
+                  filter
+                  size="small"
+                  value="delete"
+                  variant="outlined"
+                  >移除</v-chip
+                >
+              </template>
+              <span>删除该自定义基质，不再作为宝藏判定条件</span>
+            </v-tooltip>
+            <v-tooltip location="top" open-delay="0" transition="none">
+              <template #activator="{ props: tooltipProps }">
+                <v-chip
+                  v-bind="tooltipProps"
+                  color="primary"
+                  filter
+                  size="small"
+                  value="switch"
+                  variant="outlined"
+                  >切换</v-chip
+                >
+              </template>
+              <span>删除自定义基质，并将其等级与优先级转移给内置武器</span>
+            </v-tooltip>
             <v-chip filter size="small" value="ignore" variant="outlined">本次忽略</v-chip>
-            <v-chip filter size="small" value="suppress" variant="outlined">不再提示</v-chip>
+            <v-tooltip location="top" open-delay="0" transition="none">
+              <template #activator="{ props: tooltipProps }">
+                <v-chip
+                  v-bind="tooltipProps"
+                  filter
+                  size="small"
+                  value="suppress"
+                  variant="outlined"
+                  >不再提示</v-chip
+                >
+              </template>
+              <span>
+                仅关闭进入宝藏基质页面时的自动重合检测弹窗。<br />
+                手动点击「武器总览 → 检查自定义基质重合」仍会显示该条目
+              </span>
+            </v-tooltip>
           </v-chip-group>
         </div>
       </v-card-text>
@@ -86,6 +123,7 @@
           :disabled="overlapCompareReady"
           location="top"
           text="等级比较结果尚未就绪，请稍候或手动选择"
+          transition="none"
         >
           <template #activator="{ props: tooltipProps }">
             <span v-bind="tooltipProps">
