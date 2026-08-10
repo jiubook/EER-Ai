@@ -1015,7 +1015,14 @@ def _apply_weapon_group_limit(
                         )
             return evaluation
         if _claim_by_limit(
-            setting, weapon_id, current_levels, limit, keep_best, mode, stat_types, _display
+            setting,
+            weapon_id,
+            current_levels,
+            limit,
+            keep_best,
+            mode,
+            stat_types,
+            _display,
         ):
             _claimed_this_scan.add((weapon_id, current_levels))
             _updated_this_scan.add(
