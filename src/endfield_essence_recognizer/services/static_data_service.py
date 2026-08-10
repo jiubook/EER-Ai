@@ -191,8 +191,8 @@ class StaticDataService:
         Get the mapping of matrix icon URLs.
 
         Returns:
-            A MatrixIconResponse containing the essence background URL
-            and skill stat ID to icon URL mapping.
+            A MatrixIconResponse containing the essence background URL,
+            the default essence icon URL, and skill stat ID to icon URL mapping.
         """
         # 技能属性ID到资源文件名的映射
         skill_icon_map = {
@@ -222,6 +222,7 @@ class StaticDataService:
 
         return MatrixIconResponse(
             essence_bg=f"{self.matrix_icon_base_url}item_gem_rarity_5.png",
+            default_icon=f"{self.matrix_icon_base_url}icon_wpngem_00.png",
             skills=skills,
         )
 

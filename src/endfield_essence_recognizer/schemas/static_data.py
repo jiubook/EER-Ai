@@ -115,6 +115,7 @@ class RarityColorResponse(BaseModel):
 
 class MatrixIconResponse(BaseModel):
     essence_bg: str = Field(description="基质底板图片的URL")
+    default_icon: str = Field(description="默认基质的图标URL（技能属性缺失时显示）")
     skills: dict[str, str] = Field(description="技能属性ID到图标URL的映射")
 
     model_config = ConfigDict(
