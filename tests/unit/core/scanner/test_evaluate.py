@@ -666,10 +666,10 @@ def test_evaluate_no_weapon_worse_level_trashes_with_clear_message(
     assert default_settings._same_type_treasure_counts.get(("A", "B", "C"), 0) == 0
 
 
-def test_evaluate_no_weapon_worse_level_trashes_without_keep_best(
+def test_evaluate_no_weapon_worse_level_claims_without_keep_best(
     mock_static_game_data, default_settings, default_essence_data
 ):
-    """无匹配武器 + 关闭留大弃小：更差基质同样拒绝，不认领也不消耗配额。"""
+    """无匹配武器 + 关闭留大弃小：不比较等级，未达上限即认领（先到先得）。"""
     default_settings.same_type_keep_best = False
     default_settings.treasure_essence_stats = [
         EssenceStats(attribute="A", secondary="B", skill="C")
@@ -682,9 +682,8 @@ def test_evaluate_no_weapon_worse_level_trashes_without_keep_best(
         default_essence_data, default_settings, mock_static_game_data
     )
 
-    assert result.quality == EssenceQuality.TRASH
-    assert "低于已保存" in result.log_message
-    assert default_settings._same_type_treasure_counts.get(("A", "B", "C"), 0) == 0
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_treasure_counts.get(("A", "B", "C"), 0) == 1
 
 
 def test_evaluate_by_stat_claim_writes_weapon_count_for_sync(
@@ -804,6 +803,59 @@ def test_evaluate_by_weapon_limit_still_allows_new_claims_with_quota(
         EssenceQuality.TREASURE,  # 存量 2（相等跳过）
         EssenceQuality.TREASURE,  # 新增认领 3/3
         EssenceQuality.TRASH,  # 超出总保有量
+    ]
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 3
+
+
+def test_evaluate_by_weapon_large_limit_no_keep_best_claims_worse_level(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按武器划分 + 大上限(999) + 关闭留大弃小：存量已有更高等级时，
+    更差基质仍被认领为宝藏（先到先得、来者不拒），不被识别为养成材料。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_WEAPON
+    default_settings.same_type_treasure_limit = 999
+    default_settings.same_type_keep_best = False
+    default_settings.same_type_non_downgrade_filter = False
+    _reset_scan_state(default_settings)
+    # 模拟 profile 已保存 1 枚 (3,3,3)：存量计数与最佳等级
+    default_settings._same_type_treasure_counts["wpn_a"] = 1
+    default_settings._same_type_best_levels["wpn_a"] = (3, 3, 3)
+    default_settings._same_type_equal_skips["wpn_a"] = 1
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+    default_essence_data.levels = [2, 2, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 2
+    # 更差基质不覆盖已保存的更高等级
+    assert default_settings._same_type_best_levels["wpn_a"] == (3, 3, 3)
+
+
+def test_evaluate_by_weapon_large_limit_no_keep_best_accepts_each_new(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """按武器划分 + 大上限(999) + 关闭留大弃小：连续扫描更差/同级基质全部认领。"""
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_WEAPON
+    default_settings.same_type_treasure_limit = 999
+    default_settings.same_type_keep_best = False
+    default_settings.same_type_non_downgrade_filter = False
+    _reset_scan_state(default_settings)
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    results = [
+        evaluate_essence(
+            default_essence_data, default_settings, mock_static_game_data, **kwargs
+        ).quality
+        for _ in range(3)
+    ]
+
+    assert results == [
+        EssenceQuality.TREASURE,
+        EssenceQuality.TREASURE,
+        EssenceQuality.TREASURE,
     ]
     assert default_settings._same_type_treasure_counts["wpn_a"] == 3
 

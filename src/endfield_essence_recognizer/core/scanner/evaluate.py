@@ -619,6 +619,7 @@ def _claim_by_limit(
     key: tuple[str | None, ...] | str,
     current_levels: tuple[int, int, int],
     limit: int,
+    keep_best: bool,
     mode: KeepBestMode = KeepBestMode.SEQUENTIAL,
     stat_types: list[StatType | None] | None = None,
     _weapon_display: Callable[[str], str] = lambda k: k,
@@ -626,6 +627,9 @@ def _claim_by_limit(
     """按数量上限认领当前基质：未达上限则保留并计数，同时维护最佳等级。
 
     Args:
+        limit: 每组数量上限。
+        keep_best: 留大弃小开关。开启时等级劣于已保存最佳的基质拒绝认领；
+            关闭时先到先得，仅按数量上限判断，不比较等级。
         mode: 等级比较方式，用于判断新基质是否比已记录的最佳等级更优。
         stat_types: 词条类型列表，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表。
     """
@@ -633,7 +637,11 @@ def _claim_by_limit(
     if count >= limit:
         return False
     best = setting._same_type_best_levels.get(key)
-    if best is not None and _level_cmp(current_levels, best, mode, stat_types) < 0:
+    if (
+        keep_best
+        and best is not None
+        and _level_cmp(current_levels, best, mode, stat_types) < 0
+    ):
         logger.debug(
             f"[数量上限] {_weapon_display(key)} 基质等级 {current_levels} 劣于已保存 {best}，不认领"
         )
@@ -687,13 +695,13 @@ def _apply_stat_group_limit(
             return _make_trash_by_limit(evaluation, count, limit)
         # 无匹配武器时，仍用 stat_key 更新（自定义基质场景）
         best = setting._same_type_best_levels.get(stat_key)
-        if best is not None:
+        if keep_best and best is not None:
             cmp = _level_cmp(current_levels, best, mode, stat_types)
-            # 与 _claim_by_limit 对齐：劣于已保存最佳等级的一律拒绝，
-            # 避免更差基质覆盖已保存等级或消耗配额（与 keep_best 无关）。
+            # 留大弃小开启时：劣于已保存最佳等级的一律拒绝，
+            # 避免更差基质覆盖已保存等级或消耗配额。
             if cmp < 0:
                 return _make_trash_by_worse_level(evaluation)
-            if keep_best and cmp == 0:
+            if cmp == 0:
                 skip = setting._same_type_equal_skips.get(stat_key, 0)
                 if skip > 0:
                     setting._same_type_equal_skips[stat_key] = skip - 1
@@ -783,11 +791,12 @@ def _apply_stat_group_limit(
 
         # 数量上限：用 stat_key 做共享计数，用 weapon_id 记录最佳等级
         if count < limit:
-            # 与 BY_WEAPON 的 _claim_by_limit 对齐：劣于该武器已保存的最佳等级时
-            # 跳过该武器，避免更差基质覆盖已保存的更高等级（profile 降级）。
+            # 留大弃小开启时：劣于该武器已保存的最佳等级时跳过该武器，
+            # 避免更差基质覆盖已保存的更高等级（profile 降级）。
             best = setting._same_type_best_levels.get(weapon_id)
             if (
-                best is not None
+                keep_best
+                and best is not None
                 and _level_cmp(current_levels, best, mode, stat_types) < 0
             ):
                 logger.debug(
@@ -801,7 +810,10 @@ def _apply_stat_group_limit(
             setting._same_type_treasure_counts[weapon_id] = (
                 setting._same_type_treasure_counts.get(weapon_id, 0) + 1
             )
-            setting._same_type_best_levels[weapon_id] = current_levels
+            # 只在更优时更新最佳等级，避免认领更差基质时 profile 降级
+            best = setting._same_type_best_levels.get(weapon_id)
+            if best is None or _level_cmp(current_levels, best, mode, stat_types) > 0:
+                setting._same_type_best_levels[weapon_id] = current_levels
             _updated_this_scan.add(weapon_id)
             logger.debug(
                 f"[数量上限] 属性组合 [{stat_label}] 武器 {_display(weapon_id)} "
@@ -978,6 +990,8 @@ def _apply_weapon_group_limit(
     # 留大弃小：如果该武器已有更优或相等的保存等级，直接认领（不占数量上限）。
     # 数量上限：如果未达上限，认领并计数。
     # 当武器通过留大弃小升级时，释放的旧等级会级联给剩余武器。
+    # 跟踪拒绝原因：全部因达上限 → 提示数量；存在因等级被拒 → 提示等级。
+    rejected_by_worse_level = False
     for i, weapon_id in enumerate(weapon_ids):
         old_best = setting._same_type_best_levels.get(weapon_id)
         if keep_best and _claim_as_owned(
@@ -1001,25 +1015,39 @@ def _apply_weapon_group_limit(
                         )
             return evaluation
         if _claim_by_limit(
-            setting, weapon_id, current_levels, limit, mode, stat_types, _display
+            setting, weapon_id, current_levels, limit, keep_best, mode, stat_types, _display
         ):
             _claimed_this_scan.add((weapon_id, current_levels))
             _updated_this_scan.add(
                 weapon_id
             )  # 认领成功时加入更新集合，确保计数和等级同步到引擎
             return evaluation
+        # 未被认领：keep_best 开启且该武器仍有配额，则必是因等级更差被拒
+        # （count>=limit 会走"已达上限"日志，只有配额未满时的拒绝才是等级原因）。
+        if keep_best and setting._same_type_treasure_counts.get(weapon_id, 0) < limit:
+            rejected_by_worse_level = True
 
-    # 所有匹配武器都已达上限
+    # 所有匹配武器都已达上限（或留大弃小下全部因等级被拒）
     if exhausted_policy == "keep":
         logger.debug(
             f"[数量上限] 所有可选武器 {', '.join(_display(w) for w in weapon_ids)} "
             "均已认领 1 枚，保留为宝藏基质（不落盘）"
         )
         return evaluation
+    if rejected_by_worse_level:
+        logger.debug(
+            f"[数量上限] 所有可选武器 {', '.join(_display(w) for w in weapon_ids)} "
+            f"均已保存更高等级，标记为养成材料（当前等级 {current_levels}）"
+        )
+        return _make_trash_by_worse_level(evaluation)
     logger.debug(
         f"[数量上限] 所有可选武器 {', '.join(_display(w) for w in weapon_ids)} 均已达上限 {limit}，标记为养成材料"
     )
-    return _make_trash_by_limit(evaluation, limit, limit)
+    current_count = max(
+        (setting._same_type_treasure_counts.get(w, 0) for w in weapon_ids),
+        default=0,
+    )
+    return _make_trash_by_limit(evaluation, current_count, limit)
 
 
 def _apply_same_type_treasure_limit(
