@@ -72,7 +72,10 @@
         <!-- 自定义基质区段 -->
         <template v-if="showCustomSection">
           <div class="d-flex align-center mb-1 mt-3">
-            <img v-if="essenceBgSrc" alt="" class="essence-icon-small me-2" :src="essenceBgSrc" />
+            <span class="essence-icon-stack me-2">
+              <img v-if="essenceBgSrc" alt="" :src="essenceBgSrc" />
+              <img v-if="defaultIconSrc" alt="" :src="defaultIconSrc" />
+            </span>
             <h4>自定义基质</h4>
           </div>
           <div class="weapon-overview-grid">
@@ -348,19 +351,22 @@ watch(
 
 // 底板图片路径
 const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
+// 默认基质图标路径（叠加在底板上）
+const defaultIconSrc = computed(() => matrixIcons.value.defaultIcon)
 
 // --- 武器卡片辅助函数 ---
 
-/** 获取武器的技能属性图标 URL */
+/** 获取武器的技能属性图标 URL；属性缺失或未匹配时兜底返回默认基质图标 */
 function getWeaponSkillIcon(weaponId: string): string | null {
+  const fallback = matrixIcons.value.defaultIcon || null
   const found = findCustomStat(weaponId, customStats.value)
   if (found) {
-    if (!found.stat.skill) return null
-    return matrixIcons.value.skills[found.stat.skill] || null
+    if (!found.stat.skill) return fallback
+    return matrixIcons.value.skills[found.stat.skill] || fallback
   }
   const weapon = weaponsMap.value.get(weaponId)
-  if (!weapon?.skillStatId) return null
-  return matrixIcons.value.skills[weapon.skillStatId] || null
+  if (!weapon?.skillStatId) return fallback
+  return matrixIcons.value.skills[weapon.skillStatId] || fallback
 }
 
 // 武器详情弹窗（null=关闭，string=打开编辑该武器）

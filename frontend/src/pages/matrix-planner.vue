@@ -496,12 +496,10 @@
                 v-if="selectedRarities.includes('custom') && customMatrixEntries.length > 0"
               >
                 <div class="d-flex align-center mb-2 mt-4">
-                  <img
-                    v-if="essenceBgSrc"
-                    alt=""
-                    class="essence-icon-small me-2"
-                    :src="essenceBgSrc"
-                  />
+                  <span class="essence-icon-stack me-2">
+                    <img v-if="essenceBgSrc" alt="" :src="essenceBgSrc" />
+                    <img v-if="defaultIconSrc" alt="" :src="defaultIconSrc" />
+                  </span>
                   <h4>自定义基质</h4>
                 </div>
                 <div class="weapon-grid">
@@ -638,6 +636,8 @@ const { customStats, customMatrixEntries, fetchCustomStats } = useCustomStats()
 
 // 底板图片路径
 const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
+// 默认基质图标路径（叠加在底板上）
+const defaultIconSrc = computed(() => matrixIcons.value.defaultIcon)
 // 页面渲染中会频繁判断"是否已有基质"，用 Set 避免对 treasureMatrix 反复线性扫描。
 const obtainedWeaponIds = computed(
   () => new Set(treasureMatrix.value.map((entry) => entry.weapon_id)),
@@ -1002,6 +1002,33 @@ function getSelectedWeaponMatchCount(choice: BattleChoice): number {
 }
 
 /**
+ * 根据 URL 参数选中武器并加入需求列表。
+ *
+ * 内置武器直接按 weaponId 添加；自定义基质需要先从配置中解析
+ * 出属性组合（fetchCustomStats 是异步的，可能尚未就绪），
+ * 再按合成 ID 添加需求。
+ */
+async function selectWeaponFromQuery(weaponParam: string) {
+  if (isCustomStatId(weaponParam)) {
+    if (customStats.value.length === 0) {
+      await fetchCustomStats()
+    }
+    const found = findCustomStat(weaponParam, customStats.value)
+    if (!found) return
+    const stat = found.stat
+    if (!stat.attribute || !stat.secondary || !stat.skill) return
+    addStatFromCustomPreset(
+      weaponParam,
+      getStatDisplayName(stat.attribute),
+      getStatDisplayName(stat.secondary),
+      getStatDisplayName(stat.skill),
+    )
+    return
+  }
+  addStatFromWeapon(weaponParam)
+}
+
+/**
  * 在页面加载时处理 URL 参数。
  */
 onMounted(() => {
@@ -1011,6 +1038,11 @@ onMounted(() => {
   if (shouldClear) {
     // 从宝藏基质跳转过来，清空之前的选择
     clearAllStats()
+  }
+
+  const weaponParam = route.query.weapon
+  if (typeof weaponParam === 'string' && weaponParam) {
+    void selectWeaponFromQuery(weaponParam)
   }
 
   if (noPrecraft) {
@@ -1032,6 +1064,11 @@ watch(
 
     if (shouldClear) {
       clearAllStats()
+    }
+
+    const weaponParam = query.weapon
+    if (typeof weaponParam === 'string' && weaponParam) {
+      void selectWeaponFromQuery(weaponParam)
     }
 
     if (noPrecraft) {

@@ -41,6 +41,7 @@ export interface RarityColorResponse {
 
 export interface MatrixIconResponse {
   essenceBg: string
+  defaultIcon: string
   skills: Record<string, string>
 }
 

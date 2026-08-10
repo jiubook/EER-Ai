@@ -50,6 +50,18 @@ def test_get_rarity_colors_service(service):
     assert response.colors[4].upper() == "#9452FA"
 
 
+def test_get_matrix_icons_service(service):
+    response = service.get_matrix_icons()
+    assert response.essence_bg.endswith("item_gem_rarity_5.png")
+    assert response.default_icon.endswith("icon_wpngem_00.png")
+    assert len(response.skills) > 0
+    for skill_id, icon_url in response.skills.items():
+        assert icon_url.startswith("/")
+        assert skill_id.startswith("gst_passive_") or skill_id.startswith(
+            "weapon.stat.gst_passive_"
+        )
+
+
 def test_get_essence_service(service):
     essences = service.list_essences().items
     assert len(essences) > 0, "Essence dataset must not be empty"

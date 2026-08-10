@@ -46,10 +46,10 @@ watch([() => props.name, nameRef], () => {
 // 底板图片路径
 const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
 
-// 技能属性图标路径
+// 技能属性图标路径；属性缺失或未匹配时兜底显示默认基质图标
 const skillIconSrc = computed(() => {
-  if (!props.skillStatId) return null
-  return matrixIcons.value.skills[props.skillStatId] || null
+  if (!props.skillStatId) return matrixIcons.value.defaultIcon || null
+  return matrixIcons.value.skills[props.skillStatId] || matrixIcons.value.defaultIcon || null
 })
 
 // 技能图标 alt 文本：用词条的中文名，英文缩写对读屏软件没有意义
