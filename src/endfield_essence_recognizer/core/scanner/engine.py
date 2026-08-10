@@ -25,6 +25,7 @@ from endfield_essence_recognizer.core.scanner.context import (
     ScannerContext,
 )
 from endfield_essence_recognizer.core.scanner.evaluate import (
+    _group_stat_key,
     _level_cmp,
     evaluate_essence,
 )
@@ -318,6 +319,7 @@ class ScannerEngine:
         排序规则：
         1. 用户设置的 priority（正数）优先于默认值
         2. 默认值按稀有度降序排列
+        3. 同优先级按武器 ID 升序，保证分配顺序确定可复现
         """
         priority_map: dict[str, int] = {}
         try:
@@ -343,7 +345,8 @@ class ScannerEngine:
             weapon = self.ctx.static_game_data.get_weapon(weapon_id)
             return weapon.rarity if weapon else 0
 
-        return sorted(weapon_ids, key=lambda wid: -get_priority(wid))
+        # 同优先级按武器 ID 升序（元组第二键），避免集合迭代顺序导致的不确定性
+        return sorted(weapon_ids, key=lambda wid: (-get_priority(wid), wid))
 
     def _resolve_weapon_id(self, weapon_id_or_name: str) -> str:
         """将武器名称归一化为武器 ID；已是合法 ID 则原样返回。"""
@@ -471,16 +474,8 @@ class ScannerEngine:
             logger.debug("未能从账号配置初始化同类型最佳等级: {}", exc)
 
     def _get_stat_tuple(self, weapon_ids: set[str]) -> tuple:
-        """获取一组武器的属性组合作为 hashable key。"""
-        for wid in weapon_ids:
-            weapon = self.ctx.static_game_data.get_weapon(wid)
-            if weapon:
-                return (
-                    weapon.stat1_id,
-                    weapon.stat2_id,
-                    weapon.stat3_id,
-                )
-        return ()
+        """获取一组武器的属性组合作为 hashable key（复用 evaluate 的统一实现）。"""
+        return _group_stat_key(weapon_ids, self.ctx.static_game_data)
 
     def _assign_essence_to_weapon(
         self,
@@ -631,9 +626,10 @@ class ScannerEngine:
         # 从 profile 初始化已有武器等级，用于同等级跳过判断
         self._init_weapon_levels_from_profile()
 
-        # 从 profile 初始化同类型最佳等级，用于留大弃小策略
-        if user_setting.same_type_treasure_limit_enabled:
-            self._init_same_type_levels_from_profile(user_setting)
+        # 从 profile 初始化同类型最佳等级/计数/相等跳过名额。
+        # 数量上限关闭时同样需要：用于留大弃小策略、存量跳过（重扫不重复认领）
+        # 与相同等级基质的分散分配。
+        self._init_same_type_levels_from_profile(user_setting)
 
         icon_x_list = self._profile.essence_icon_x_list
         icon_y_list = self._profile.essence_icon_y_list
@@ -839,9 +835,10 @@ class DraggableScannerEngine(ScannerEngine):
         # 从 profile 初始化已有武器等级，用于同等级跳过判断
         self._init_weapon_levels_from_profile()
 
-        # 从 profile 初始化同类型最佳等级，用于留大弃小策略
-        if user_setting.same_type_treasure_limit_enabled:
-            self._init_same_type_levels_from_profile(user_setting)
+        # 从 profile 初始化同类型最佳等级/计数/相等跳过名额。
+        # 数量上限关闭时同样需要：用于留大弃小策略、存量跳过（重扫不重复认领）
+        # 与相同等级基质的分散分配。
+        self._init_same_type_levels_from_profile(user_setting)
 
         # 检查是否启用自动翻页
         auto_page_flip = user_setting.auto_page_flip

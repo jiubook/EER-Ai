@@ -24,12 +24,22 @@ from endfield_essence_recognizer.schemas.user_setting import (
 
 STAT_SLOTS = ("attribute", "secondary", "skill")
 
+# 数量上限关闭时的占位上限：取 schema 允许的最大值（UserSetting.same_type_treasure_limit 的
+# le=999），确保认领/级联的数量检查永不达额，语义等价于不限数量。
+UNLIMITED_LIMIT = 999
+
 # 本轮扫描中通过 _claim_by_limit 认领的 (key, level)，用于级联判断。
 _claimed_this_scan: set[tuple[str, tuple[int, int, int]]] = set()
 # 本轮扫描中实际更新了 best levels 的 key，用于同步到引擎。
 _updated_this_scan: set[str] = set()
-# 本轮扫描中级联更新了 best levels 的 key（不增加计数，仅同步等级到引擎）。
+# 本轮扫描中级联更新了 best levels 的 key（引擎仅据此同步等级）。
+# 级联武器同时会加入 _updated_this_scan 以同步计数。
 _cascade_updated_this_scan: set[str] = set()
+# 数量上限关闭模式：每组属性组合在指定等级上已扫描的基质数量，用于跳过
+# 已记录（存量/本组重扫）的同等级基质，避免重复认领。
+_limit_off_scanned: dict[tuple, int] = {}
+# 本轮扫描中更新过 best level 的 key（其存量跳过名额已失效，不再计入跳过配额）。
+_best_touched_this_scan: set[str] = set()
 
 
 def reset_scan_claims() -> None:
@@ -37,6 +47,8 @@ def reset_scan_claims() -> None:
     _claimed_this_scan.clear()
     _updated_this_scan.clear()
     _cascade_updated_this_scan.clear()
+    _limit_off_scanned.clear()
+    _best_touched_this_scan.clear()
 
 
 def get_updated_weapon_ids() -> set[str]:
@@ -45,8 +57,20 @@ def get_updated_weapon_ids() -> set[str]:
 
 
 def get_cascade_updated_weapon_ids() -> set[str]:
-    """获取本轮扫描中级联更新了 best levels 的武器 ID（仅等级，无计数）。"""
+    """获取本轮扫描中级联更新了 best levels 的武器 ID（引擎据此同步等级）。"""
     return _cascade_updated_this_scan.copy()
+
+
+def _group_stat_key(
+    matched_weapon_ids: set[str],
+    static_game_data: StaticGameData | None,
+) -> tuple:
+    """取一组武器的属性组合作为 hashable key（同属性组合的孪生武器共享）。"""
+    for wid in sorted(matched_weapon_ids):
+        weapon = static_game_data.get_weapon(wid) if static_game_data else None
+        if weapon:
+            return (weapon.stat1_id, weapon.stat2_id, weapon.stat3_id)
+    return tuple(sorted(matched_weapon_ids))
 
 
 def _order_candidate_ids(
@@ -879,10 +903,12 @@ def _cascade_freed_levels(
 ) -> None:
     """级联：将一把武器升级后释放的旧等级分配给剩余武器。
 
-    仅更新 _same_type_best_levels（不增加计数），用于后续非降级过滤。
-    级联武器记录到 _cascade_updated_this_scan，引擎会同步等级但不同步计数。
+    认领释放等级的武器同时增加计数（等价于接管了那枚基质），并同步
+    计数与等级到引擎；目标武器已达上限时不接收。
     """
     for wid in remaining_ids:
+        if setting._same_type_treasure_counts.get(wid, 0) >= limit:
+            continue  # 已达上限，无法接收释放的等级
         old_best = setting._same_type_best_levels.get(wid)
         # 检查释放的等级是否优于当前最佳
         if (
@@ -890,9 +916,14 @@ def _cascade_freed_levels(
             and _level_cmp(freed_levels, old_best, mode, stat_types) <= 0
         ):
             continue  # 不优于，跳过
-        # 认领释放的等级（不增加计数）
+        # 认领释放的等级（接管该枚基质的计数）
         setting._same_type_best_levels[wid] = freed_levels
+        setting._same_type_treasure_counts[wid] = (
+            setting._same_type_treasure_counts.get(wid, 0) + 1
+        )
+        _best_touched_this_scan.add(wid)
         _cascade_updated_this_scan.add(wid)
+        _updated_this_scan.add(wid)
         logger.debug(
             f"[级联] 武器 {_weapon_display(wid)} 认领释放的等级 {freed_levels}"
         )
@@ -912,6 +943,7 @@ def _apply_weapon_group_limit(
     weapon_priority_order: list[str] | None = None,
     static_game_data: StaticGameData | None = None,
     exhausted_policy: Literal["trash", "keep"] = "trash",
+    limit_off: bool = False,
 ) -> EvaluationResult:
     """按武器分组（每把武器独立计数）的限制逻辑。
 
@@ -922,6 +954,8 @@ def _apply_weapon_group_limit(
         weapon_priority_order: 武器优先级排序（高优先级在前），用于决定分配顺序。
         exhausted_policy: 认领耗尽（或非降级过滤后无可用武器）时的处理方式：
             "trash" 标记为养成材料；"keep" 保留原判定结果（不落盘，用于限制关闭时）。
+        limit_off: 数量上限关闭时置 True。每枚基质只认领一把武器，相同等级的
+            重复基质按优先级分散给组内其他武器，避免重复记录导致 profile 污染。
     """
     weapon_ids = _order_candidate_ids(matched_weapon_ids, weapon_priority_order)
 
@@ -986,21 +1020,132 @@ def _apply_weapon_group_limit(
             is_high_level=evaluation.is_high_level,
         )
 
+    # 数量上限关闭（limit_off）：单武器认领 + 分散分配。
+    # 每枚基质只认领一把武器（按优先级），避免同一枚基质被多把同属性武器
+    # 重复记录导致 profile 污染；计数总和等于物理基质枚数。
+    #   - 相同等级：已记录同等级的武器跳过（存量/重扫的基质不重复认领；
+    #     新增的重复基质按优先级分散给组内下一把武器）；
+    #   - 更差等级：已持有更佳等级的武器跳过，下放给下一把武器；
+    #   - 升级：认领并提升最佳等级，释放的旧等级级联给剩余武器；
+    #   - 无人可认领时：留大弃小关闭（或存在相同等级）则对最高优先级武器
+    #     仅计数（来者不拒），开启且全部严格更差则跳过。
+    if limit_off:
+        group_stat_key = _group_stat_key(matched_weapon_ids, static_game_data)
+        skip_key = (group_stat_key, current_levels)
+        # 存量跳过名额：本组中已保存且本轮未改动的最佳等级恰为当前等级的武器，
+        # 其存量相等名额总和即"已记录的该等级基质"数量。
+        recorded_slots = [
+            wid
+            for wid in weapon_ids
+            if setting._same_type_best_levels.get(wid) == current_levels
+            and wid not in _best_touched_this_scan
+        ]
+        profile_slots = sum(
+            setting._same_type_equal_skips.get(wid, 0) for wid in recorded_slots
+        )
+        scanned = _limit_off_scanned.get(skip_key, 0) + 1
+        _limit_off_scanned[skip_key] = scanned
+        if scanned <= profile_slots:
+            # 重扫已保存的同等级基质：不重复认领，仅把存量同步到引擎展示
+            for wid in recorded_slots:
+                _updated_this_scan.add(wid)
+            return evaluation
+
+        for i, weapon_id in enumerate(weapon_ids):
+            old_best = setting._same_type_best_levels.get(weapon_id)
+            if (
+                old_best is not None
+                and _level_cmp(current_levels, old_best, mode, stat_types) <= 0
+            ):
+                logger.debug(
+                    f"[数量上限关闭] 武器 {_display(weapon_id)} 已持有 "
+                    f"{old_best}（不差于当前 {current_levels}），分散给下一把武器"
+                )
+                continue
+            if old_best is None:
+                setting._same_type_treasure_counts[weapon_id] = (
+                    setting._same_type_treasure_counts.get(weapon_id, 0) + 1
+                )
+            setting._same_type_best_levels[weapon_id] = current_levels
+            _best_touched_this_scan.add(weapon_id)
+            _updated_this_scan.add(weapon_id)
+            _claimed_this_scan.add((weapon_id, current_levels))
+            logger.debug(
+                f"[数量上限关闭] 武器 {_display(weapon_id)} 认领基质等级 {current_levels}"
+            )
+            # 升级：释放的旧等级级联给剩余武器（旧等级需为本轮认领的）
+            if old_best is not None and (weapon_id, old_best) in _claimed_this_scan:
+                remaining = weapon_ids[i + 1 :]
+                if remaining:
+                    _cascade_freed_levels(
+                        setting,
+                        old_best,
+                        remaining,
+                        limit=UNLIMITED_LIMIT,
+                        mode=mode,
+                        stat_types=stat_types,
+                        _weapon_display=_display,
+                    )
+            return evaluation
+
+        # 无人可认领：留大弃小开启且所有武器均持有严格更佳等级时跳过（拒绝）
+        if keep_best and all(
+            setting._same_type_best_levels.get(w) is not None
+            and _level_cmp(
+                current_levels,
+                setting._same_type_best_levels[w],
+                mode,
+                stat_types,
+            )
+            < 0
+            for w in weapon_ids
+        ):
+            logger.debug(
+                "[数量上限关闭] 所有匹配武器均持有更佳等级，留大弃小开启，跳过"
+            )
+            return evaluation
+        # 仅计数（等级不变）：新增重复基质或留大弃小关闭时的更差基质
+        target = weapon_ids[0]
+        setting._same_type_treasure_counts[target] = (
+            setting._same_type_treasure_counts.get(target, 0) + 1
+        )
+        _updated_this_scan.add(target)
+        _claimed_this_scan.add((target, current_levels))
+        logger.debug(
+            f"[数量上限关闭] 武器 {_display(target)} 已持有不低于当前等级的基质，仅计数"
+        )
+        return evaluation
+
     # 矩阵只分配给一把武器（优先级最高的可接受武器）。
     # 留大弃小：如果该武器已有更优或相等的保存等级，直接认领（不占数量上限）。
     # 数量上限：如果未达上限，认领并计数。
     # 当武器通过留大弃小升级时，释放的旧等级会级联给剩余武器。
+    # 相同等级分散：该等级本轮已被认领过（归属不确定），持有该等级的武器跳过，
+    # 让重复基质分散给组内其他武器；无人可认领时盈余按优先级顺序回填（仅计数）。
     # 跟踪拒绝原因：全部因达上限 → 提示数量；存在因等级被拒 → 提示等级。
     rejected_by_worse_level = False
+    identical_claimants: list[str] = []
     for i, weapon_id in enumerate(weapon_ids):
         old_best = setting._same_type_best_levels.get(weapon_id)
+
+        if old_best == current_levels and any(
+            claimed_level == current_levels for _, claimed_level in _claimed_this_scan
+        ):
+            identical_claimants.append(weapon_id)
+            logger.debug(
+                f"[数量上限] 武器 {_display(weapon_id)} 本轮已认领等级 {current_levels}，"
+                f"归属不确定，分散给下一把武器"
+            )
+            continue
+
         if keep_best and _claim_as_owned(
             setting, weapon_id, current_levels, mode, stat_types, _display
         ):
             # 留大弃小认领成功，检查是否是升级（而非相等跳过）
             if old_best is not None and old_best != current_levels:
-                # 是升级：释放旧等级给剩余武器
-                # 仅当旧等级是本轮扫描中通过 _claim_by_limit 认领的才级联
+                # 是升级：记录本轮认领（供后续相同等级分散/级联判断），
+                # 并释放旧等级给剩余武器（仅当旧等级是本轮认领的才级联）
+                _claimed_this_scan.add((weapon_id, current_levels))
                 if (weapon_id, old_best) in _claimed_this_scan:
                     remaining = weapon_ids[i + 1 :]
                     if remaining:
@@ -1033,6 +1178,20 @@ def _apply_weapon_group_limit(
         # （count>=limit 会走"已达上限"日志，只有配额未满时的拒绝才是等级原因）。
         if keep_best and setting._same_type_treasure_counts.get(weapon_id, 0) < limit:
             rejected_by_worse_level = True
+
+    # 相同等级全部已认领过（归属不确定）：盈余按优先级顺序回填给第一个有容量的武器
+    for weapon_id in identical_claimants:
+        if setting._same_type_treasure_counts.get(weapon_id, 0) < limit:
+            setting._same_type_treasure_counts[weapon_id] = (
+                setting._same_type_treasure_counts.get(weapon_id, 0) + 1
+            )
+            _updated_this_scan.add(weapon_id)
+            logger.debug(
+                f"[数量上限] 武器 {_display(weapon_id)} 相同等级盈余回填，仅计数，"
+                f"当前计数 {setting._same_type_treasure_counts[weapon_id]}"
+            )
+            return evaluation
+    # 未回填成功（同等级武器全部达上限）→ 落入下方"全部已达上限"处理
 
     # 所有匹配武器都已达上限（或留大弃小下全部因等级被拒）
     if exhausted_policy == "keep":
@@ -1077,9 +1236,9 @@ def _apply_same_type_treasure_limit(
     # 传递词条类型，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表
     stat_types = data.stat_types
 
-    # 限制关闭时：视为不限数量（上限取 schema 允许的最大值），认领的落盘，
-    # 认领失败的（非降级过滤/无匹配武器）保留为宝藏基质，不落盘。
-    # 认领计数持续累加，让设置页等处的武器扫描数量显示实际扫描到的枚数。
+    # 限制关闭时：每枚基质只认领一把武器（单认领 + 分散分配），计数总和等于
+    # 物理基质枚数，避免同一枚基质被多把同属性武器重复记录导致 profile 污染；
+    # 认领失败的（非降级过滤后无可用武器）保留为宝藏基质，不落盘。
     if not setting.same_type_treasure_limit_enabled:
         if matched_weapon_ids:
             return _apply_weapon_group_limit(
@@ -1087,7 +1246,7 @@ def _apply_same_type_treasure_limit(
                 evaluation,
                 matched_weapon_ids,
                 current_levels,
-                limit=999,
+                limit=UNLIMITED_LIMIT,
                 keep_best=setting.same_type_keep_best,
                 mode=setting.same_type_keep_best_mode,
                 stat_types=stat_types,
@@ -1095,6 +1254,7 @@ def _apply_same_type_treasure_limit(
                 weapon_priority_order=weapon_priority_order,
                 static_game_data=static_game_data,
                 exhausted_policy="keep",
+                limit_off=True,
             )
         return evaluation
 

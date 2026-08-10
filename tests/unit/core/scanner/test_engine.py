@@ -407,6 +407,49 @@ def test_exact_level_skip_isolated_by_level(
     assert engine.get_weapon_essence_counts() == {}
 
 
+def test_sort_weapons_by_priority_deterministic_tie_break(
+    monkeypatch,
+    mock_scanner_context,
+    mock_user_setting_manager,
+    mock_profile,
+):
+    """同稀有度武器按 ID 升序排序，分配顺序确定可复现。"""
+    from endfield_essence_recognizer.api.routes import profiles as profiles_routes
+
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    profile_manager = MagicMock()
+    profile_manager.get_active_profile.return_value = SimpleNamespace(
+        treasure_matrix=[], weapon_priorities={}
+    )
+    monkeypatch.setattr(profiles_routes, "get_profile_manager", lambda: profile_manager)
+
+    def fake_get_weapon(weapon_id):
+        if weapon_id in ("wpn_b", "wpn_a", "wpn_c", "wpn_low"):
+            rarity = 5 if weapon_id == "wpn_low" else 6
+            return SimpleNamespace(name=weapon_id, rarity=rarity)
+        return None
+
+    mock_scanner_context.static_game_data.get_weapon.side_effect = fake_get_weapon
+
+    # 同稀有度：按武器 ID 升序
+    assert engine._sort_weapons_by_priority({"wpn_b", "wpn_a", "wpn_c"}) == [
+        "wpn_a",
+        "wpn_b",
+        "wpn_c",
+    ]
+    # 不同稀有度：稀有度降序优先
+    assert engine._sort_weapons_by_priority({"wpn_low", "wpn_a"}) == [
+        "wpn_a",
+        "wpn_low",
+    ]
+
+
 def test_downgrade_blocked_essence_is_not_fallback_counted(
     mock_scanner_context, mock_user_setting_manager, mock_profile
 ):
