@@ -17,7 +17,7 @@ const weaponsMap = ref<Map<string, WeaponInfo>>(new Map())
 const weaponTypes = ref<WeaponTypeInfo[]>([])
 const essencesMap = ref<Map<string, EssenceInfo>>(new Map())
 const rarityColors = ref<Record<number, string>>({})
-const matrixIcons = ref<MatrixIconResponse>({ essenceBg: '', skills: {} })
+const matrixIcons = ref<MatrixIconResponse>({ essenceBg: '', defaultIcon: '', skills: {} })
 const energyAlluviums = ref<EnergyAlluviumInfo[]>([])
 const isLoaded = ref(false)
 
@@ -55,6 +55,7 @@ async function fetchStaticData() {
         fetchJson<EnergyAlluviumListResponse>(`/api/static/energy_alluviums`),
         fetchOptionalJson<MatrixIconResponse>(`/api/static/matrix_icons`, {
           essenceBg: '',
+          defaultIcon: '',
           skills: {},
         }),
       ])

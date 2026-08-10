@@ -17,9 +17,10 @@
           <v-text-field
             v-if="isCustomEntry(weaponId) || isNewCustom"
             v-model="customEntryName"
+            class="custom-name-field"
             density="compact"
             hide-details
-            placeholder="自定义基质名称"
+            placeholder="自定义基质名称(点我进行修改)"
             variant="underlined"
           />
           <template v-else>
@@ -99,6 +100,19 @@
             </v-col>
           </v-row>
         </div>
+
+        <!-- 跳转基质规划：查看该基质的刷取方案 -->
+        <v-btn
+          v-if="!isNewCustom"
+          class="mb-4"
+          color="primary"
+          prepend-icon="mdi-map-search"
+          size="small"
+          variant="tonal"
+          @click="navigateToPlanner"
+        >
+          查看最优刷取方案
+        </v-btn>
 
         <!-- 基质等级 -->
         <div class="mb-4 detail-level-outer">
@@ -347,6 +361,7 @@
 
 <script lang="ts" setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { useCustomStats } from '@/composables/useCustomStats'
@@ -364,6 +379,23 @@ const dialogOpen = computed({
     if (!open) weaponId.value = null
   },
 })
+
+const router = useRouter()
+
+/**
+ * 跳转到基质规划页面，在武器预设中选中当前基质并计算最优刷取方案。
+ * 不使用预刻券模式保持关闭（不传 noPrecraft 参数）。
+ */
+function navigateToPlanner() {
+  const id = weaponId.value
+  if (!id || id === '__new_custom__') return
+  router.push({
+    name: 'matrix-planner',
+    query: { clear: 'true', weapon: id },
+  })
+  // 滚动到页面顶部
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
 
 const { weaponsMap, essencesMap } = useStaticData()
 const { treasureMatrix, updateTreasureMatrix, updateWeaponPriority } = useProfiles()
@@ -922,6 +954,11 @@ async function swapMatrix(weaponAId: string, weaponBId: string) {
   height: 3rem !important;
   min-width: 3rem !important;
   min-height: 3rem !important;
+}
+
+// 自定义基质名称输入框：字号与内置武器名（v-card-title 默认 1.25rem）保持一致
+.custom-name-field :deep(.v-field__input) {
+  font-size: 1.25em;
 }
 
 .weapon-icon-same {
