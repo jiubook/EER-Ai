@@ -1070,8 +1070,9 @@ def _apply_same_type_treasure_limit(
     # 传递词条类型，用于 GREASE 和 WEIGHTED_SUM 模式下动态选择权重表
     stat_types = data.stat_types
 
-    # 限制关闭时：仍按武器分配规则记录（每把武器上限 1 枚），认领的落盘，
-    # 分配不到武器的（耗尽/非降级过滤/无匹配武器）保留为宝藏基质，不落盘。
+    # 限制关闭时：视为不限数量（上限取 schema 允许的最大值），认领的落盘，
+    # 认领失败的（非降级过滤/无匹配武器）保留为宝藏基质，不落盘。
+    # 认领计数持续累加，让设置页等处的武器扫描数量显示实际扫描到的枚数。
     if not setting.same_type_treasure_limit_enabled:
         if matched_weapon_ids:
             return _apply_weapon_group_limit(
@@ -1079,7 +1080,7 @@ def _apply_same_type_treasure_limit(
                 evaluation,
                 matched_weapon_ids,
                 current_levels,
-                limit=1,
+                limit=999,
                 keep_best=setting.same_type_keep_best,
                 mode=setting.same_type_keep_best_mode,
                 stat_types=stat_types,

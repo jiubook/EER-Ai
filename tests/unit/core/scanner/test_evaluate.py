@@ -946,33 +946,37 @@ def test_evaluate_limit_disabled_keep_best_upgrades_keeps_worse(
     assert default_settings._same_type_best_levels["wpn_a"] == (4, 3, 3)
 
 
-def test_evaluate_limit_disabled_no_keep_best_first_come_first_served(
+def test_evaluate_limit_disabled_no_keep_best_claims_each(
     mock_static_game_data, default_settings, default_essence_data
 ):
-    """关闭数量上限且关闭留大弃小：无比较，首枚认领后锁定，更优的也不替换。"""
+    """关闭数量上限且关闭留大弃小：来者不拒，每一枚都认领并累加计数，
+    更优的基质同时提升已记录等级。"""
     default_settings.same_type_treasure_limit_enabled = False
     default_settings.same_type_keep_best = False
     _reset_scan_state(default_settings)
     kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
 
     default_essence_data.levels = [3, 3, 3]
-    evaluate_essence(
+    first = evaluate_essence(
         default_essence_data, default_settings, mock_static_game_data, **kwargs
     )
+    assert first.quality == EssenceQuality.TREASURE
     assert default_settings._same_type_best_levels["wpn_a"] == (3, 3, 3)
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 1
 
     default_essence_data.levels = [4, 3, 3]
-    result = evaluate_essence(
+    second = evaluate_essence(
         default_essence_data, default_settings, mock_static_game_data, **kwargs
     )
-    assert result.quality == EssenceQuality.TREASURE
-    assert default_settings._same_type_best_levels["wpn_a"] == (3, 3, 3)
+    assert second.quality == EssenceQuality.TREASURE
+    assert default_settings._same_type_best_levels["wpn_a"] == (4, 3, 3)
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 2
 
 
-def test_evaluate_limit_disabled_exhausted_keeps_treasure(
+def test_evaluate_limit_disabled_claims_every_match(
     mock_static_game_data, default_settings, default_essence_data
 ):
-    """关闭数量上限后，所有匹配武器各认领 1 枚后，多余的保留为宝藏基质。"""
+    """关闭数量上限后，同一武器扫描到多枚基质时全部认领，计数持续累加。"""
     default_settings.same_type_treasure_limit_enabled = False
     _reset_scan_state(default_settings)
     kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a", "wpn_b"])
@@ -987,10 +991,8 @@ def test_evaluate_limit_disabled_exhausted_keeps_treasure(
         default_essence_data, default_settings, mock_static_game_data, **kwargs
     )
     assert extra.quality == EssenceQuality.TREASURE
-    assert default_settings._same_type_best_levels == {
-        "wpn_a": (1, 1, 1),
-        "wpn_b": (1, 1, 1),
-    }
+    assert default_settings._same_type_best_levels["wpn_a"] == (1, 1, 1)
+    assert default_settings._same_type_treasure_counts["wpn_a"] == 3
 
 
 def test_evaluate_limit_disabled_non_downgrade_filter_blocks_keeps(
