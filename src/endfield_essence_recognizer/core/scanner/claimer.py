@@ -28,6 +28,7 @@ from endfield_essence_recognizer.core.scanner.models import (
     LevelTuple,
     RejectReason,
 )
+from endfield_essence_recognizer.schemas.profile import CUSTOM_ID_PREFIX
 from endfield_essence_recognizer.schemas.user_setting import (
     KeepBestMode,
     SameTypeGroupMode,
@@ -67,12 +68,34 @@ class ClaimContext:
         self.treasure_counts: dict[str | tuple, int] = {}
         self.equal_skips: dict[str | tuple, int] = {}
 
+        # 日志显示用引用
+        self._static_game_data = static_game_data
+        self._user_setting = user_setting
+
         # 本轮扫描中的累加状态
         self.claimed_this_scan: set[tuple[str, LevelTuple]] = set()
         self.group_scanned: dict[tuple, int] = {}
 
         # 从 profile 初始化
         self._init_from_profile(profile_entries, user_setting, static_game_data)
+
+    def _display(self, key: str | tuple) -> str:
+        """输出 "中文名(id)" 格式便于日志排查；属性组合输出可读名称。"""
+        from endfield_essence_recognizer.core.scanner.classifier import (
+            _custom_stat_display,
+        )
+
+        if isinstance(key, tuple):
+            return _format_stat_key(key, self._static_game_data)
+        if key.startswith(CUSTOM_ID_PREFIX):
+            custom = _custom_stat_display(self._user_setting, key)
+            return f"{custom}({key})" if custom else key
+        weapon = (
+            self._static_game_data.get_weapon(key) if self._static_game_data else None
+        )
+        if weapon:
+            return f"{weapon.name}({key})"
+        return key
 
     def _init_from_profile(
         self,
@@ -306,7 +329,7 @@ class ClaimContext:
                     upgradeable_ids.append(wid)
                 else:
                     logger.debug(
-                        f"[非降级] 武器 {wid} 已保存等级 {existing}，"
+                        f"[非降级] 武器 {self._display(wid)} 已保存等级 {existing}，"
                         f"基质等级 {current_levels}，不满足非降级原则，过滤"
                     )
             weapon_ids = upgradeable_ids
@@ -386,7 +409,7 @@ class ClaimContext:
             if skip > 0:
                 self.equal_skips[wid] = skip - 1
                 logger.debug(
-                    f"[相同等级] 武器 {wid} 已记录等级 {current_levels}，"
+                    f"[相同等级] 武器 {self._display(wid)} 已记录等级 {current_levels}，"
                     f"消耗存量跳过名额（剩余 {skip - 1}），不重复认领"
                 )
                 return ClaimResult(updated_levels={wid: current_levels})
@@ -398,7 +421,7 @@ class ClaimContext:
                 self.treasure_counts[wid] = 1
                 self.claimed_this_scan.add((wid, current_levels))
                 logger.debug(
-                    f"[相同等级] 武器 {wid} 无记录，认领基质等级 {current_levels}"
+                    f"[相同等级] 武器 {self._display(wid)} 无记录，认领基质等级 {current_levels}"
                 )
                 return ClaimResult(
                     accepted_weapon_id=wid,
@@ -410,7 +433,7 @@ class ClaimContext:
             if self.treasure_counts.get(wid, 0) < limit:
                 self.treasure_counts[wid] = self.treasure_counts.get(wid, 0) + 1
                 logger.debug(
-                    f"[相同等级] 武器 {wid} 已持有同等级基质，"
+                    f"[相同等级] 武器 {self._display(wid)} 已持有同等级基质，"
                     f"保留为宝藏（仅计数，不落盘），当前计数 "
                     f"{self.treasure_counts[wid]}"
                 )
@@ -450,7 +473,7 @@ class ClaimContext:
                 and _level_cmp(current_levels, old_best, mode, stat_types) <= 0
             ):
                 logger.debug(
-                    f"[数量上限关闭] 武器 {weapon_id} 已持有 "
+                    f"[数量上限关闭] 武器 {self._display(weapon_id)} 已持有 "
                     f"{old_best}（不差于当前 {current_levels}），分散给下一把武器"
                 )
                 continue
@@ -461,7 +484,7 @@ class ClaimContext:
             self.best_levels[weapon_id] = current_levels
             self.claimed_this_scan.add((weapon_id, current_levels))
             logger.debug(
-                f"[数量上限关闭] 武器 {weapon_id} 认领基质等级 {current_levels}"
+                f"[数量上限关闭] 武器 {self._display(weapon_id)} 认领基质等级 {current_levels}"
             )
             # 升级：释放旧等级级联
             cascade: dict[str, LevelTuple] = {}
@@ -497,7 +520,7 @@ class ClaimContext:
         target = weapon_ids[0]
         self.treasure_counts[target] = self.treasure_counts.get(target, 0) + 1
         self.claimed_this_scan.add((target, current_levels))
-        logger.debug(f"[数量上限关闭] 武器 {target} 仅计数")
+        logger.debug(f"[数量上限关闭] 武器 {self._display(target)} 仅计数")
         return ClaimResult(
             accepted_weapon_id=target,
             updated_levels={target: self.best_levels.get(target) or current_levels},
@@ -598,7 +621,8 @@ class ClaimContext:
         if cmp > 0:
             self.best_levels[key] = current_levels
             logger.debug(
-                f"[留大弃小] {key} 基质等级 {current_levels} 优于已保存 {best}，认领并提升阈值"
+                f"[留大弃小] {self._display(key)} 基质等级 {current_levels} "
+                f"优于已保存 {best}，认领并提升阈值"
             )
             skip = self.equal_skips.get(key, 0)
             if skip > 0:
@@ -609,7 +633,8 @@ class ClaimContext:
             if skip > 0:
                 self.equal_skips[key] = skip - 1
                 logger.debug(
-                    f"[留大弃小] {key} 基质等级 {current_levels} 等于已保存 {best}，认领"
+                    f"[留大弃小] {self._display(key)} 基质等级 {current_levels} "
+                    f"等于已保存 {best}，认领"
                 )
                 return True
         return False
@@ -634,14 +659,14 @@ class ClaimContext:
             and _level_cmp(current_levels, best, mode, stat_types) < 0
         ):
             logger.debug(
-                f"[数量上限] {key} 基质等级 {current_levels} 劣于已保存 {best}，不认领"
+                f"[数量上限] {self._display(key)} 基质等级 {current_levels} 劣于已保存 {best}，不认领"
             )
             return False
         self.treasure_counts[key] = count + 1
         if best is None or _level_cmp(current_levels, best, mode, stat_types) > 0:
             self.best_levels[key] = current_levels
         logger.debug(
-            f"[数量上限] {key} 认领基质等级 {current_levels}，当前计数 {count + 1}/{limit}"
+            f"[数量上限] {self._display(key)} 认领基质等级 {current_levels}，当前计数 {count + 1}/{limit}"
         )
         return True
 
@@ -667,7 +692,9 @@ class ClaimContext:
             self.best_levels[wid] = freed_levels
             self.treasure_counts[wid] = self.treasure_counts.get(wid, 0) + 1
             result[wid] = freed_levels
-            logger.debug(f"[级联] 武器 {wid} 认领释放的等级 {freed_levels}")
+            logger.debug(
+                f"[级联] 武器 {self._display(wid)} 认领释放的等级 {freed_levels}"
+            )
             break
         return result
 

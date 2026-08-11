@@ -88,7 +88,12 @@ def recognize_essence(
         screenshot_image = mem_source.screenshot(roi)
         attr, max_val = ctx.attr_recognizer.recognize_roi(screenshot_image)
         stats.append(attr)
-        logger.debug(f"属性 {k} 识别结果: {attr} (分数: {max_val:.3f})")
+        stat_display = attr
+        if attr is not None:
+            stat_info = ctx.static_game_data.get_stat(attr)
+            if stat_info is not None:
+                stat_display = f"{stat_info.name}({attr})"
+        logger.debug(f"属性 {k} 识别结果: {stat_display} (分数: {max_val:.3f})")
 
         # 识别等级（通过检测坐标点状态）
         level_value = ctx.attr_level_recognizer.recognize_level(
