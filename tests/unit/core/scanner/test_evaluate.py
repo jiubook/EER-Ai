@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,6 +12,7 @@ from endfield_essence_recognizer.core.scanner.evaluate import (
     compare_levels,
     evaluate_essence,
     get_cascade_updated_weapon_ids,
+    get_group_scanned_counts,
     get_updated_weapon_ids,
     reset_scan_claims,
 )
@@ -994,6 +996,27 @@ def _set_weapon_match(
     }
 
 
+def _set_weapon_stats(
+    mock_static_game_data, stats_by_id: dict[str, tuple[str, str, str]]
+) -> None:
+    """配置 get_weapon 返回带属性组合的武器，供组扫描计数测试使用。"""
+
+    def _get_weapon(wid: str):
+        stats = stats_by_id.get(wid)
+        if stats is None:
+            return None
+        return SimpleNamespace(
+            name=wid,
+            weapon_type="t",
+            rarity=6,
+            stat1_id=stats[0],
+            stat2_id=stats[1],
+            stat3_id=stats[2],
+        )
+
+    mock_static_game_data.get_weapon.side_effect = _get_weapon
+
+
 def test_evaluate_limit_disabled_claims_single_weapon(
     mock_static_game_data, default_settings, default_essence_data
 ):
@@ -1513,3 +1536,129 @@ class TestCompareLevelsWeightedSum:
             [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
         )
         assert result == 1
+
+
+def test_group_scanned_counts_twins_share_group(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """组扫描计数：孪生武器（相同属性组合）共享同一组计数，重复基质不重复计。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    _reset_scan_state(default_settings)
+    _set_weapon_stats(
+        mock_static_game_data,
+        {"wpn_a": ("A", "B", "C"), "wpn_b": ("A", "B", "C")},
+    )
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a", "wpn_b"])
+
+    evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    # 2 枚基质只给属性组合 (A,B,C) 计 2 次，不因孪生翻倍
+    assert get_group_scanned_counts() == {("A", "B", "C"): 2}
+
+
+def test_group_scanned_counts_non_downgrade_rejected_still_counted(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """组扫描计数：被非降级原则判定为养成材料的匹配基质也计入（镀红祝福场景）。"""
+    default_settings.same_type_treasure_limit_enabled = True
+    default_settings.same_type_group_mode = SameTypeGroupMode.BY_WEAPON
+    default_settings.same_type_non_downgrade_filter = True
+    _reset_scan_state(default_settings)
+    _set_weapon_stats(mock_static_game_data, {"wpn_a": ("A", "B", "C")})
+    kwargs = _set_weapon_match(
+        mock_static_game_data,
+        ["wpn_a"],
+        weapon_levels={"wpn_a": (6, 6, 3)},
+    )
+    default_essence_data.levels = [1, 1, 2]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TRASH
+    assert get_group_scanned_counts() == {("A", "B", "C"): 1}
+
+
+def test_group_scanned_counts_custom_only_not_counted(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """组扫描计数：纯自定义匹配（无内置武器）不产生组计数。"""
+    _reset_scan_state(default_settings)
+    default_settings.treasure_essence_stats = [
+        EssenceStats(id="abc", attribute="A", secondary="B", skill="C")
+    ]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert get_group_scanned_counts() == {}
+
+
+def test_group_scanned_counts_custom_plus_real_no_double_count(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """组扫描计数：自定义基质与内置武器词条一致时不重复计算。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    _reset_scan_state(default_settings)
+    _set_weapon_stats(mock_static_game_data, {"wpn_a": ("A", "B", "C")})
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+    default_settings.treasure_essence_stats = [
+        EssenceStats(id="abc", attribute="A", secondary="B", skill="C")
+    ]
+
+    evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    # 每枚基质只计一次到 (A,B,C)，自定义 id 不单独计数
+    assert get_group_scanned_counts() == {("A", "B", "C"): 2}
+
+
+def test_group_scanned_counts_trash_weapon_excluded(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """组扫描计数：匹配武器全部被拦截时不计数。"""
+    _reset_scan_state(default_settings)
+    _set_weapon_stats(mock_static_game_data, {"wpn_a": ("A", "B", "C")})
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+    default_settings.trash_weapon_ids = ["wpn_a"]
+    default_settings.high_level_treasure_enabled = True
+    # 高等级词条命中使判定保持 TREASURE（即使全部武器被拦截），从而进入组计数挂钩
+    default_essence_data.levels = [4, 0, 0]
+
+    result = evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+
+    assert result.quality == EssenceQuality.TREASURE
+    assert get_group_scanned_counts() == {}
+
+
+def test_group_scanned_counts_reset_clears(
+    mock_static_game_data, default_settings, default_essence_data
+):
+    """reset_scan_claims 清空组扫描计数。"""
+    default_settings.same_type_treasure_limit_enabled = False
+    _reset_scan_state(default_settings)
+    _set_weapon_stats(mock_static_game_data, {"wpn_a": ("A", "B", "C")})
+    kwargs = _set_weapon_match(mock_static_game_data, ["wpn_a"])
+
+    evaluate_essence(
+        default_essence_data, default_settings, mock_static_game_data, **kwargs
+    )
+    assert get_group_scanned_counts() == {("A", "B", "C"): 1}
+
+    reset_scan_claims()
+
+    assert get_group_scanned_counts() == {}

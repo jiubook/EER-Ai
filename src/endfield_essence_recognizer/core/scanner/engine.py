@@ -297,7 +297,7 @@ class ScannerEngine:
         Returns:
             A dictionary mapping weapon IDs to essence counts.
         """
-        return self._weapon_essence_counts.copy()
+        return self._get_display_essence_counts()
 
     def get_weapon_essence_data(self):
         """
@@ -309,9 +309,28 @@ class ScannerEngine:
         from endfield_essence_recognizer.schemas.scanner import WeaponEssenceData
 
         return WeaponEssenceData(
-            counts=self._weapon_essence_counts.copy(),
+            counts=self._get_display_essence_counts(),
             levels=self._weapon_essence_levels.copy(),
         )
+
+    def _get_display_essence_counts(self) -> dict[WeaponId, int]:
+        """按属性组合聚合的武器基质数量（同组显示组总数，孪生武器共享）。
+
+        组内每把武器显示该属性组合扫描到的匹配基质总枚数（含被非降级/留大弃小
+        拒绝的）；无组计数时回退为逐武器认领计数。纯自定义匹配不产生组计数。
+        """
+        from endfield_essence_recognizer.core.scanner.evaluate import (
+            get_group_scanned_counts,
+        )
+
+        group_counts = get_group_scanned_counts()
+        if not group_counts:
+            return self._weapon_essence_counts.copy()
+        result: dict[WeaponId, int] = {}
+        for stat_key, count in group_counts.items():
+            for weapon_id in self.ctx.static_game_data.find_weapons_by_stats(*stat_key):
+                result[weapon_id] = count
+        return result
 
     def _sort_weapons_by_priority(self, weapon_ids: set[str]) -> list[str]:
         """按优先级排序武器ID（高优先级在前）。
@@ -745,7 +764,8 @@ class ScannerEngine:
 
         # 输出武器基质数量统计
         logger.info(f"共扫描了 {self._total_essence_count} 个基质。")
-        if self._weapon_essence_counts:
+        display_counts = self._get_display_essence_counts()
+        if display_counts:
             # 按 稀有度降序 武器ID 排序
             def sort_key(item: tuple[WeaponId, int]) -> tuple[int, WeaponId]:
                 weapon_id, _ = item
@@ -754,7 +774,7 @@ class ScannerEngine:
                 rarity = -weapon.rarity if weapon else 0
                 return (rarity, weapon_id)
 
-            sorted_counts = sorted(self._weapon_essence_counts.items(), key=sort_key)
+            sorted_counts = sorted(display_counts.items(), key=sort_key)
 
             logger.info("武器基质数量统计：")
             for weapon_id, count in sorted_counts:
@@ -973,7 +993,8 @@ class DraggableScannerEngine(ScannerEngine):
 
         # 输出武器基质数量统计
         logger.info(f"共扫描了 {self._total_essence_count} 个基质。")
-        if self._weapon_essence_counts:
+        display_counts = self._get_display_essence_counts()
+        if display_counts:
             # 按 稀有度降序 武器ID 排序
             def sort_key(item: tuple[WeaponId, int]) -> tuple[int, WeaponId]:
                 weapon_id, _ = item
@@ -982,7 +1003,7 @@ class DraggableScannerEngine(ScannerEngine):
                 rarity = -weapon.rarity if weapon else 0
                 return (rarity, weapon_id)
 
-            sorted_counts = sorted(self._weapon_essence_counts.items(), key=sort_key)
+            sorted_counts = sorted(display_counts.items(), key=sort_key)
 
             logger.info("武器基质数量统计：")
             for weapon_id, count in sorted_counts:

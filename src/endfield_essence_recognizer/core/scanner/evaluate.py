@@ -40,6 +40,9 @@ _cascade_updated_this_scan: set[str] = set()
 _limit_off_scanned: dict[tuple, int] = {}
 # 本轮扫描中更新过 best level 的 key（其存量跳过名额已失效，不再计入跳过配额）。
 _best_touched_this_scan: set[str] = set()
+# 本轮扫描中按属性组合（stat 三元组）统计的匹配基质枚数，与认领/限额逻辑正交：
+# 只要判定为宝藏且匹配到真实武器即计数，被非降级/留大弃小/达上限拒绝的也计入。
+_group_scanned: dict[tuple, int] = {}
 
 
 def reset_scan_claims() -> None:
@@ -49,6 +52,7 @@ def reset_scan_claims() -> None:
     _cascade_updated_this_scan.clear()
     _limit_off_scanned.clear()
     _best_touched_this_scan.clear()
+    _group_scanned.clear()
 
 
 def get_updated_weapon_ids() -> set[str]:
@@ -59,6 +63,11 @@ def get_updated_weapon_ids() -> set[str]:
 def get_cascade_updated_weapon_ids() -> set[str]:
     """获取本轮扫描中级联更新了 best levels 的武器 ID（引擎据此同步等级）。"""
     return _cascade_updated_this_scan.copy()
+
+
+def get_group_scanned_counts() -> dict[tuple, int]:
+    """获取本轮扫描中每个属性组合扫描到的匹配基质枚数（展示用，与认领无关）。"""
+    return _group_scanned.copy()
 
 
 def _group_stat_key(
@@ -1227,6 +1236,19 @@ def _apply_same_type_treasure_limit(
 ) -> EvaluationResult:
     if evaluation.quality != EssenceQuality.TREASURE:
         return evaluation
+
+    # 组扫描计数（与认领/限额正交）：匹配到至少一把非拦截真实武器的宝藏基质，
+    # 按属性组合计数一次。被非降级过滤/留大弃小拒绝/达上限的也计入，供设置页
+    # 与统计日志显示"该组词条的基质总枚数"；纯自定义匹配（无内置武器）不计数。
+    if matched_weapon_ids:
+        matched = matched_weapon_ids - set(setting.trash_weapon_ids)
+        if (
+            matched
+            and static_game_data
+            and any(static_game_data.get_weapon(wid) for wid in matched)
+        ):
+            key = _group_stat_key(matched, static_game_data)
+            _group_scanned[key] = _group_scanned.get(key, 0) + 1
 
     current_levels = (
         data.levels[0] or 1,

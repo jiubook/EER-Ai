@@ -472,6 +472,50 @@ def test_downgrade_blocked_essence_is_not_fallback_counted(
     assert engine.get_weapon_essence_counts() == {}
 
 
+def test_get_weapon_essence_counts_group_aggregation(
+    monkeypatch, mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """组扫描计数存在时，组内每把武器（孪生）都显示该属性组合的组总数。"""
+    from endfield_essence_recognizer.core.scanner import evaluate as evaluate_module
+
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    monkeypatch.setattr(evaluate_module, "_group_scanned", {("A", "B", "C"): 3})
+    mock_scanner_context.static_game_data.find_weapons_by_stats.side_effect = (
+        lambda attr, sec, skill: (
+            ["wpn_a", "wpn_b"] if (attr, sec, skill) == ("A", "B", "C") else []
+        )
+    )
+    engine._weapon_essence_counts = {"wpn_a": 1}
+
+    assert engine.get_weapon_essence_counts() == {"wpn_a": 3, "wpn_b": 3}
+    assert engine.get_weapon_essence_data().counts == {"wpn_a": 3, "wpn_b": 3}
+
+
+def test_get_weapon_essence_counts_fallback_without_group_counts(
+    monkeypatch, mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """无组扫描计数时回退为逐武器认领计数。"""
+    from endfield_essence_recognizer.core.scanner import evaluate as evaluate_module
+
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    monkeypatch.setattr(evaluate_module, "_group_scanned", {})
+    engine._weapon_essence_counts = {"wpn_a": 2}
+
+    assert engine.get_weapon_essence_counts() == {"wpn_a": 2}
+
+
 def _make_screenshot_with_gaps(
     width: int,
     height: int,
