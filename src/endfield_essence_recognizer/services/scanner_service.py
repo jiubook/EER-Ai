@@ -334,7 +334,6 @@ class ScannerService:
 
             entries: list[TreasureMatrixEntry] = []
             for weapon_id, levels in weapon_levels.items():
-                logger.debug(f"处理武器 {weapon_id}, 等级: {levels}")
                 weapon = static_data.get_weapon(weapon_id)
                 if weapon:
                     weapon_name = weapon.name
@@ -342,6 +341,7 @@ class ScannerService:
                     weapon_name = custom_names.get(weapon_id, weapon_id)
                 else:
                     weapon_name = weapon_id
+                logger.debug(f"处理武器 {weapon_name}({weapon_id}), 等级: {levels}")
 
                 # 新增满级武器默认不参与计算，避免扫描后把已毕业武器加入刷取建议。
                 is_maxed = levels[0] == 6 and levels[1] == 6 and levels[2] == 3

@@ -407,6 +407,49 @@ def test_exact_level_skip_isolated_by_level(
     assert engine.get_weapon_essence_counts() == {}
 
 
+def test_sort_weapons_by_priority_deterministic_tie_break(
+    monkeypatch,
+    mock_scanner_context,
+    mock_user_setting_manager,
+    mock_profile,
+):
+    """同稀有度武器按 ID 升序排序，分配顺序确定可复现。"""
+    from endfield_essence_recognizer.api.routes import profiles as profiles_routes
+
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    profile_manager = MagicMock()
+    profile_manager.get_active_profile.return_value = SimpleNamespace(
+        treasure_matrix=[], weapon_priorities={}
+    )
+    monkeypatch.setattr(profiles_routes, "get_profile_manager", lambda: profile_manager)
+
+    def fake_get_weapon(weapon_id):
+        if weapon_id in ("wpn_b", "wpn_a", "wpn_c", "wpn_low"):
+            rarity = 5 if weapon_id == "wpn_low" else 6
+            return SimpleNamespace(name=weapon_id, rarity=rarity)
+        return None
+
+    mock_scanner_context.static_game_data.get_weapon.side_effect = fake_get_weapon
+
+    # 同稀有度：按武器 ID 升序
+    assert engine._sort_weapons_by_priority({"wpn_b", "wpn_a", "wpn_c"}) == [
+        "wpn_a",
+        "wpn_b",
+        "wpn_c",
+    ]
+    # 不同稀有度：稀有度降序优先
+    assert engine._sort_weapons_by_priority({"wpn_low", "wpn_a"}) == [
+        "wpn_a",
+        "wpn_low",
+    ]
+
+
 def test_downgrade_blocked_essence_is_not_fallback_counted(
     mock_scanner_context, mock_user_setting_manager, mock_profile
 ):
@@ -427,6 +470,57 @@ def test_downgrade_blocked_essence_is_not_fallback_counted(
     engine._assign_essence_to_weapon({"w1"}, [2, 3, 1])
 
     assert engine.get_weapon_essence_counts() == {}
+
+
+def test_get_weapon_essence_counts_group_aggregation(
+    monkeypatch, mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """组扫描计数存在时，组内每把武器（孪生）都显示该属性组合的组总数。"""
+    from endfield_essence_recognizer.core.scanner.claimer import ClaimContext
+
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    # 创建 ClaimContext 并设置组扫描计数
+    claim_ctx = ClaimContext([], UserSetting())
+    claim_ctx.group_scanned = {("A", "B", "C"): 3}
+    engine._claim_context = claim_ctx
+
+    mock_scanner_context.static_game_data.find_weapons_by_stats.side_effect = (
+        lambda attr, sec, skill: (
+            ["wpn_a", "wpn_b"] if (attr, sec, skill) == ("A", "B", "C") else []
+        )
+    )
+    engine._weapon_essence_counts = {"wpn_a": 1}
+
+    assert engine.get_weapon_essence_counts() == {"wpn_a": 3, "wpn_b": 3}
+    assert engine.get_weapon_essence_data().counts == {"wpn_a": 3, "wpn_b": 3}
+
+
+def test_get_weapon_essence_counts_fallback_without_group_counts(
+    monkeypatch, mock_scanner_context, mock_user_setting_manager, mock_profile
+):
+    """无组扫描计数时回退为逐武器认领计数。"""
+    from endfield_essence_recognizer.core.scanner.claimer import ClaimContext
+
+    engine = ScannerEngine(
+        ctx=mock_scanner_context,
+        image_source=MockImageSource(),
+        window_actions=MockWindowActions(),
+        user_setting_manager=mock_user_setting_manager,
+        profile=mock_profile,
+    )
+    # 创建 ClaimContext 但不设置组扫描计数（空）
+    claim_ctx = ClaimContext([], UserSetting())
+    engine._claim_context = claim_ctx
+
+    engine._weapon_essence_counts = {"wpn_a": 2}
+
+    assert engine.get_weapon_essence_counts() == {"wpn_a": 2}
 
 
 def _make_screenshot_with_gaps(
@@ -650,81 +744,69 @@ def test_init_same_type_levels_counts_existing_entries(
     monkeypatch, mock_scanner_context, mock_user_setting_manager, mock_profile
 ):
     """初始化同类型状态：存量条数计入限额名额（总保有量语义）。"""
-    from endfield_essence_recognizer.api.routes import profiles as profiles_routes
+    from endfield_essence_recognizer.core.scanner.claimer import ClaimContext
     from endfield_essence_recognizer.schemas.profile import TreasureMatrixEntry
 
-    engine, profile_manager = _make_same_type_engine(
-        mock_scanner_context,
-        mock_user_setting_manager,
-        mock_profile,
-        [
-            TreasureMatrixEntry(
-                weapon_id="wpn_sword_0001",
-                weapon_name="测试武器",
-                affix1_level=3,
-                affix2_level=3,
-                affix3_level=3,
-            ),
-            TreasureMatrixEntry(
-                weapon_id="wpn_sword_0001",
-                weapon_name="测试武器",
-                affix1_level=3,
-                affix2_level=3,
-                affix3_level=3,
-            ),
-            TreasureMatrixEntry(
-                weapon_id="wpn_lance_0001",
-                weapon_name="测试长枪",
-                affix1_level=2,
-                affix2_level=2,
-                affix3_level=1,
-            ),
-        ],
-    )
-    monkeypatch.setattr(profiles_routes, "get_profile_manager", lambda: profile_manager)
+    entries = [
+        TreasureMatrixEntry(
+            weapon_id="wpn_sword_0001",
+            weapon_name="测试武器",
+            affix1_level=3,
+            affix2_level=3,
+            affix3_level=3,
+        ),
+        TreasureMatrixEntry(
+            weapon_id="wpn_sword_0001",
+            weapon_name="测试武器",
+            affix1_level=3,
+            affix2_level=3,
+            affix3_level=3,
+        ),
+        TreasureMatrixEntry(
+            weapon_id="wpn_lance_0001",
+            weapon_name="测试长枪",
+            affix1_level=2,
+            affix2_level=2,
+            affix3_level=1,
+        ),
+    ]
 
     user_setting = UserSetting()
-    engine._init_same_type_levels_from_profile(user_setting)
+    ctx = ClaimContext(entries, user_setting, mock_scanner_context.static_game_data)
 
     # 每把武器：计数 = 存量条数，最佳等级 = 组内最高，相等跳过名额 = 等于最佳的数量
-    assert user_setting._same_type_treasure_counts["wpn_sword_0001"] == 2
-    assert user_setting._same_type_best_levels["wpn_sword_0001"] == (3, 3, 3)
-    assert user_setting._same_type_equal_skips["wpn_sword_0001"] == 2
-    assert user_setting._same_type_treasure_counts["wpn_lance_0001"] == 1
-    assert user_setting._same_type_best_levels["wpn_lance_0001"] == (2, 2, 1)
-    assert user_setting._same_type_equal_skips["wpn_lance_0001"] == 1
+    assert ctx.treasure_counts["wpn_sword_0001"] == 2
+    assert ctx.best_levels["wpn_sword_0001"] == (3, 3, 3)
+    assert ctx.equal_skips["wpn_sword_0001"] == 2
+    assert ctx.treasure_counts["wpn_lance_0001"] == 1
+    assert ctx.best_levels["wpn_lance_0001"] == (2, 2, 1)
+    assert ctx.equal_skips["wpn_lance_0001"] == 1
 
 
 def test_init_same_type_levels_custom_entries_feed_stat_key_counts(
     monkeypatch, mock_scanner_context, mock_user_setting_manager, mock_profile
 ):
     """自定义基质条目的存量按配置属性组合计入 stat_key 计数（BY_STAT 总保有量）。"""
-    from endfield_essence_recognizer.api.routes import profiles as profiles_routes
+    from endfield_essence_recognizer.core.scanner.claimer import ClaimContext
     from endfield_essence_recognizer.schemas.profile import TreasureMatrixEntry
 
-    engine, profile_manager = _make_same_type_engine(
-        mock_scanner_context,
-        mock_user_setting_manager,
-        mock_profile,
-        [
-            TreasureMatrixEntry(
-                weapon_id="custom:abc",
-                weapon_name="自定义X",
-                affix1_level=2,
-                affix2_level=1,
-                affix3_level=1,
-            )
-        ],
-    )
-    monkeypatch.setattr(profiles_routes, "get_profile_manager", lambda: profile_manager)
+    entries = [
+        TreasureMatrixEntry(
+            weapon_id="custom:abc",
+            weapon_name="自定义X",
+            affix1_level=2,
+            affix2_level=1,
+            affix3_level=1,
+        )
+    ]
 
     user_setting = UserSetting()
     user_setting.treasure_essence_stats = [
         EssenceStats(id="abc", name="自定义X", attribute="A", secondary="B", skill="C")
     ]
-    engine._init_same_type_levels_from_profile(user_setting)
+    ctx = ClaimContext(entries, user_setting, mock_scanner_context.static_game_data)
 
     # 自定义条目既计入自身 weapon_id，也按配置的属性组合计入 stat_key
-    assert user_setting._same_type_treasure_counts["custom:abc"] == 1
-    assert user_setting._same_type_treasure_counts[("A", "B", "C")] == 1
-    assert user_setting._same_type_best_levels[("A", "B", "C")] == (2, 1, 1)
+    assert ctx.treasure_counts["custom:abc"] == 1
+    assert ctx.treasure_counts[("A", "B", "C")] == 1
+    assert ctx.best_levels[("A", "B", "C")] == (2, 1, 1)
