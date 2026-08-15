@@ -213,8 +213,53 @@
           <v-divider class="my-4" />
 
           <!-- 1-B: 额外属性匹配 -->
-          <h2>自定义基质 | 额外将以下属性的基质视为宝藏</h2>
-          <v-row v-for="(essenceStat, index) in treasureEssenceStats" :key="index" align="center">
+          <div class="d-flex align-center flex-wrap ga-2">
+            <h2>自定义基质 | 额外将以下属性的基质视为宝藏</h2>
+            <v-spacer />
+            <v-btn
+              color="primary"
+              prepend-icon="mdi-auto-fix"
+              size="small"
+              variant="tonal"
+              @click="prepareFillAllCombinations"
+            >
+              一键补齐全部组合
+              <v-tooltip activator="parent" location="bottom" max-width="360">
+                按「基础 × 附加 × 技能」生成全部
+                {{ totalCombinationCount }}
+                种属性组合，自动跳过内置武器已覆盖的组合与列表中已有的组合。
+              </v-tooltip>
+            </v-btn>
+            <v-btn
+              v-if="treasureEssenceStats.length > 0"
+              color="error"
+              prepend-icon="mdi-delete-sweep"
+              size="small"
+              variant="tonal"
+              @click="clearAllDialog = true"
+            >
+              清空全部
+            </v-btn>
+          </div>
+          <v-row v-if="customStatPageCount > 1" align="center" class="mt-0">
+            <v-col class="d-flex align-center flex-wrap ga-4 justify-center" cols="12">
+              <v-pagination
+                v-model="customStatPage"
+                density="comfortable"
+                :length="customStatPageCount"
+                rounded="circle"
+                :total-visible="7"
+              />
+              <span class="text-caption text-medium-emphasis">
+                共 {{ treasureEssenceStats.length }} 条，每页 {{ CUSTOM_STAT_PAGE_SIZE }} 条
+              </span>
+            </v-col>
+          </v-row>
+          <v-row
+            v-for="{ stat: essenceStat, index } in pagedCustomStats"
+            :key="essenceStat.id"
+            align="center"
+          >
             <v-col cols="12" md="3" sm="6">
               <v-text-field
                 v-model="essenceStat.name"
@@ -315,11 +360,7 @@
           </v-row>
           <v-row v-if="treasureEssenceStats.length === 0" class="my-4">
             <v-col cols="12">
-              <v-btn
-                color="primary"
-                prepend-icon="mdi-plus"
-                @click="treasureEssenceStats.push(newCustomStat())"
-              >
+              <v-btn color="primary" prepend-icon="mdi-plus" @click="appendCustomStat">
                 添加自定义宝藏基质
               </v-btn>
             </v-col>
@@ -327,12 +368,7 @@
           <v-row v-else>
             <v-col cols="12" md="9" sm="6" />
             <v-col cols="12" md="3" sm="6">
-              <v-btn
-                color="primary"
-                icon="mdi-plus"
-                variant="text"
-                @click="treasureEssenceStats.push(newCustomStat())"
-              />
+              <v-btn color="primary" icon="mdi-plus" variant="text" @click="appendCustomStat" />
             </v-col>
           </v-row>
         </v-expansion-panel-text>
@@ -807,6 +843,59 @@
         配置版本: v{{ configVersion }}
       </v-card-text>
     </v-card>
+
+    <!-- 一键补齐全部属性组合的确认弹窗 -->
+    <v-dialog v-model="fillAllDialog" max-width="520">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-auto-fix</v-icon>
+          一键补齐全部属性组合
+        </v-card-title>
+        <v-card-text>
+          <p class="mb-2">
+            基础 {{ allAttributeStats.length }} × 附加 {{ allSecondaryStats.length }} × 技能
+            {{ allSkillStats.length }} 共 {{ totalCombinationCount }} 种组合，其中
+            {{ totalCombinationCount - pendingFullMatrix.length }}
+            种已被内置武器或现有条目覆盖。
+          </p>
+          <p class="mb-4">
+            本次将新增 <strong>{{ pendingFullMatrix.length }}</strong> 条自定义基质，名称由「基础 2
+            字 + 附加 2 字 + 技能 1 字」拼成 5 个字，例如 {{ pendingFullMatrix[0]?.name }}。
+          </p>
+          <v-alert border="start" density="compact" type="warning" variant="tonal">
+            条目数量较多会明显拖慢设置页与宝藏基质页的渲染，请确认后再继续。
+          </v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="fillAllDialog = false">取消</v-btn>
+          <v-btn color="primary" variant="flat" @click="confirmFillAllCombinations">确认添加</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 清空全部自定义基质的确认弹窗 -->
+    <v-dialog v-model="clearAllDialog" max-width="520">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-delete-sweep</v-icon>
+          清空全部自定义基质
+        </v-card-title>
+        <v-card-text>
+          <p class="mb-4">
+            将删除全部 <strong>{{ treasureEssenceStats.length }}</strong> 条自定义基质配置。
+          </p>
+          <v-alert border="start" density="compact" type="warning" variant="tonal">
+            此操作不可撤销。与逐条删除一样，只清除设置中的配置，宝藏基质页里已记录的对应条目需自行清理。
+          </v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="clearAllDialog = false">取消</v-btn>
+          <v-btn color="error" variant="flat" @click="confirmClearAllCustomStats">确认清空</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
@@ -815,9 +904,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import ItemIcon from '@/components/ItemIcon.vue'
 import { setScanningStatusPolling, useScanningStatus } from '@/composables/useScanningStatus'
+import { useToast } from '@/composables/useToast'
 import { useUpdateMirrors } from '@/composables/useUpdateMirrors'
 import { useStaticData } from '@/utils/gameData/staticData'
 import {
+  buildFullCustomStatMatrix,
+  buildStatKey,
   createCustomStatId,
   type CustomStat,
   getGemTagName,
@@ -902,6 +994,98 @@ const updateMirrorChyanResId = ref('')
 const updateMirrorChyanCdk = ref('')
 const updateMirrorChyanUserAgent = ref('EER_APP')
 const weaponEssenceCounts = ref<Record<string, number>>({})
+
+/** 自定义基质列表每页条目数：一次性渲染上百行下拉框会让设置页长时间无响应 */
+const CUSTOM_STAT_PAGE_SIZE = 10
+const customStatPage = ref(1)
+
+/** 一键补齐的候选条目，用户在弹窗中确认后才写入列表 */
+const pendingFullMatrix = ref<CustomStat[]>([])
+const fillAllDialog = ref(false)
+const clearAllDialog = ref(false)
+
+const customStatPageCount = computed(() =>
+  Math.max(1, Math.ceil(treasureEssenceStats.value.length / CUSTOM_STAT_PAGE_SIZE)),
+)
+
+/**
+ * 当前页的自定义基质，附带其在完整列表中的下标。
+ *
+ * 增删改与上下移动都直接作用于 `treasureEssenceStats`，所以这里必须把全局下标
+ * 一并带出去，否则翻到第二页后所有操作都会打到列表开头的条目上。
+ */
+const pagedCustomStats = computed(() => {
+  const start = (customStatPage.value - 1) * CUSTOM_STAT_PAGE_SIZE
+  return treasureEssenceStats.value
+    .slice(start, start + CUSTOM_STAT_PAGE_SIZE)
+    .map((stat, offset) => ({ stat, index: start + offset }))
+})
+
+/** 基础 × 附加 × 技能 的理论组合总数 */
+const totalCombinationCount = computed(
+  () =>
+    allAttributeStats.value.length * allSecondaryStats.value.length * allSkillStats.value.length,
+)
+
+// 删除条目使总页数变少时，把当前页拉回有效范围，避免停在一页空白上
+watch(customStatPageCount, (count) => {
+  if (customStatPage.value > count) {
+    customStatPage.value = count
+  }
+})
+
+/**
+ * 计算「一键补齐」会新增哪些条目并弹窗确认。
+ *
+ * 内置武器已覆盖的组合和列表中已有的组合都算作已占用，因此重复点击不会产生重复条目。
+ */
+function prepareFillAllCombinations() {
+  const occupiedKeys = new Set<string>()
+  for (const weapon of weaponsMap.value.values()) {
+    occupiedKeys.add(
+      buildStatKey(weapon.attributeStatId, weapon.secondaryStatId, weapon.skillStatId),
+    )
+  }
+  for (const stat of treasureEssenceStats.value) {
+    occupiedKeys.add(buildStatKey(stat.attribute, stat.secondary, stat.skill))
+  }
+
+  const generated = buildFullCustomStatMatrix(
+    allAttributeStats.value,
+    allSecondaryStats.value,
+    allSkillStats.value,
+    occupiedKeys,
+  )
+  if (generated.length === 0) {
+    useToast().info('全部属性组合都已被内置武器或现有条目覆盖，无需补齐')
+    return
+  }
+
+  pendingFullMatrix.value = generated
+  fillAllDialog.value = true
+}
+
+/** 确认后把候选条目追加到列表末尾 */
+function confirmFillAllCombinations() {
+  fillAllDialog.value = false
+  treasureEssenceStats.value = [...treasureEssenceStats.value, ...pendingFullMatrix.value]
+  useToast().success(`已添加 ${pendingFullMatrix.value.length} 条自定义基质`)
+}
+
+/** 在列表末尾追加一条空白自定义基质，并翻到它所在的页 */
+function appendCustomStat() {
+  treasureEssenceStats.value.push(newCustomStat())
+  customStatPage.value = customStatPageCount.value
+}
+
+/** 确认后清空全部自定义基质，并回到第一页 */
+function confirmClearAllCustomStats() {
+  const clearedCount = treasureEssenceStats.value.length
+  clearAllDialog.value = false
+  treasureEssenceStats.value = []
+  customStatPage.value = 1
+  useToast().success(`已清空 ${clearedCount} 条自定义基质`)
+}
 
 const notSelectedWeaponIds = computed(() => {
   return Array.from(weaponsMap.value.keys()).filter(
