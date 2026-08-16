@@ -227,15 +227,21 @@ const customCards = computed<ExportCard[]>(() =>
 
 const totalCount = computed(() => weaponCards.value.length + customCards.value.length)
 
-/** 从当前 Vuetify 主题取出绘制需要的颜色，canvas 读不到 CSS 变量 */
+/**
+ * 从当前 Vuetify 主题取出绘制需要的颜色，canvas 读不到 CSS 变量。
+ *
+ * 必须走 computedThemes 而不是 current：v-app 会调用 provideTheme，
+ * 而它把 current 指向未经计算的原始 themes（vuetify theme.js:375），
+ * 那里没有自动生成的 on-* 系列颜色，取出来会是 undefined。
+ */
 function currentTheme(): ExportTheme {
-  const colors = theme.current.value.colors
+  const colors = theme.computedThemes.value[theme.name.value]!.colors
   return {
-    primary: colors.primary,
-    onPrimary: colors['on-primary'],
-    background: colors.background,
-    surface: colors.surface,
-    onSurface: colors['on-surface'],
+    primary: colors.primary!,
+    onPrimary: colors['on-primary']!,
+    background: colors.background!,
+    surface: colors.surface!,
+    onSurface: colors['on-surface']!,
   }
 }
 

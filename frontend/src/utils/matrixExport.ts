@@ -220,6 +220,24 @@ function withAlpha(color: string, alpha: number): string {
 }
 
 /**
+ * 把主题色统一规范成 canvas 一定认得的 rgb 字符串。
+ *
+ * canvas 对无效的 fillStyle 是静默忽略的——一个 undefined 会让文字直接消失，
+ * 而不是报错。这里先过一遍 color 包（它把无效值兜底成黑色），
+ * 让"取色取错了"至少表现为颜色不对，而不是整块内容不翼而飞。
+ */
+function normalizeTheme(theme: ExportTheme): ExportTheme {
+  const toRgb = (color: string) => Color(color).string()
+  return {
+    primary: toRgb(theme.primary),
+    onPrimary: toRgb(theme.onPrimary),
+    background: toRgb(theme.background),
+    surface: toRgb(theme.surface),
+    onSurface: toRgb(theme.onSurface),
+  }
+}
+
+/**
  * 把文字压进指定宽度：先按比例缩字号，到下限仍超宽则尾部截断加省略号。
  *
  * 思路与 utils/autoFontSizing.ts 一致，只是把 DOM 测量换成 measureText。
@@ -580,7 +598,8 @@ function drawGrid(
  * @throws 卡片为空、或画布导出失败时抛出。
  */
 export async function renderMatrixExport(input: MatrixExportInput): Promise<MatrixExportResult> {
-  const { weapons, customs, theme } = input
+  const { weapons, customs } = input
+  const theme = normalizeTheme(input.theme)
   const allCards = [...weapons, ...customs]
   if (allCards.length === 0) {
     throw new Error('没有可导出的条目')
