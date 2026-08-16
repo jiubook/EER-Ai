@@ -886,7 +886,7 @@
             将删除全部 <strong>{{ treasureEssenceStats.length }}</strong> 条自定义基质配置。
           </p>
           <v-alert border="start" density="compact" type="warning" variant="tonal">
-            此操作不可撤销。与逐条删除一样，只清除设置中的配置，宝藏基质页里已记录的对应条目需自行清理。
+            此操作不可撤销。与逐条删除一样，宝藏基质页中对应的已记录条目会一并移除。
           </v-alert>
         </v-card-text>
         <v-card-actions>

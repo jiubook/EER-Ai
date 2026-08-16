@@ -904,15 +904,15 @@ def test_migrate_stale_weapon_ids_covers_all_profiles(
         assert ids == ["wpn_lance_0101", "wpn_sword_0001"]
 
 
-def test_remove_custom_stat_refs_cleans_all_profiles(profile_manager: ProfileManager):
-    """清理自定义引用：覆盖全部账号的矩阵与优先级，普通武器不受影响。"""
+def test_prune_custom_stat_refs_cleans_all_profiles(profile_manager: ProfileManager):
+    """空白名单清理自定义引用：覆盖全部账号的矩阵与优先级，普通武器不受影响。"""
     profile_manager.load()
     profile_manager.switch_profile("alt")
     _seed_legacy_custom_refs(profile_manager)
     profile_manager.switch_profile("default")
     _seed_legacy_custom_refs(profile_manager)
 
-    assert profile_manager.remove_custom_stat_refs() is True
+    assert profile_manager.prune_custom_stat_refs(set()) is True
 
     for name in ("default", "alt"):
         profile = profile_manager.get_collection().profiles[name]
@@ -920,7 +920,7 @@ def test_remove_custom_stat_refs_cleans_all_profiles(profile_manager: ProfileMan
         assert profile.weapon_priorities == {"wpn_normal": 4}
 
 
-def test_remove_custom_stat_refs_cleans_new_format(profile_manager: ProfileManager):
+def test_prune_custom_stat_refs_cleans_new_format(profile_manager: ProfileManager):
     """新格式 custom:{id} 引用同样被清理。"""
     profile_manager.load()
     profile_manager.update_treasure_matrix(
@@ -934,18 +934,95 @@ def test_remove_custom_stat_refs_cleans_new_format(profile_manager: ProfileManag
         ]
     )
 
-    assert profile_manager.remove_custom_stat_refs() is True
+    assert profile_manager.prune_custom_stat_refs(set()) is True
 
     profile = profile_manager.get_active_profile()
     assert [e.weapon_id for e in profile.treasure_matrix] == ["wpn_normal"]
     assert profile.weapon_priorities == {}
 
 
-def test_remove_custom_stat_refs_no_custom_refs(profile_manager: ProfileManager):
+def test_prune_custom_stat_refs_no_custom_refs(profile_manager: ProfileManager):
     """没有自定义引用时不写盘。"""
     profile_manager.load()
     profile_manager.update_treasure_matrix(
         [TreasureMatrixEntry(weapon_id="wpn_001", weapon_name="W", affix1_level=1)]
     )
 
-    assert profile_manager.remove_custom_stat_refs() is False
+    assert profile_manager.prune_custom_stat_refs(set()) is False
+
+
+def test_prune_custom_stat_refs_keeps_live_ids(profile_manager: ProfileManager):
+    """白名单内的引用保留，只有配置里已删除的那条被剪掉。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [
+            TreasureMatrixEntry(
+                weapon_id="custom:live", weapon_name="L", affix1_level=3, priority=5
+            ),
+            TreasureMatrixEntry(
+                weapon_id="custom:gone", weapon_name="G", affix1_level=2, priority=3
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_normal", weapon_name="N", affix1_level=1, priority=4
+            ),
+        ]
+    )
+
+    assert profile_manager.prune_custom_stat_refs({"live"}) is True
+
+    profile = profile_manager.get_active_profile()
+    assert [e.weapon_id for e in profile.treasure_matrix] == [
+        "custom:live",
+        "wpn_normal",
+    ]
+    assert profile.weapon_priorities == {"custom:live": 5, "wpn_normal": 4}
+
+
+def test_prune_custom_stat_refs_all_ids_live(profile_manager: ProfileManager):
+    """全部引用都在白名单内时不写盘——设置页每次改动都会调用，不能有无谓写入。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [
+            TreasureMatrixEntry(
+                weapon_id="custom:live", weapon_name="L", affix1_level=3, priority=5
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_normal", weapon_name="N", affix1_level=1
+            ),
+        ]
+    )
+
+    assert profile_manager.prune_custom_stat_refs({"live", "unused"}) is False
+
+
+def test_prune_custom_stat_refs_drops_legacy_refs(profile_manager: ProfileManager):
+    """旧格式引用一律剪掉：启动迁移之后还残留的必然解析不出对应条目。"""
+    profile_manager.load()
+    _seed_legacy_custom_refs(profile_manager)
+
+    assert profile_manager.prune_custom_stat_refs({"aaa", "bbb", "ccc"}) is True
+
+    profile = profile_manager.get_active_profile()
+    assert [e.weapon_id for e in profile.treasure_matrix] == ["wpn_normal"]
+    assert profile.weapon_priorities == {"wpn_normal": 4}
+
+
+def test_prune_custom_stat_refs_cleans_orphan_priority_only(
+    profile_manager: ProfileManager,
+):
+    """矩阵里没有孤儿、只有优先级键是孤儿时也要清理。"""
+    profile_manager.load()
+    profile_manager.update_treasure_matrix(
+        [
+            TreasureMatrixEntry(
+                weapon_id="wpn_normal", weapon_name="N", affix1_level=1, priority=4
+            )
+        ]
+    )
+    profile_manager.update_weapon_priority("custom:gone", 7)
+
+    assert profile_manager.prune_custom_stat_refs(set()) is True
+
+    profile = profile_manager.get_active_profile()
+    assert [e.weapon_id for e in profile.treasure_matrix] == ["wpn_normal"]
+    assert profile.weapon_priorities == {"wpn_normal": 4}
