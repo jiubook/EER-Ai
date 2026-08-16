@@ -337,6 +337,32 @@ class TestClaimUnmatchedHighLevel:
         assert second.reject_reason is RejectReason.LIMIT
         assert claim_context.best_levels[("A", "B", "C")] == (4, 1, 1)
         assert claim_context.treasure_counts[("A", "B", "C")] == 1
+
+    def test_stat_order_normalized_into_same_group(
+        self, mock_static_game_data, high_level_settings, claim_context
+    ):
+        """词条显示顺序不同的同属性组合归入同一分组，不各占名额。"""
+        self._claim(
+            claim_context,
+            self._make_essence([3, 1, 1]),
+            high_level_settings,
+            mock_static_game_data,
+        )
+        # 同一属性组合，识别位置顺序为技能、属性、副属性
+        reordered = self._make_essence(
+            [1, 4, 1],
+            stats=["C", "A", "B"],
+            stat_types=[StatType.SKILL, StatType.ATTRIBUTE, StatType.SECONDARY],
+        )
+        second = self._claim(
+            claim_context, reordered, high_level_settings, mock_static_game_data
+        )
+
+        assert list(claim_context.treasure_counts) == [("A", "B", "C")]
+        assert second.reject_reason is None
+        assert claim_context.best_levels[("A", "B", "C")] == (4, 1, 1)
+
+
 class TestClaimNonTreasure:
     """非宝藏基质不认领。"""
 

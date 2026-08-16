@@ -18,6 +18,7 @@ from endfield_essence_recognizer.core.scanner.classifier import (
 from endfield_essence_recognizer.core.scanner.evaluate import (
     _group_stat_key,
     _level_cmp,
+    _normalize_by_stat_type,
     _order_candidate_ids,
 )
 from endfield_essence_recognizer.core.scanner.models import (
@@ -228,12 +229,10 @@ class ClaimContext:
                 classification.matched_weapon_ids, setting, static_game_data
             )
 
-        current_levels: LevelTuple = (
-            data.levels[0] or 1,
-            data.levels[1] or 1,
-            data.levels[2] or 1,
+        # 归一化为语义顺序（属性、副属性、技能），与武器 stat1/2/3、profile affix1/2/3 对齐
+        stat_key, stat_types, current_levels = _normalize_by_stat_type(
+            data.stats, data.stat_types, data.levels
         )
-        stat_types = data.stat_types
         matched_weapon_ids = classification.matched_weapon_ids
 
         # 数量上限关闭
@@ -279,7 +278,6 @@ class ClaimContext:
             )
 
         # 默认按基质分组
-        stat_key = tuple(data.stats)
         return self._claim_by_matrix(
             classification,
             stat_key,
