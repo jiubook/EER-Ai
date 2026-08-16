@@ -227,6 +227,15 @@
           >
             添加武器
           </v-btn>
+          <v-btn
+            class="mt-2 ml-2"
+            color="secondary"
+            prepend-icon="mdi-image-outline"
+            variant="tonal"
+            @click="showExportDialog = true"
+          >
+            导出为图片
+          </v-btn>
         </v-expansion-panel-text>
       </v-expansion-panel>
 
@@ -543,6 +552,9 @@
       </v-card>
     </v-dialog>
 
+    <!-- 导出为图片弹窗 -->
+    <matrix-export-dialog v-model="showExportDialog" />
+
     <!-- 回到顶部按钮 -->
     <back-to-top />
   </v-container>
@@ -554,6 +566,7 @@ import { useRouter } from 'vue-router'
 import BackToTop from '@/components/BackToTop.vue'
 import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
+import MatrixExportDialog from '@/components/MatrixExportDialog.vue'
 import WeaponOverview from '@/components/WeaponOverview.vue'
 import { useCustomStats } from '@/composables/useCustomStats'
 import { type TreasureMatrixEntry, useProfiles } from '@/composables/useProfiles'
@@ -592,6 +605,7 @@ const { weaponsMap, weaponTypes, matrixIcons } = useStaticData()
 const essenceBgSrc = computed(() => matrixIcons.value.essenceBg)
 
 const showAddWeaponDialog = ref(false)
+const showExportDialog = ref(false)
 const weaponSearch = ref('')
 const computing = ref(false)
 
