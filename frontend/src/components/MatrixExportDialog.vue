@@ -129,9 +129,8 @@
 
 <script lang="ts" setup>
 import type { TreasureMatrixEntry } from '@/composables/useProfiles'
-import type { ExportCard, ExportTheme } from '@/utils/matrixExport'
+import type { ExportCard } from '@/utils/matrixExport'
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { useTheme } from 'vuetify'
 import { useCustomStats } from '@/composables/useCustomStats'
 import { useProfiles } from '@/composables/useProfiles'
 import { useToast } from '@/composables/useToast'
@@ -150,7 +149,6 @@ import { renderMatrixExport } from '@/utils/matrixExport'
 const open = defineModel<boolean>({ default: false })
 
 const toast = useToast()
-const theme = useTheme()
 const { activeProfileName, treasureMatrix } = useProfiles()
 const { customStats } = useCustomStats()
 const { isCustomEntry, isWeaponMaxed, isWeaponOwned } = useWeaponStats()
@@ -390,24 +388,6 @@ const customCards = computed<ExportCard[]>(() => [
 
 const totalCount = computed(() => weaponCards.value.length + customCards.value.length)
 
-/**
- * 从当前 Vuetify 主题取出绘制需要的颜色，canvas 读不到 CSS 变量。
- *
- * 必须走 computedThemes 而不是 current：v-app 会调用 provideTheme，
- * 而它把 current 指向未经计算的原始 themes（vuetify theme.js:375），
- * 那里没有自动生成的 on-* 系列颜色，取出来会是 undefined。
- */
-function currentTheme(): ExportTheme {
-  const colors = theme.computedThemes.value[theme.name.value]!.colors
-  return {
-    primary: colors.primary!,
-    onPrimary: colors['on-primary']!,
-    background: colors.background!,
-    surface: colors.surface!,
-    onSurface: colors['on-surface']!,
-  }
-}
-
 function releasePreview() {
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = null
@@ -443,8 +423,8 @@ async function regenerate() {
       weapons: weaponCards.value,
       customs: customCards.value,
       title: `${activeProfileName.value} · 宝藏基质`,
-      subtitle: `${new Date().toLocaleString('zh-CN')} · 共 ${totalCount.value} 项`,
-      theme: currentTheme(),
+      // 条目数由绘制模块自己从卡片数量算，这里只给归档时间
+      subtitle: new Date().toLocaleString('zh-CN'),
     })
 
     // 期间又触发了新一轮渲染，丢弃这次的结果
