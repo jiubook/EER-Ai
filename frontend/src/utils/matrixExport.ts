@@ -25,6 +25,8 @@ export interface ExportCard {
   maxed: boolean
   /** 扫描到的基质枚数；缺省或非正数时不画角标 */
   badgeCount?: number
+  /** 三词条中文名，如 ["攻击", "终结技充能效率", "巧技"] */
+  traitNames?: string[]
 }
 
 /**
@@ -106,16 +108,17 @@ const HEADER_H = 62
 const SECTION_HEAD_H = 30
 const CARD_W = 260
 const CARD_H = 132
-const CARD_R = 8
+const CARD_R = 3
 const CARD_PAD = 12
 const NAME_H = 22
-const ICON = 76
+const ICON = 56
 const MATRIX_ICON = 56
 const PIP_W = 8
-const PIP_H = 17
+const PIP_H = 12
 const PIP_GAP = 3
-const PIP_ROW_GAP = 26
+const PIP_ROW_GAP = 21
 const BADGE_R = 11
+const TRAIT_FONTSIZE = 12
 
 /** 画布单边的设备像素上限，取远低于 Chromium 16384 的保守值 */
 const MAX_DEVICE_PX = 8192
@@ -300,7 +303,7 @@ function drawImagePlaceholder(
 ): void {
   ctx.fillStyle = withAlpha(theme.onSurface, 0.08)
   ctx.beginPath()
-  ctx.roundRect(x, y, size, size, 6)
+  ctx.roundRect(x, y, size, size, 3)
   ctx.fill()
 
   ctx.fillStyle = withAlpha(theme.onSurface, 0.35)
@@ -314,7 +317,7 @@ function drawImagePlaceholder(
  * 画武器 icon：图片 + 底部稀有度渐变 + 底部色条。
  *
  * 对应 ItemIcon.vue 的三层结构，但不画 icon 内嵌名称——
- * 76px 见方塞中文名不可读，名称在卡片里有独立一行。
+ * 56px 见方塞中文名不可读，名称在卡片里有独立一行。
  */
 function drawWeaponIcon(
   ctx: CanvasRenderingContext2D,
@@ -332,7 +335,7 @@ function drawWeaponIcon(
 
   ctx.save()
   ctx.beginPath()
-  ctx.roundRect(x, y, size, size, 6)
+  ctx.roundRect(x, y, size, size, 3)
   ctx.clip()
 
   drawImageCover(ctx, image, x, y, size, size)
@@ -373,7 +376,7 @@ function drawEssenceIcon(
 
   ctx.save()
   ctx.beginPath()
-  ctx.roundRect(x, y, size, size, [6, 6, 0, 0])
+  ctx.roundRect(x, y, size, size, 3)
   ctx.clip()
 
   ctx.fillStyle = '#ffffff'
@@ -398,7 +401,7 @@ function drawEssenceIcon(
   ctx.strokeStyle = withAlpha(CUSTOM_ORANGE, 0.5)
   ctx.lineWidth = 2
   ctx.beginPath()
-  ctx.roundRect(x + 1, y + 1, size - 2, size - 2, [6, 6, 0, 0])
+  ctx.roundRect(x + 1, y + 1, size - 2, size - 2, 3)
   ctx.stroke()
 }
 
@@ -426,7 +429,7 @@ function drawPipRow(
     }
 
     ctx.beginPath()
-    ctx.roundRect(pipX, y, PIP_W, PIP_H, 4)
+    ctx.roundRect(pipX, y, PIP_W, PIP_H, 2)
     ctx.fill()
     clearShadow(ctx)
   }
@@ -477,6 +480,20 @@ function drawBadge(
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(count > 99 ? '99+' : String(count), centerX, centerY)
+}
+
+/**
+ * 处理词条名称：去掉"提升"后缀以缩短显示长度。
+ *
+ * "攻击力提升" → "攻击"
+ * "终结技充能效率提升" → "终结技充能效率"
+ * "巧技" → "巧技"（无"提升"则保持不变）
+ */
+function shortenTraitName(name: string): string {
+  if (name.endsWith('提升')) {
+    return name.slice(0, -2)
+  }
+  return name
 }
 
 /** 画一整张卡片 */
@@ -541,6 +558,18 @@ function drawCard(
       pipX,
       bodyY + slot * PIP_ROW_GAP,
     )
+  }
+
+  // 底部词条名
+  if (card.traitNames && card.traitNames.length > 0) {
+    const traitText = card.traitNames.map((name) => shortenTraitName(name)).join('·')
+    const traitMaxWidth = CARD_W - CARD_PAD * 2
+    const traitY = y + CARD_H - CARD_PAD - 4
+    ctx.fillStyle = withAlpha(theme.onSurface, 0.55)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    const fittedText = fitText(ctx, traitText, traitMaxWidth, TRAIT_FONTSIZE, 10, 400)
+    ctx.fillText(fittedText, x + CARD_W / 2, traitY)
   }
 
   if (card.maxed) drawRainbowBorder(ctx, x, y, CARD_W, CARD_H)

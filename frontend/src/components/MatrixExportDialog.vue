@@ -103,7 +103,12 @@ import { useToast } from '@/composables/useToast'
 import { AFFIX_MAX_LEVEL, useWeaponStats } from '@/composables/useWeaponStats'
 import { getItemIconUrl, getItemTierColor } from '@/utils/gameData/item'
 import { useStaticData } from '@/utils/gameData/staticData'
-import { fallbackCustomStatName, findCustomStat } from '@/utils/gameData/weapon'
+import {
+  fallbackCustomStatName,
+  findCustomStat,
+  getGemTagName,
+  getStatsForWeapon,
+} from '@/utils/gameData/weapon'
 import { renderMatrixExport } from '@/utils/matrixExport'
 
 const open = defineModel<boolean>({ default: false })
@@ -163,6 +168,34 @@ function resolveCustomName(entry: TreasureMatrixEntry): string {
   return found.stat.name || fallbackCustomStatName(found.index)
 }
 
+/**
+ * 获取武器的三词条中文名。
+ *
+ * 自定义基质从配置里读取，内置武器从静态数据读取；
+ * 返回 ["攻击", "终结技充能效率", "巧技"] 这样的数组。
+ */
+function getTraitNames(weaponId: string): string[] {
+  // 自定义基质：从配置中读取
+  if (isCustomEntry(weaponId)) {
+    const found = findCustomStat(weaponId, customStats.value)
+    if (!found) return []
+    const stat = found.stat
+    const parts: string[] = []
+    if (stat.attribute) parts.push(getGemTagName(stat.attribute))
+    if (stat.secondary) parts.push(getGemTagName(stat.secondary))
+    if (stat.skill) parts.push(getGemTagName(stat.skill))
+    return parts
+  }
+
+  // 内置武器：从静态数据读取
+  const stats = getStatsForWeapon(weaponId)
+  const parts: string[] = []
+  if (stats.attribute) parts.push(getGemTagName(stats.attribute))
+  if (stats.secondary) parts.push(getGemTagName(stats.secondary))
+  if (stats.skill) parts.push(getGemTagName(stats.skill))
+  return parts
+}
+
 function matchesFilters(entry: TreasureMatrixEntry, rarityKey: string): boolean {
   if (!selectedRarities.value.includes(rarityKey)) return false
   if (!includeMaxed.value && isWeaponMaxed(entry.weapon_id)) return false
@@ -207,6 +240,7 @@ const weaponCards = computed<ExportCard[]>(() => {
       levels: toLevels(entry),
       maxed: isWeaponMaxed(entry.weapon_id),
       badgeCount: showBadges.value ? essenceCounts.value[entry.weapon_id] : undefined,
+      traitNames: getTraitNames(entry.weapon_id),
     }))
 })
 
@@ -222,6 +256,7 @@ const customCards = computed<ExportCard[]>(() =>
       tierColor: CUSTOM_TIER_COLOR,
       levels: toLevels(entry),
       maxed: isWeaponMaxed(entry.weapon_id),
+      traitNames: getTraitNames(entry.weapon_id),
     })),
 )
 
