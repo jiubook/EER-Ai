@@ -13,6 +13,8 @@ export interface ExportCard {
   /** 'weapon' 画武器 icon + 基质小图；'custom' 只画放大的基质图 */
   kind: 'weapon' | 'custom'
   name: string
+  /** 名称上方的小号注音行（内置武器放 ★ 星级）；缺省则该行留空 */
+  nameRuby?: string
   /** 武器 icon 地址；自定义基质没有武器图，传 null */
   iconUrl: string | null
   /** 基质底板地址 */
@@ -27,6 +29,8 @@ export interface ExportCard {
   badgeCount?: number
   /** 三词条中文名，如 ["攻击", "终结技充能效率", "巧技"] */
   traitNames?: string[]
+  /** 未获得的条目：整张卡片降透明度 + 去色绘制 */
+  dimmed?: boolean
 }
 
 /**
@@ -107,10 +111,13 @@ const SECTION_GAP = 22
 const HEADER_H = 62
 const SECTION_HEAD_H = 30
 const CARD_W = 260
-const CARD_H = 132
+const CARD_H = 144
 const CARD_R = 3
 const CARD_PAD = 12
 const NAME_H = 22
+/** 名称上方的注音行高度；不管有没有星级都占位，两类卡片的名称才对得齐 */
+const RUBY_H = 11
+const RUBY_FONTSIZE = 9
 const ICON = 56
 const MATRIX_ICON = 56
 const PIP_W = 8
@@ -119,6 +126,15 @@ const PIP_GAP = 3
 const PIP_ROW_GAP = 21
 const BADGE_R = 11
 const TRAIT_FONTSIZE = 12
+
+/**
+ * 未获得条目的置灰参数，对应总览页 `.weapon-not-owned` 的 `opacity/filter`。
+ *
+ * 透明度比页面上的 0.4 略高：页面只灰化图标，导出图整张卡片一起灰，
+ * 名称和词条名再压到 0.4 就基本读不出来了。
+ */
+const DIMMED_ALPHA = 0.45
+const DIMMED_FILTER = 'grayscale(0.8)'
 
 /** 画布单边的设备像素上限，取远低于 Chromium 16384 的保守值 */
 const MAX_DEVICE_PX = 8192
@@ -505,6 +521,14 @@ function drawCard(
   x: number,
   y: number,
 ): void {
+  // 无条件成对 save/restore：置灰只作用于当前这张卡，
+  // 漏掉 restore 会让后面所有卡片跟着变灰。
+  ctx.save()
+  if (card.dimmed) {
+    ctx.globalAlpha = DIMMED_ALPHA
+    ctx.filter = DIMMED_FILTER
+  }
+
   ctx.fillStyle = theme.surface
   ctx.beginPath()
   ctx.roundRect(x, y, CARD_W, CARD_H, CARD_R)
@@ -515,13 +539,23 @@ function drawCard(
 
   // 名称行
   const nameMaxWidth = CARD_W - CARD_PAD * 2
+
+  // 注音行：星级压到名称上方一行，小一号且半透明，不与名称抢视线
+  if (card.nameRuby) {
+    const rubyText = fitText(ctx, card.nameRuby, nameMaxWidth, RUBY_FONTSIZE, 7)
+    ctx.fillStyle = withAlpha(theme.onSurface, 0.55)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(rubyText, x + CARD_W / 2, y + CARD_PAD + RUBY_H / 2)
+  }
+
   const nameText = fitText(ctx, card.name, nameMaxWidth, 14, 10)
   ctx.fillStyle = theme.onSurface
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(nameText, x + CARD_W / 2, y + CARD_PAD + NAME_H / 2)
+  ctx.fillText(nameText, x + CARD_W / 2, y + CARD_PAD + RUBY_H + NAME_H / 2)
 
-  const bodyY = y + CARD_PAD + NAME_H + 4
+  const bodyY = y + CARD_PAD + RUBY_H + NAME_H + 4
   const iconImage = card.iconUrl ? (images.get(card.iconUrl) ?? null) : null
   const bgImage = card.essenceBgUrl ? (images.get(card.essenceBgUrl) ?? null) : null
   const skillImage = card.skillIconUrl ? (images.get(card.skillIconUrl) ?? null) : null
@@ -573,6 +607,8 @@ function drawCard(
   }
 
   if (card.maxed) drawRainbowBorder(ctx, x, y, CARD_W, CARD_H)
+
+  ctx.restore()
 }
 
 /** 画区标题，返回下一个可用的 y 坐标 */

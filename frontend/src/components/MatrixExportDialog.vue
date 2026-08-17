@@ -10,7 +10,13 @@
         <!-- 导出范围：与页面顶部的筛选相互独立，避免互相污染 -->
         <div class="d-flex align-center gap-2 mb-2">
           <span class="text-body-2 text-medium-emphasis">导出星级：</span>
-          <v-chip-group v-model="selectedRarities" column multiple>
+          <!-- 单向绑定：勾选「自定义」时要先弹确认，双向绑定拦不住这次点击 -->
+          <v-chip-group
+            column
+            :model-value="selectedRarities"
+            multiple
+            @update:model-value="onRaritySelectionChange"
+          >
             <v-chip color="primary" filter size="small" value="3" variant="outlined"> 3★ </v-chip>
             <v-chip color="primary" filter size="small" value="4" variant="outlined"> 4★ </v-chip>
             <v-chip color="primary" filter size="small" value="5" variant="outlined"> 5★ </v-chip>
@@ -30,6 +36,14 @@
             label="包含满级武器（6/6/3）"
           />
           <v-switch
+            v-model="includeUnowned"
+            color="primary"
+            density="compact"
+            :disabled="onlyIncludedInCalculation"
+            hide-details
+            label="未获得的武器/基质"
+          />
+          <v-switch
             v-model="onlyIncludedInCalculation"
             color="primary"
             density="compact"
@@ -45,7 +59,8 @@
           />
         </div>
         <div class="text-caption text-medium-emphasis mb-4">
-          角标来自本次运行的扫描结果，重启后清零；自定义基质无对应数据。
+          未获得的条目按 0/6·0/6·0/3
+          置灰展示；角标来自本次运行的扫描结果，重启后清零，自定义基质无对应数据。
         </div>
 
         <v-alert v-if="totalCount === 0" border="start" type="warning" variant="tonal">
@@ -90,6 +105,26 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
+
+  <!-- 自定义基质可能有几百枚，一次全画会卡住界面，开启前先确认 -->
+  <v-dialog v-model="showCustomConfirm" max-width="460">
+    <v-card>
+      <v-card-title class="d-flex align-center">
+        <v-icon class="mr-2" color="warning">mdi-alert-outline</v-icon>
+        加入自定义基质
+      </v-card-title>
+      <v-card-text>
+        当前配置中有 {{ customStats.length }} 枚自定义基质。
+        <br />
+        全部绘制会长时间占用主线程，数量多时界面可能明显卡顿甚至短暂无响应。确认加入导出？
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="showCustomConfirm = false">取消</v-btn>
+        <v-btn color="warning" variant="flat" @click="confirmIncludeCustom">确认加入</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script lang="ts" setup>
@@ -108,6 +143,7 @@ import {
   findCustomStat,
   getGemTagName,
   getStatsForWeapon,
+  toCustomStatId,
 } from '@/utils/gameData/weapon'
 import { renderMatrixExport } from '@/utils/matrixExport'
 
@@ -117,18 +153,27 @@ const toast = useToast()
 const theme = useTheme()
 const { activeProfileName, treasureMatrix } = useProfiles()
 const { customStats } = useCustomStats()
-const { isCustomEntry, isWeaponMaxed, getWeaponPriority } = useWeaponStats()
-const { weaponsMap, matrixIcons } = useStaticData()
+const { isCustomEntry, isWeaponMaxed, isWeaponOwned } = useWeaponStats()
+const { weaponsMap, weaponTypes, matrixIcons } = useStaticData()
 
 /** 自定义基质在导出图里按 6★ 处理，与页面筛选口径一致 */
 const CUSTOM_RARITY_KEY = 'custom'
 /** 自定义基质卡片的底部色条 */
 const CUSTOM_TIER_COLOR = '#ff7100'
+/** 未获得条目的词条等级：三条全为 0 */
+const UNOWNED_LEVELS = [0, 0, 0] as const
 
-const selectedRarities = ref<string[]>(['3', '4', '5', '6', CUSTOM_RARITY_KEY])
+// 自定义基质默认不勾选：批量添加之后配置里可能有几百枚，
+// 默认全画出来会让弹窗一打开就卡住。
+const selectedRarities = ref<string[]>(['3', '4', '5', '6'])
 const includeMaxed = ref(true)
+const includeUnowned = ref(true)
 const onlyIncludedInCalculation = ref(false)
 const showBadges = ref(false)
+const showCustomConfirm = ref(false)
+
+/** 等待用户确认时暂存的目标选择，确认后才写回 selectedRarities */
+let pendingRarities: string[] = []
 
 const essenceCounts = ref<Record<string, number>>({})
 const previewUrl = ref<string | null>(null)
@@ -196,12 +241,36 @@ function getTraitNames(weaponId: string): string[] {
   return parts
 }
 
-function matchesFilters(entry: TreasureMatrixEntry, rarityKey: string): boolean {
-  if (!selectedRarities.value.includes(rarityKey)) return false
+/**
+ * 星级 chip 的选择变更入口。
+ *
+ * 勾选「自定义」时先弹确认再生效：确认前 selectedRarities 保持不变，
+ * chip 也就不会亮起来，取消/ESC/点遮罩都无需额外回滚。
+ */
+function onRaritySelectionChange(value: unknown) {
+  const next = value as string[]
+  if (next.includes(CUSTOM_RARITY_KEY) && !selectedRarities.value.includes(CUSTOM_RARITY_KEY)) {
+    pendingRarities = next
+    showCustomConfirm.value = true
+    return
+  }
+  selectedRarities.value = next
+}
+
+function confirmIncludeCustom() {
+  selectedRarities.value = pendingRarities
+  showCustomConfirm.value = false
+}
+
+/** 已获得条目要额外过的两个开关；星级筛选在各自的 computed 里判断 */
+function passesToggles(entry: TreasureMatrixEntry): boolean {
   if (!includeMaxed.value && isWeaponMaxed(entry.weapon_id)) return false
   if (onlyIncludedInCalculation.value && entry.include_in_calculation === false) return false
   return true
 }
+
+/** 是否绘制未获得的条目：「仅导出参与计算」开启时它们本就不参与计算，一律排除 */
+const showUnowned = computed(() => includeUnowned.value && !onlyIncludedInCalculation.value)
 
 function toLevels(entry: TreasureMatrixEntry): [number, number, number] {
   return [
@@ -211,42 +280,72 @@ function toLevels(entry: TreasureMatrixEntry): [number, number, number] {
   ]
 }
 
-const weaponCards = computed<ExportCard[]>(() => {
-  const entries = treasureMatrix.value.filter((entry) => {
-    if (isCustomEntry(entry.weapon_id)) return false
-    // 丢弃静态数据里已不存在的武器，避免画出空白卡
-    const weapon = weaponsMap.value.get(entry.weapon_id)
-    if (!weapon) return false
-    return matchesFilters(entry, String(weapon.rarity))
-  })
-
-  return entries
-    .toSorted((a, b) => {
-      const priorityDiff = getWeaponPriority(b.weapon_id) - getWeaponPriority(a.weapon_id)
-      if (priorityDiff !== 0) return priorityDiff
-      const rarityDiff =
-        (weaponsMap.value.get(b.weapon_id)?.rarity ?? 0) -
-        (weaponsMap.value.get(a.weapon_id)?.rarity ?? 0)
-      if (rarityDiff !== 0) return rarityDiff
-      return a.weapon_id.localeCompare(b.weapon_id)
-    })
-    .map((entry) => ({
-      kind: 'weapon' as const,
-      name: weaponsMap.value.get(entry.weapon_id)?.name ?? entry.weapon_name,
-      iconUrl: getItemIconUrl(entry.weapon_id) ?? null,
-      essenceBgUrl: matrixIcons.value.essenceBg,
-      skillIconUrl: resolveSkillIconUrl(entry.weapon_id),
-      tierColor: getItemTierColor(entry.weapon_id).hex(),
-      levels: toLevels(entry),
-      maxed: isWeaponMaxed(entry.weapon_id),
-      badgeCount: showBadges.value ? essenceCounts.value[entry.weapon_id] : undefined,
-      traitNames: getTraitNames(entry.weapon_id),
-    }))
+/**
+ * weapon_id → 所属武器类型的 sortOrder。
+ *
+ * 后端已按 sortOrder 排好（单手剑→双手剑→长柄武器→手铳→施术单元），
+ * 这里仍显式读 sortOrder 而不是数组下标，接口顺序万一变了也不会静默错位。
+ */
+const weaponTypeOrder = computed(() => {
+  const order = new Map<string, number>()
+  for (const weaponType of weaponTypes.value) {
+    for (const weaponId of weaponType.weaponIds) {
+      order.set(weaponId, weaponType.sortOrder)
+    }
+  }
+  return order
 })
 
-const customCards = computed<ExportCard[]>(() =>
-  treasureMatrix.value
-    .filter((entry) => isCustomEntry(entry.weapon_id) && matchesFilters(entry, CUSTOM_RARITY_KEY))
+/**
+ * 内置武器区的卡片。
+ *
+ * 排序：武器类型（单手剑→…→施术单元）→ 稀有度降序（6★→3★）→ id 升序。
+ * 已获得与未获得走同一条序列，未获得的穿插在已获得之间而不是堆在最后。
+ * 只遍历静态数据里的武器，账号里指向已下线 ID 的条目自然被丢弃，避免画出空白卡。
+ */
+const weaponCards = computed<ExportCard[]>(() => {
+  const entryByWeaponId = new Map(
+    treasureMatrix.value.map((entry) => [entry.weapon_id, entry] as const),
+  )
+  const weapons = [...weaponsMap.value.values()].toSorted((a, b) => {
+    // 不属于任何类型的武器（类型数据缺失时）沉到最末尾
+    const typeA = weaponTypeOrder.value.get(a.id) ?? Number.POSITIVE_INFINITY
+    const typeB = weaponTypeOrder.value.get(b.id) ?? Number.POSITIVE_INFINITY
+    if (typeA !== typeB) return typeA - typeB
+    if (a.rarity !== b.rarity) return b.rarity - a.rarity
+    return a.id.localeCompare(b.id)
+  })
+
+  const cards: ExportCard[] = []
+  for (const weapon of weapons) {
+    if (!selectedRarities.value.includes(String(weapon.rarity))) continue
+
+    const entry = entryByWeaponId.get(weapon.id)
+    if (entry ? !passesToggles(entry) : !showUnowned.value) continue
+
+    cards.push({
+      kind: 'weapon',
+      name: weapon.name,
+      nameRuby: '★'.repeat(weapon.rarity),
+      iconUrl: getItemIconUrl(weapon.id) ?? null,
+      essenceBgUrl: matrixIcons.value.essenceBg,
+      skillIconUrl: resolveSkillIconUrl(weapon.id),
+      tierColor: getItemTierColor(weapon.id).hex(),
+      levels: entry ? toLevels(entry) : UNOWNED_LEVELS,
+      maxed: isWeaponMaxed(weapon.id),
+      // 未获得的武器不画角标：扫到的基质还没有落到具体武器上
+      badgeCount: entry && showBadges.value ? essenceCounts.value[weapon.id] : undefined,
+      traitNames: getTraitNames(weapon.id),
+      dimmed: entry === undefined,
+    })
+  }
+  return cards
+})
+
+const ownedCustomCards = computed<ExportCard[]>(() => {
+  if (!selectedRarities.value.includes(CUSTOM_RARITY_KEY)) return []
+  return treasureMatrix.value
+    .filter((entry) => isCustomEntry(entry.weapon_id) && passesToggles(entry))
     .map((entry) => ({
       kind: 'custom' as const,
       name: resolveCustomName(entry),
@@ -257,8 +356,37 @@ const customCards = computed<ExportCard[]>(() =>
       levels: toLevels(entry),
       maxed: isWeaponMaxed(entry.weapon_id),
       traitNames: getTraitNames(entry.weapon_id),
-    })),
-)
+    }))
+})
+
+/** 未获得的自定义基质：配置里有、但账号里没写入 treasure_matrix 的那些 */
+const unownedCustomCards = computed<ExportCard[]>(() => {
+  if (!selectedRarities.value.includes(CUSTOM_RARITY_KEY) || !showUnowned.value) return []
+
+  return customStats.value
+    .map((stat, index) => ({
+      weaponId: toCustomStatId(stat),
+      name: stat.name || fallbackCustomStatName(index),
+    }))
+    .filter((item) => !isWeaponOwned(item.weaponId))
+    .map((item) => ({
+      kind: 'custom' as const,
+      name: item.name,
+      iconUrl: null,
+      essenceBgUrl: matrixIcons.value.essenceBg,
+      skillIconUrl: resolveSkillIconUrl(item.weaponId),
+      tierColor: CUSTOM_TIER_COLOR,
+      levels: UNOWNED_LEVELS,
+      maxed: false,
+      traitNames: getTraitNames(item.weaponId),
+      dimmed: true,
+    }))
+})
+
+const customCards = computed<ExportCard[]>(() => [
+  ...ownedCustomCards.value,
+  ...unownedCustomCards.value,
+])
 
 const totalCount = computed(() => weaponCards.value.length + customCards.value.length)
 
@@ -419,7 +547,14 @@ watch(open, (opened) => {
 })
 
 watch(
-  [selectedRarities, includeMaxed, onlyIncludedInCalculation, showBadges, treasureMatrix],
+  [
+    selectedRarities,
+    includeMaxed,
+    includeUnowned,
+    onlyIncludedInCalculation,
+    showBadges,
+    treasureMatrix,
+  ],
   () => {
     if (open.value) scheduleRegenerate()
   },

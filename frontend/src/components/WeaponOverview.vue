@@ -53,6 +53,15 @@
         >
           {{ switchModeLabels[switchDisplayMode] }}
         </v-btn>
+        <v-btn
+          color="secondary"
+          prepend-icon="mdi-image-outline"
+          size="small"
+          variant="tonal"
+          @click="showExportDialog = true"
+        >
+          导出为图片
+        </v-btn>
       </div>
 
       <!-- 武器总览容器（包含连线层） -->
@@ -216,12 +225,16 @@
 
   <!-- 自定义基质重合检测弹窗 -->
   <overlap-detection-dialog />
+
+  <!-- 宝藏基质导出弹窗 -->
+  <matrix-export-dialog v-model="showExportDialog" />
 </template>
 
 <script lang="ts" setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import CustomStatIcon from '@/components/CustomStatIcon.vue'
 import ItemIcon from '@/components/ItemIcon.vue'
+import MatrixExportDialog from '@/components/MatrixExportDialog.vue'
 import OverlapDetectionDialog from '@/components/OverlapDetectionDialog.vue'
 import WeaponDetailDialog from '@/components/WeaponDetailDialog.vue'
 import { useCustomStats } from '@/composables/useCustomStats'
@@ -371,6 +384,9 @@ function getWeaponSkillIcon(weaponId: string): string | null {
 
 // 武器详情弹窗（null=关闭，string=打开编辑该武器）
 const detailWeaponId = ref<string | null>(null)
+
+// 导出为图片弹窗
+const showExportDialog = ref(false)
 
 /**
  * 计算指定武器的属性组合键。
