@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class TreasureMatrixExportRequest(BaseModel):
     image_base64: str = Field(
-        description="PNG 图片内容的 base64 编码（不含 data URI 前缀）",
+        description="WebP 或 PNG 图片内容的 base64 编码（不含 data URI 前缀）",
     )
     open_folder: bool = Field(
         default=True,

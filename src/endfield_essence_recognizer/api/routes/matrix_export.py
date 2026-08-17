@@ -1,7 +1,7 @@
 """
 宝藏基质导出 API 路由。
 
-接收前端 Canvas 渲染出的 PNG 图片，落盘到导出目录，并可选地打开所在文件夹。
+接收前端 Canvas 渲染出的图片，落盘到导出目录，并可选地打开所在文件夹。
 """
 
 import asyncio
@@ -26,14 +26,41 @@ from endfield_essence_recognizer.utils.log import logger
 
 router = APIRouter(prefix="/export", tags=["export"])
 
-# PNG 文件头魔数。这个接口只接受本工具自己画出来的 PNG，不做通用文件落盘。
+# 这个接口只接受本工具自己画出来的图，不做通用文件落盘。
+# WebP 是 RIFF 容器：前 4 字节 'RIFF'、4 字节长度、再 4 字节 'WEBP'。
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_RIFF_SIGNATURE = b"RIFF"
+_WEBP_SIGNATURE = b"WEBP"
 
 # 导出图体积上限。前端 2x 缩放下的实际产物远小于此值，这里只作兜底防御。
 _MAX_EXPORT_BYTES = 32 * 1024 * 1024
 
 # Windows 文件名非法字符与控制字符
 _ILLEGAL_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def _resolve_extension(raw: bytes) -> str:
+    """
+    按图片魔数确定文件扩展名。
+
+    前端主路径产出 WebP；浏览器不支持 WebP 编码时 canvas.toBlob 会静默回退成
+    PNG，两种都要能落盘，否则那种环境下保存会整条失败。扩展名取自实际内容
+    而不是前端声明，落盘文件的后缀就一定和内容对得上。
+
+    Args:
+        raw: 解码后的图片字节。
+
+    Returns:
+        不含点号的扩展名。
+
+    Raises:
+        ValueError: 内容既不是 WebP 也不是 PNG。
+    """
+    if raw[:4] == _RIFF_SIGNATURE and raw[8:12] == _WEBP_SIGNATURE:
+        return "webp"
+    if raw.startswith(_PNG_SIGNATURE):
+        return "png"
+    raise ValueError("图片内容不是合法的 WebP 或 PNG")
 
 
 def _safe_file_stem(profile_name: str) -> str:
@@ -77,15 +104,14 @@ async def export_treasure_matrix(
     exports_dir: Path = Depends(get_exports_dir_dep),
     manager: ProfileManager = Depends(get_profile_manager),
 ) -> TreasureMatrixExportResponse:
-    """接收前端渲染好的 PNG 图片并落盘，可选地打开所在文件夹。"""
+    """接收前端渲染好的图片并落盘，可选地打开所在文件夹。"""
     try:
         try:
             raw = base64.b64decode(request.image_base64, validate=True)
         except (binascii.Error, ValueError) as e:
             raise ValueError("图片内容不是合法的 base64") from e
 
-        if not raw.startswith(_PNG_SIGNATURE):
-            raise ValueError("图片内容不是合法的 PNG")
+        extension = _resolve_extension(raw)
 
         if len(raw) > _MAX_EXPORT_BYTES:
             raise ValueError(f"图片体积超过上限（{len(raw) / 1024 / 1024:.1f} MB）")
@@ -93,7 +119,7 @@ async def export_treasure_matrix(
         # 文件名完全由后端拼接：账号名清洗后加时间戳，多次导出天然不覆盖，
         # 前端不参与命名，杜绝路径穿越。
         stem = _safe_file_stem(manager.get_active_profile_name())
-        file_name = f"{stem}_{datetime.now():%Y%m%d-%H%M%S}.png"
+        file_name = f"{stem}_{datetime.now():%Y%m%d-%H%M%S}.{extension}"
         save_path = exports_dir / file_name
         await asyncio.to_thread(exports_dir.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(save_path.write_bytes, raw)

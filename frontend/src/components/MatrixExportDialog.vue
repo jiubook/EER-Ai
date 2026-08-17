@@ -144,7 +144,7 @@ import {
   getStatsForWeapon,
   toCustomStatId,
 } from '@/utils/gameData/weapon'
-import { renderMatrixExport } from '@/utils/matrixExport'
+import { renderMatrixExport, toPngBlob } from '@/utils/matrixExport'
 
 const open = defineModel<boolean>({ default: false })
 
@@ -470,7 +470,8 @@ async function copyToClipboard() {
 
   copying.value = true
   try {
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    // 剪贴板只吃 PNG，导出图是 WebP，这里现场转一份
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': await toPngBlob(blob) })])
     toast.success('已复制到剪贴板')
   } catch (error) {
     toast.reportError('复制到剪贴板失败', error)

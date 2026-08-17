@@ -1,7 +1,7 @@
 /**
  * 宝藏基质导出图的 Canvas 绘制模块。
  *
- * 这里只负责「把一组卡片画成一张 PNG」，不感知任何应用状态：
+ * 这里只负责「把一组卡片画成一张图」，不感知任何应用状态：
  * 调用方把 profile、静态数据整理成普通对象传进来。
  * 这样布局计算能在 node 环境的单测里直接跑，无需 DOM。
  *
@@ -53,6 +53,7 @@ export interface MatrixExportInput {
 }
 
 export interface MatrixExportResult {
+  /** 导出图；正常是 WebP，浏览器不支持 WebP 编码时会回退成 PNG，看 blob.type */
   blob: Blob
   /** 预览用的 object URL，调用方负责 revoke */
   objectUrl: string
@@ -219,6 +220,23 @@ const GRID_STEP = 44
 const MAX_DEVICE_PX = 8192
 
 /**
+ * 导出图的编码格式。
+ *
+ * PNG 对这张图格外不利：drawPaper 铺的颗粒层逐像素随机，几乎不可压缩，
+ * 两千万像素能压出十几 MB。同一份内容换成 WebP 只有几 MB。
+ */
+const EXPORT_MIME = 'image/webp'
+
+/**
+ * WebP 质量。
+ *
+ * Chromium 只在质量严格等于 1 时走无损编码，小于 1 则是有损档位——有损能再
+ * 小一个量级，代价是颗粒层被平滑掉一部分。想换档位只改这个常量，其余链路
+ * 都按实际产出的 MIME 走，不必跟着动。
+ */
+const EXPORT_QUALITY = 1
+
+/**
  * 按卡片总数选择网格列数。
  *
  * 两个区共用同一列数，网格才对得齐。
@@ -313,14 +331,56 @@ async function preloadImages(
   return new Map(entries)
 }
 
-/** 把 canvas 转成 PNG Blob；toBlob 是回调式的，这里包一层 Promise */
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+/**
+ * 把 canvas 编码成 Blob；toBlob 是回调式的，这里包一层 Promise。
+ *
+ * 浏览器不认识请求的格式时，toBlob 会静默回退成 PNG 而不是报错，所以调用方
+ * 得看 blob.type，不能假定拿到的就是自己要的格式。
+ */
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  mimeType: string,
+  quality?: number,
+): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob)
-      else reject(new Error('画布导出失败'))
-    }, 'image/png')
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('画布导出失败'))
+      },
+      mimeType,
+      quality,
+    )
   })
+}
+
+/**
+ * 把导出图重新编码成 PNG。
+ *
+ * 剪贴板专用：Chromium 的剪贴板写入只接受 image/png，塞 WebP 会抛
+ * NotAllowedError。这里从已有的 Blob 解码重画，而不是让 renderMatrixExport
+ * 一次产出两份——编码这么大的图要几百毫秒，筛选项每动一次都要重绘，
+ * 不该为一个可能不会被点的按钮每次都付这个代价。
+ *
+ * @param blob 导出图 Blob；已经是 PNG 时原样返回。
+ * @returns PNG 格式的 Blob。
+ * @throws 解码失败或画布导出失败时抛出。
+ */
+export async function toPngBlob(blob: Blob): Promise<Blob> {
+  if (blob.type === 'image/png') return blob
+
+  const bitmap = await createImageBitmap(blob)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('无法创建画布上下文')
+    ctx.drawImage(bitmap, 0, 0)
+    return await canvasToBlob(canvas, 'image/png')
+  } finally {
+    bitmap.close()
+  }
 }
 
 /** 以 rgba 形式取颜色的透明度变体 */
@@ -1332,10 +1392,10 @@ function drawGrid(
 }
 
 /**
- * 把宝藏基质卡片渲染成一张 PNG。
+ * 把宝藏基质卡片渲染成一张导出图。
  *
  * @param input 卡片数据与页头文案。
- * @returns PNG Blob、预览用 object URL 及实际尺寸。
+ * @returns 导出图 Blob（WebP，不支持时回退 PNG）、预览用 object URL 及实际尺寸。
  * @throws 卡片为空、或画布导出失败时抛出。
  */
 export async function renderMatrixExport(input: MatrixExportInput): Promise<MatrixExportResult> {
@@ -1403,7 +1463,7 @@ export async function renderMatrixExport(input: MatrixExportInput): Promise<Matr
 
   drawFooter(ctx, allCards.length, PAGE_PAD, cursorY + SECTION_GAP, gridWidth)
 
-  const blob = await canvasToBlob(canvas)
+  const blob = await canvasToBlob(canvas, EXPORT_MIME, EXPORT_QUALITY)
   return {
     blob,
     objectUrl: URL.createObjectURL(blob),

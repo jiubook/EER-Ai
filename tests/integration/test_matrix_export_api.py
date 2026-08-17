@@ -14,6 +14,9 @@ PNG_BASE64 = (
     "60e6kgAAAABJRU5ErkJggg=="
 )
 
+# 1x1 无损 WebP。前端主路径产出的就是 WebP，PNG 只是不支持时的回退。
+WEBP_BASE64 = "UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA="
+
 
 @pytest.fixture
 def mock_profile_manager():
@@ -42,8 +45,26 @@ def mock_open_directory():
         yield mock
 
 
+def test_export_saves_webp(client, mock_open_directory, tmp_path):
+    """WebP 是前端主路径，应落盘为 .webp 而不是被当成 PNG。"""
+    response = client.post(
+        "/api/export/treasure_matrix",
+        json={"image_base64": WEBP_BASE64, "open_folder": False},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["file_name"].startswith("default_")
+    assert data["file_name"].endswith(".webp")
+
+    saved = tmp_path / "exports" / data["file_name"]
+    assert saved.exists()
+    assert saved.read_bytes() == base64.b64decode(WEBP_BASE64)
+
+
 def test_export_saves_png(client, mock_open_directory, tmp_path):
-    """合法 PNG 应落盘到导出目录，并返回文件路径。"""
+    """PNG 是浏览器不支持 WebP 编码时的回退通道，同样要能落盘。"""
     response = client.post(
         "/api/export/treasure_matrix",
         json={"image_base64": PNG_BASE64, "open_folder": False},
@@ -60,12 +81,12 @@ def test_export_saves_png(client, mock_open_directory, tmp_path):
     assert saved.read_bytes() == base64.b64decode(PNG_BASE64)
 
 
-def test_export_rejects_non_png(client, mock_open_directory):
-    """非 PNG 内容必须被拒绝，这个接口不做通用文件落盘。"""
+def test_export_rejects_unsupported_format(client, mock_open_directory):
+    """既不是 WebP 也不是 PNG 的内容必须被拒绝，这个接口不做通用文件落盘。"""
     response = client.post(
         "/api/export/treasure_matrix",
         json={
-            "image_base64": base64.b64encode(b"not a png at all").decode(),
+            "image_base64": base64.b64encode(b"not an image at all").decode(),
             "open_folder": False,
         },
     )
@@ -73,6 +94,7 @@ def test_export_rejects_non_png(client, mock_open_directory):
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is False
+    assert "WebP" in data["message"]
     assert "PNG" in data["message"]
     assert data["file_path"] is None
 
