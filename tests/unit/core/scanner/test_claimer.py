@@ -263,6 +263,106 @@ class TestClaimByMatrix:
         assert result.reject_reason is None
 
 
+class TestClaimUnmatchedHighLevel:
+    """不匹配任何已实装武器的高等级宝藏基质（按属性组合分组认领）。"""
+
+    @pytest.fixture
+    def high_level_settings(self, default_settings):
+        default_settings.high_level_treasure_enabled = True
+        default_settings.same_type_treasure_limit_enabled = True
+        default_settings.same_type_treasure_limit = 1
+        default_settings.same_type_group_mode = SameTypeGroupMode.BY_WEAPON
+        default_settings.same_type_keep_best = True
+        default_settings.same_type_keep_best_mode = KeepBestMode.WEIGHTED_SUM
+        return default_settings
+
+    def _make_essence(self, levels, stats=None, stat_types=None) -> EssenceData:
+        return EssenceData(
+            stats=stats or ["A", "B", "C"],
+            stat_types=stat_types
+            or [StatType.ATTRIBUTE, StatType.SECONDARY, StatType.SKILL],
+            levels=levels,
+            rarity=RarityLabel.FIVE,
+            abandon_label=AbandonStatusLabel.NOT_ABANDONED,
+            lock_label=LockStatusLabel.NOT_LOCKED,
+        )
+
+    def _claim(self, ctx, essence, settings, static_data):
+        classification = classify_essence(essence, settings, static_data)
+        assert classification.quality == EssenceQuality.TREASURE
+        return ctx.claim(
+            classification, essence, settings, static_game_data=static_data
+        )
+
+    def test_better_level_replaces_after_limit_reached(
+        self, mock_static_game_data, high_level_settings, claim_context
+    ):
+        """达到数量上限后，更优基质仍应按留大弃小替换（上游 issue #199）。"""
+        first = self._claim(
+            claim_context,
+            self._make_essence([3, 1, 1]),
+            high_level_settings,
+            mock_static_game_data,
+        )
+        second = self._claim(
+            claim_context,
+            self._make_essence([4, 1, 1]),
+            high_level_settings,
+            mock_static_game_data,
+        )
+
+        assert first.reject_reason is None
+        assert second.reject_reason is None
+        assert claim_context.best_levels[("A", "B", "C")] == (4, 1, 1)
+        # 替换语义：不额外占用名额
+        assert claim_context.treasure_counts[("A", "B", "C")] == 1
+
+    def test_worse_level_rejected_after_limit_reached(
+        self, mock_static_game_data, high_level_settings, claim_context
+    ):
+        """扫描顺序反转：更差基质仍判为养成材料，保留的始终是更优的那枚。"""
+        self._claim(
+            claim_context,
+            self._make_essence([4, 1, 1]),
+            high_level_settings,
+            mock_static_game_data,
+        )
+        second = self._claim(
+            claim_context,
+            self._make_essence([3, 1, 1]),
+            high_level_settings,
+            mock_static_game_data,
+        )
+
+        assert second.reject_reason is RejectReason.LIMIT
+        assert claim_context.best_levels[("A", "B", "C")] == (4, 1, 1)
+        assert claim_context.treasure_counts[("A", "B", "C")] == 1
+
+    def test_stat_order_normalized_into_same_group(
+        self, mock_static_game_data, high_level_settings, claim_context
+    ):
+        """词条显示顺序不同的同属性组合归入同一分组，不各占名额。"""
+        self._claim(
+            claim_context,
+            self._make_essence([3, 1, 1]),
+            high_level_settings,
+            mock_static_game_data,
+        )
+        # 同一属性组合，识别位置顺序为技能、属性、副属性
+        reordered = self._make_essence(
+            [1, 4, 1],
+            stats=["C", "A", "B"],
+            stat_types=[StatType.SKILL, StatType.ATTRIBUTE, StatType.SECONDARY],
+        )
+        second = self._claim(
+            claim_context, reordered, high_level_settings, mock_static_game_data
+        )
+
+        assert list(claim_context.treasure_counts) == [("A", "B", "C")]
+        assert second.reject_reason is None
+        assert claim_context.best_levels[("A", "B", "C")] == (4, 1, 1)
+
+
 class TestClaimNonTreasure:
     """非宝藏基质不认领。"""
 

@@ -24,6 +24,14 @@ _WEIGHTS_AFFIX_12 = tuple(
 )  # 索引 = 等级（1~6）
 _WEIGHTS_AFFIX_3 = tuple(accumulate((0, 0, 1 / 0.109, 1 / 0.042)))  # 索引 = 等级（1~3）
 
+# ── 词条的语义顺序 ──
+# 与武器的 stat1/stat2/stat3、profile 的 affix1/affix2/affix3 保持一致
+_SEMANTIC_ORDER: tuple[StatType, ...] = (
+    StatType.ATTRIBUTE,
+    StatType.SECONDARY,
+    StatType.SKILL,
+)
+
 
 def _grease_sum(
     levels: tuple[int, int, int], stat_types: list[StatType | None]
@@ -117,6 +125,54 @@ def compare_levels(
         1（当前更优）/ 0（相等）/ -1（当前更差）
     """
     return _level_cmp(current, existing, mode, stat_types)
+
+
+def _normalize_by_stat_type(
+    stats: list[str | None],
+    stat_types: list[StatType | None],
+    levels: list[int | None],
+) -> tuple[tuple[str | None, ...], list[StatType | None], tuple[int, int, int]]:
+    """把识别位置顺序的词条三元组重排为语义顺序（属性、副属性、技能）。
+
+    识别层按屏幕 ROI 位置 0/1/2 产出 stats/stat_types/levels，位置顺序不保证
+    等于语义顺序；而武器的 stat1/2/3 与 profile 的 affix1/2/3 均按语义顺序存储。
+    不归一化时，同一属性组合的基质会因词条显示顺序不同被算作不同分组各占名额，
+    等级比较与落盘也会错位。
+
+    语义类型未识别（None）或重复的位置，按原相对顺序补入剩余空槽。
+
+    Args:
+        stats: 按识别位置排列的属性 ID 列表。
+        stat_types: 按识别位置排列的语义类型列表。
+        levels: 按识别位置排列的等级列表（None 视作 1 级）。
+
+    Returns:
+        (语义顺序的属性组合 key, 语义顺序的类型列表, 语义顺序的等级元组)。
+    """
+    slots: list[int | None] = [None] * len(_SEMANTIC_ORDER)
+    leftovers: list[int] = []
+    for index, stat_type in enumerate(stat_types):
+        slot = (
+            _SEMANTIC_ORDER.index(stat_type) if stat_type in _SEMANTIC_ORDER else None
+        )
+        if slot is None or slots[slot] is not None:
+            leftovers.append(index)
+        else:
+            slots[slot] = index
+
+    # 类型未识别或重复的位置，按原顺序补入剩余空槽
+    order: list[int] = []
+    for slot_index in slots:
+        order.append(leftovers.pop(0) if slot_index is None else slot_index)
+
+    stat_key = tuple(stats[i] for i in order)
+    ordered_types = [stat_types[i] for i in order]
+    ordered_levels = (
+        levels[order[0]] or 1,
+        levels[order[1]] or 1,
+        levels[order[2]] or 1,
+    )
+    return stat_key, ordered_types, ordered_levels
 
 
 def _order_candidate_ids(

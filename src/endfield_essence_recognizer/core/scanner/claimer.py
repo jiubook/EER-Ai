@@ -18,6 +18,7 @@ from endfield_essence_recognizer.core.scanner.classifier import (
 from endfield_essence_recognizer.core.scanner.evaluate import (
     _group_stat_key,
     _level_cmp,
+    _normalize_by_stat_type,
     _order_candidate_ids,
 )
 from endfield_essence_recognizer.core.scanner.models import (
@@ -228,12 +229,10 @@ class ClaimContext:
                 classification.matched_weapon_ids, setting, static_game_data
             )
 
-        current_levels: LevelTuple = (
-            data.levels[0] or 1,
-            data.levels[1] or 1,
-            data.levels[2] or 1,
+        # 归一化为语义顺序（属性、副属性、技能），与武器 stat1/2/3、profile affix1/2/3 对齐
+        stat_key, stat_types, current_levels = _normalize_by_stat_type(
+            data.stats, data.stat_types, data.levels
         )
-        stat_types = data.stat_types
         matched_weapon_ids = classification.matched_weapon_ids
 
         # 数量上限关闭
@@ -279,7 +278,6 @@ class ClaimContext:
             )
 
         # 默认按基质分组
-        stat_key = tuple(data.stats)
         return self._claim_by_matrix(
             classification,
             stat_key,
@@ -717,30 +715,27 @@ class ClaimContext:
         stat_label = _format_stat_key(stat_key, static_game_data)
 
         if not matched_weapon_ids:
+            # 留大弃小优先于数量上限：更优基质替换组内已保存的那一枚（替换语义，不增计数）
+            if keep_best and self._try_keep_best(
+                stat_key, current_levels, mode, stat_types
+            ):
+                return ClaimResult()
+
+            # 数量上限：未达上限则新增并计数
+            if self._try_claim_slot(
+                stat_key, current_levels, limit, keep_best, mode, stat_types
+            ):
+                return ClaimResult()
+
+            # 未被认领：未达上限说明是被留大弃小拦下的更差基质
             count = self.treasure_counts.get(stat_key, 0)
-            if count >= limit:
-                logger.debug(
-                    f"[数量上限] 属性组合 [{stat_label}] 已达上限 {count}/{limit}"
-                )
-                return ClaimResult(
-                    reject_reason=RejectReason.LIMIT,
-                    current_count=count,
-                )
-            best = self.best_levels.get(stat_key)
-            if keep_best and best is not None:
-                cmp = _level_cmp(current_levels, best, mode, stat_types)
-                if cmp < 0:
-                    return ClaimResult(reject_reason=RejectReason.WORSE_LEVEL)
-                if cmp == 0:
-                    skip = self.equal_skips.get(stat_key, 0)
-                    if skip > 0:
-                        self.equal_skips[stat_key] = skip - 1
-                        return ClaimResult()
-            self.treasure_counts[stat_key] = count + 1
-            best = self.best_levels.get(stat_key)
-            if best is None or _level_cmp(current_levels, best, mode, stat_types) > 0:
-                self.best_levels[stat_key] = current_levels
-            return ClaimResult(accepted_weapon_id=None, updated_levels={})
+            if keep_best and count < limit:
+                return ClaimResult(reject_reason=RejectReason.WORSE_LEVEL)
+            logger.debug(f"[数量上限] 属性组合 [{stat_label}] 已达上限 {count}/{limit}")
+            return ClaimResult(
+                reject_reason=RejectReason.LIMIT,
+                current_count=count,
+            )
 
         weapon_ids = _order_candidate_ids(matched_weapon_ids, weapon_priority_order)
 
