@@ -8,7 +8,9 @@
 import type { CustomStat } from '../weapon'
 
 import { describe, expect, it } from 'vitest'
+import { useStaticData } from '../staticData'
 import {
+  buildFullCustomStatMatrix,
   buildStatKey,
   createCustomStatId,
   CUSTOM_ID_PREFIX,
@@ -122,5 +124,78 @@ describe('fallbackCustomStatName', () => {
   it('按 1 起编号', () => {
     expect(fallbackCustomStatName(0)).toBe('自定义基质 1')
     expect(fallbackCustomStatName(4)).toBe('自定义基质 5')
+  })
+})
+
+describe('buildFullCustomStatMatrix', () => {
+  const ATTRIBUTES = ['gat_passive_attr_agi', 'gat_passive_attr_main']
+  const SECONDARIES = ['gat_passive_attr_atk', 'gat_passive_attr_firedam', 'gat_passive_attr_usp']
+  const SKILLS = ['gst_passive_tacafter', 'gst_passive_ult']
+
+  /** 装载短名所依赖的词条静态数据，未装载时 getGemTagName 只会回显 ID */
+  function loadEssences() {
+    const { essencesMap } = useStaticData()
+    essencesMap.value = new Map(
+      (
+        [
+          ['gat_passive_attr_agi', '敏捷提升', 'ATTRIBUTE'],
+          ['gat_passive_attr_main', '主能力提升', 'ATTRIBUTE'],
+          ['gat_passive_attr_atk', '攻击提升', 'SECONDARY'],
+          ['gat_passive_attr_firedam', '灼热伤害提升', 'SECONDARY'],
+          ['gat_passive_attr_usp', '终结技充能效率提升', 'SECONDARY'],
+          ['gst_passive_tacafter', '流转', 'SKILL'],
+          ['gst_passive_ult', '夜幕', 'SKILL'],
+        ] as const
+      ).map(([id, name, type]) => [id, { id, name, tagName: name, type }]),
+    )
+  }
+
+  it('生成三个维度的笛卡尔积', () => {
+    loadEssences()
+    const generated = buildFullCustomStatMatrix(ATTRIBUTES, SECONDARIES, SKILLS, new Set())
+    expect(generated).toHaveLength(2 * 3 * 2)
+    const keys = new Set(generated.map((s) => buildStatKey(s.attribute, s.secondary, s.skill)))
+    expect(keys.size).toBe(12)
+  })
+
+  it('跳过已被占用的属性组合', () => {
+    loadEssences()
+    const occupied = new Set([
+      buildStatKey('gat_passive_attr_agi', 'gat_passive_attr_atk', 'gst_passive_ult'),
+    ])
+    const generated = buildFullCustomStatMatrix(ATTRIBUTES, SECONDARIES, SKILLS, occupied)
+    expect(generated).toHaveLength(11)
+    expect(
+      generated.some((s) => buildStatKey(s.attribute, s.secondary, s.skill) === [...occupied][0]),
+    ).toBe(false)
+  })
+
+  it('按「基础 2 字 + 附加 2 字 + 技能 1 字」命名', () => {
+    loadEssences()
+    const generated = buildFullCustomStatMatrix(ATTRIBUTES, SECONDARIES, SKILLS, new Set())
+    const names = generated.map((s) => s.name)
+    expect(names.every((name) => name?.length === 5)).toBe(true)
+    // 属性通用规则：去「提升」后缀；技能查简称表（流转 → 流）
+    expect(names).toContain('敏捷攻击流')
+    // 属性通用规则：再去「伤害」后缀；技能简称取末字（夜幕 → 夜）
+    expect(names).toContain('敏捷灼热夜')
+    // 属性截断到 2 字（主能力提升 → 主能）+ 属性覆盖表（终结技充能效率提升 → 充能）
+    expect(names).toContain('主能充能流')
+  })
+
+  it('每条都带互不相同的稳定 ID', () => {
+    loadEssences()
+    const generated = buildFullCustomStatMatrix(ATTRIBUTES, SECONDARIES, SKILLS, new Set())
+    expect(new Set(generated.map((s) => s.id)).size).toBe(generated.length)
+  })
+
+  it('全部组合都被占用时返回空列表', () => {
+    loadEssences()
+    const occupied = new Set(
+      ATTRIBUTES.flatMap((a) =>
+        SECONDARIES.flatMap((s) => SKILLS.map((k) => buildStatKey(a, s, k))),
+      ),
+    )
+    expect(buildFullCustomStatMatrix(ATTRIBUTES, SECONDARIES, SKILLS, occupied)).toEqual([])
   })
 })

@@ -303,46 +303,77 @@ class ProfileManager:
                 logger.info("已将失效的内置武器引用迁移为最新 ID")
             return changed
 
-    def remove_custom_stat_refs(self) -> bool:
-        """移除所有账号中对自定义基质的引用（配置被重置/清空后调用）。
+    def prune_custom_stat_refs(self, valid_ids: set[str]) -> bool:
+        """移除所有账号中指向已不存在自定义基质的引用。
 
-        自定义基质随配置重置而被删除，但各账号的矩阵与优先级里仍可能残留
-        `custom:{id}` 引用；逐账号清理会让引用永远指向不存在的基质，在
-        界面上表现为无法操作的幽灵条目。
+        自定义基质被删除后，各账号的矩阵与优先级里仍残留 `custom:{id}` 引用。
+        这类引用查不到属性来源，在界面上表现为属性未知、不参与任何判定的幽灵
+        条目；而稳定 ID 是一次性 UUID，重新添加相同属性组合只会生成新 ID，
+        旧引用永远无法复活，因此没有保留价值。
+
+        旧格式 `custom_stat_{下标}` 一律视为失效：启动时的
+        `migrate_custom_stat_ids` 已把可解析的引用改写成新格式，运行期还能
+        遇到的必然是当时就解析不出的孤儿。
+
+        Args:
+            valid_ids: 当前配置中存活的自定义基质稳定 ID（不含 `custom:` 前缀）。
+                传入空集合表示配置里一条自定义基质都不剩，即清除全部引用。
 
         Returns:
             是否发生了变更（调用方据此决定是否需要写盘）。
         """
         with self._lock:
+            live_refs = {f"{CUSTOM_ID_PREFIX}{stat_id}" for stat_id in valid_ids}
+
+            def is_orphan(weapon_id: str) -> bool:
+                """该引用指向自定义基质，但在当前配置中已找不到对应条目。"""
+                if weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX):
+                    return True
+                return (
+                    weapon_id.startswith(CUSTOM_ID_PREFIX)
+                    and weapon_id not in live_refs
+                )
+
+            def has_orphan(profile: ProfileData) -> bool:
+                return any(
+                    is_orphan(entry.weapon_id) for entry in profile.treasure_matrix
+                ) or any(
+                    is_orphan(weapon_id) for weapon_id in profile.weapon_priorities
+                )
+
+            # 先只读探测：设置页每次改动都会保存一次配置，无谓的深拷贝会被放大。
+            if not any(has_orphan(p) for p in self._collection.profiles.values()):
+                return False
+
             collection = self._collection.model_copy(deep=True)
-            changed = False
+            dropped_entries = 0
+            dropped_priorities = 0
             for profile in collection.profiles.values():
                 kept_matrix = [
                     entry
                     for entry in profile.treasure_matrix
-                    if not (
-                        entry.weapon_id.startswith(CUSTOM_ID_PREFIX)
-                        or entry.weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX)
-                    )
+                    if not is_orphan(entry.weapon_id)
                 ]
-                if len(kept_matrix) != len(profile.treasure_matrix):
-                    profile.treasure_matrix = kept_matrix
-                    changed = True
-                custom_priorities = [
-                    weapon_id
-                    for weapon_id in profile.weapon_priorities
-                    if weapon_id.startswith(CUSTOM_ID_PREFIX)
-                    or weapon_id.startswith(LEGACY_CUSTOM_ID_PREFIX)
-                ]
-                if custom_priorities:
-                    for weapon_id in custom_priorities:
-                        del profile.weapon_priorities[weapon_id]
-                    changed = True
+                dropped_entries += len(profile.treasure_matrix) - len(kept_matrix)
+                profile.treasure_matrix = kept_matrix
 
-            if changed:
-                self._commit_collection_unlocked(collection)
-                logger.info("已清理所有账号中对自定义基质的引用")
-            return changed
+                kept_priorities = {
+                    weapon_id: priority
+                    for weapon_id, priority in profile.weapon_priorities.items()
+                    if not is_orphan(weapon_id)
+                }
+                dropped_priorities += len(profile.weapon_priorities) - len(
+                    kept_priorities
+                )
+                profile.weapon_priorities = kept_priorities
+
+            self._commit_collection_unlocked(collection)
+            logger.info(
+                "已清理指向已删除自定义基质的引用：{} 条宝藏基质条目、{} 个优先级键",
+                dropped_entries,
+                dropped_priorities,
+            )
+            return True
 
     def _save_unlocked(self) -> None:
         """保存账号配置；调用方必须已经持有 `_lock`。"""
