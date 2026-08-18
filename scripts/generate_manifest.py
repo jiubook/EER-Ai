@@ -26,6 +26,7 @@ PROTECTED_PATHS: list[str] = [
     "profiles.json",
     "logs/",
     "screenshots/",
+    "exports/",
     ".env",
 ]
 

@@ -1,10 +1,20 @@
 from fastapi import APIRouter
 
-from .routes import config, profiles, scanner, screenshot, static_data, system, update
+from .routes import (
+    config,
+    matrix_export,
+    profiles,
+    scanner,
+    screenshot,
+    static_data,
+    system,
+    update,
+)
 from .websockets import events, logs, update_progress
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(config.router)
+api_router.include_router(matrix_export.router)
 api_router.include_router(profiles.router)
 api_router.include_router(scanner.router)
 api_router.include_router(screenshot.router)

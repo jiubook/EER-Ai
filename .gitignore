@@ -20,6 +20,9 @@ logs/
 # screenshots by the server
 screenshots/
 
+# 宝藏基质导出的图片
+exports/
+
 # local app settings
 config.json
 .env

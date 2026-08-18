@@ -6,7 +6,7 @@ from .core import (
     get_scanner_context_dep,
     get_scanner_engine_dep,
 )
-from .paths import get_config_path_dep, get_screenshots_dir_dep
+from .paths import get_config_path_dep, get_exports_dir_dep, get_screenshots_dir_dep
 from .recognition import (
     get_abandon_status_recognizer_dep,
     get_attribute_level_recognizer_dep,
@@ -49,6 +49,7 @@ __all__ = [
     "get_delivery_job_reward_recognizer_dep",
     "get_delivery_scene_recognizer_dep",
     "get_event_service",
+    "get_exports_dir_dep",
     "get_game_window_manager",
     "get_lock_status_recognizer_dep",
     "get_log_service",
