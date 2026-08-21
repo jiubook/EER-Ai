@@ -1184,10 +1184,10 @@ class DraggableScannerEngine(ScannerEngine):
             # 因为检测点可能正好在倒数第二行，需要确保最后一行完全滚出
             if row_height > 0:
                 scrolled_rows = actual_distance / row_height
-                # 额外滚动一整行，乘以 1.2 系数确保滚动到位
+                # 额外滚动一整行确保滚动到位
                 extra_drag = row_height
                 logger.info(
-                    f"已滚动 {scrolled_rows:.1f} 行，额外滚动一整行 {extra_drag}px 确保到位"
+                    f"已滚动 {scrolled_rows:.3f} 行，额外滚动一整行 {extra_drag}px 确保到位"
                 )
                 # 等待惯性滚动停止
                 self._window_actions.wait(0.5)
@@ -1210,7 +1210,7 @@ class DraggableScannerEngine(ScannerEngine):
         total_rows: int,
     ) -> int:
         """
-        根据渐进滚动比例计算需要跳过的行数。
+        根据渐进滚动距离与行高计算需要跳过的行数。
 
         Args:
             actual_drag: 实际滚动距离
@@ -1223,10 +1223,10 @@ class DraggableScannerEngine(ScannerEngine):
         if row_height <= 0 or actual_drag <= 0:
             return 0
 
-        # 计算比例，使用 ceil 向上取整确保滚动到位
+        # 计算滚动行数，使用 ceil 向上取整确保滚动到位
         # 例如：2.1、2.5、2.9 都会取整为 3，多滚动一行确保内容完全滚出
         # 松开鼠标后页面会自动回弹到正确位置
-        # 减 1 抵消 _progressive_drag 中 row_height * 1.2 额外拖拽造成的多算
+        # 减 1 抵消 _progressive_drag 中额外滚动一整行造成的多算
         scrolled_rows = max(0, math.ceil(actual_drag / row_height) - 1)
         skip_rows = total_rows - scrolled_rows
 
