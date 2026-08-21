@@ -830,7 +830,9 @@ class DraggableScannerEngine(ScannerEngine):
 
             if is_last_page and page_count > 1:
                 # 最后一页：根据渐进滚动距离计算需要跳过的行数
-                row_height = icon_y_list[1] - icon_y_list[0]
+                row_height = (
+                    icon_y_list[1] - icon_y_list[0] if len(icon_y_list) > 1 else 0
+                )
                 skip_rows = self._calculate_skip_rows(
                     progressive_drag_distance, row_height, total_rows
                 )
@@ -851,7 +853,9 @@ class DraggableScannerEngine(ScannerEngine):
                     0, stop_event, user_setting, icon_x_list, icon_y_list
                 )
                 if all_dup and user_setting.fix_page_flip_overscroll:
-                    row_height = icon_y_list[1] - icon_y_list[0]
+                    row_height = (
+                        icon_y_list[1] - icon_y_list[0] if len(icon_y_list) > 1 else 0
+                    )
                     adjust_distance = round(row_height * 3 / 4)
                     self._correct_overscroll(drag_start, adjust_distance)
                     logger.info(
