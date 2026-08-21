@@ -829,9 +829,12 @@ class DraggableScannerEngine(ScannerEngine):
             logger.info(f"开始扫描第 {page_count} 页基质...")
 
             if is_last_page and page_count > 1:
-                # 最后一页：根据渐进滚动比例计算需要跳过的行数
+                # 最后一页：根据渐进滚动距离计算需要跳过的行数
+                row_height = (
+                    icon_y_list[1] - icon_y_list[0] if len(icon_y_list) > 1 else 0
+                )
                 skip_rows = self._calculate_skip_rows(
-                    progressive_drag_distance, max_drag_distance, total_rows
+                    progressive_drag_distance, row_height, total_rows
                 )
                 start_row = min(skip_rows, total_rows - 1)
                 logger.info(
@@ -850,7 +853,9 @@ class DraggableScannerEngine(ScannerEngine):
                     0, stop_event, user_setting, icon_x_list, icon_y_list
                 )
                 if all_dup and user_setting.fix_page_flip_overscroll:
-                    row_height = icon_y_list[1] - icon_y_list[0]
+                    row_height = (
+                        icon_y_list[1] - icon_y_list[0] if len(icon_y_list) > 1 else 0
+                    )
                     adjust_distance = round(row_height * 3 / 4)
                     self._correct_overscroll(drag_start, adjust_distance)
                     logger.info(
@@ -1183,10 +1188,10 @@ class DraggableScannerEngine(ScannerEngine):
             # 因为检测点可能正好在倒数第二行，需要确保最后一行完全滚出
             if row_height > 0:
                 scrolled_rows = actual_distance / row_height
-                # 额外滚动一整行，乘以 1.2 系数确保滚动到位
-                extra_drag = int(row_height * 1.2)
+                # 额外滚动一整行确保滚动到位
+                extra_drag = row_height
                 logger.info(
-                    f"已滚动 {scrolled_rows:.1f} 行，额外滚动一整行 {extra_drag}px 确保到位"
+                    f"已滚动 {scrolled_rows:.3f} 行，额外滚动一整行 {extra_drag}px 确保到位"
                 )
                 # 等待惯性滚动停止
                 self._window_actions.wait(0.5)
@@ -1205,34 +1210,33 @@ class DraggableScannerEngine(ScannerEngine):
     def _calculate_skip_rows(
         self,
         actual_drag: int,
-        max_drag: int,
+        row_height: int,
         total_rows: int,
     ) -> int:
         """
-        根据渐进滚动比例计算需要跳过的行数。
+        根据渐进滚动距离与行高计算需要跳过的行数。
 
         Args:
             actual_drag: 实际滚动距离
-            max_drag: 最大滚动距离（完整一页的距离）
-            total_rows: 总行数
+            row_height: 行高
+            total_rows: 当前页总行数
 
         Returns:
             需要跳过的行数
         """
-        if max_drag <= 0 or actual_drag <= 0:
+        if row_height <= 0 or actual_drag <= 0:
             return 0
 
-        # 计算比例，使用 ceil 向上取整确保滚动到位
+        # 计算滚动行数，使用 ceil 向上取整确保滚动到位
         # 例如：2.1、2.5、2.9 都会取整为 3，多滚动一行确保内容完全滚出
         # 松开鼠标后页面会自动回弹到正确位置
-        # 减 1 抵消 _progressive_drag 中 row_height * 1.2 额外拖拽造成的多算
-        ratio = actual_drag / max_drag
-        scrolled_rows = max(0, math.ceil(ratio * total_rows) - 1)
+        # 减 1 抵消 _progressive_drag 中额外滚动一整行造成的多算
+        scrolled_rows = max(0, math.ceil(actual_drag / row_height) - 1)
         skip_rows = total_rows - scrolled_rows
 
         logger.info(
-            f"计算跳过行数: 比例={ratio:.2f}, 实际滚动={actual_drag}px, 最大={max_drag}px, "
-            f"滚动行数={ratio * total_rows:.1f}→{scrolled_rows}, 跳过={skip_rows}行"
+            f"计算跳过行数: 实际滚动={actual_drag}px，行高={row_height}px，"
+            f"滚动行数={actual_drag / row_height:.3f}→{scrolled_rows}，跳过={skip_rows}行"
         )
 
         return skip_rows
