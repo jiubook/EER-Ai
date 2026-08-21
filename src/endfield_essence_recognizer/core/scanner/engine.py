@@ -1231,8 +1231,8 @@ class DraggableScannerEngine(ScannerEngine):
         skip_rows = total_rows - scrolled_rows
 
         logger.info(
-            f"计算跳过行数: 实际滚动={actual_drag}px, 行高={row_height}px, "
-            f"滚动行数={actual_drag / row_height:.1f}→{scrolled_rows}, 跳过={skip_rows}行"
+            f"计算跳过行数: 实际滚动={actual_drag}px，行高={row_height}px，"
+            f"滚动行数={actual_drag / row_height:.3f}→{scrolled_rows}，跳过={skip_rows}行"
         )
 
         return skip_rows
