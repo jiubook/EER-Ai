@@ -7,6 +7,29 @@
       </v-card-title>
 
       <v-card-text>
+        <!-- 导出模板：单选，切换后整张图的配色与装饰层跟着变 -->
+        <div class="d-flex align-center gap-2 mb-2">
+          <span class="text-body-2 text-medium-emphasis">导出模板：</span>
+          <v-chip-group v-model="selectedTemplate" column>
+            <v-chip
+              v-for="template in EXPORT_TEMPLATES"
+              :key="template.id"
+              color="primary"
+              filter
+              size="small"
+              :title="template.description"
+              :value="template.id"
+              variant="outlined"
+            >
+              <span
+                class="template-swatch"
+                :style="{ background: template.ink.bg, borderColor: template.ink.line }"
+              />
+              {{ template.name }}
+            </v-chip>
+          </v-chip-group>
+        </div>
+
         <!-- 导出范围：与页面顶部的筛选相互独立，避免互相污染 -->
         <div class="d-flex align-center gap-2 mb-2">
           <span class="text-body-2 text-medium-emphasis">导出星级：</span>
@@ -144,7 +167,7 @@ import {
   getStatsForWeapon,
   toCustomStatId,
 } from '@/utils/gameData/weapon'
-import { renderMatrixExport, toPngBlob } from '@/utils/matrixExport'
+import { EXPORT_TEMPLATES, renderMatrixExport, toPngBlob } from '@/utils/matrixExport'
 
 const open = defineModel<boolean>({ default: false })
 
@@ -164,6 +187,8 @@ const UNOWNED_LEVELS = [0, 0, 0] as const
 // 自定义基质默认不勾选：批量添加之后配置里可能有几百枚，
 // 默认全画出来会让弹窗一打开就卡住。
 const selectedRarities = ref<string[]>(['3', '4', '5', '6'])
+/** 当前选中的导出模板 id，默认工业档案 */
+const selectedTemplate = ref<string>(EXPORT_TEMPLATES[0]!.id)
 const includeMaxed = ref(true)
 const includeUnowned = ref(true)
 const onlyIncludedInCalculation = ref(false)
@@ -425,6 +450,7 @@ async function regenerate() {
       title: `${activeProfileName.value} · 宝藏基质`,
       // 条目数由绘制模块自己从卡片数量算，这里只给归档时间
       subtitle: new Date().toLocaleString('zh-CN'),
+      template: selectedTemplate.value,
     })
 
     // 期间又触发了新一轮渲染，丢弃这次的结果
@@ -530,6 +556,7 @@ watch(open, (opened) => {
 watch(
   [
     selectedRarities,
+    selectedTemplate,
     includeMaxed,
     includeUnowned,
     onlyIncludedInCalculation,
@@ -549,6 +576,16 @@ onUnmounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.template-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  vertical-align: -2px;
+}
+
 .export-preview {
   display: block;
   width: 100%;

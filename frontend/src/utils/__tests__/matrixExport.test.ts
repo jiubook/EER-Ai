@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { buildArchiveNo, computeCanvasSize, pickColumns, YITULIU_QR } from '@/utils/matrixExport'
+import {
+  buildArchiveNo,
+  computeCanvasSize,
+  EXPORT_TEMPLATES,
+  getExportTemplate,
+  pickColumns,
+  YITULIU_QR,
+} from '@/utils/matrixExport'
 
 describe('pickColumns', () => {
   it('条目很少时每张卡各占一列，不留空位', () => {
@@ -113,5 +120,51 @@ describe('YITULIU_QR', () => {
       .join('')
     expect(timingRow).toBe('101010101')
     expect(timingColumn).toBe('101010101')
+  })
+})
+
+describe('EXPORT_TEMPLATES', () => {
+  it('模板 id 唯一，且第一个是默认模板', () => {
+    const ids = EXPORT_TEMPLATES.map((template) => template.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids[0]).toBe('industrial')
+  })
+
+  it('getExportTemplate 按 id 命中，未知 id 回退工业档案', () => {
+    for (const template of EXPORT_TEMPLATES) {
+      expect(getExportTemplate(template.id).id).toBe(template.id)
+    }
+    expect(getExportTemplate('no-such-template').id).toBe('industrial')
+  })
+
+  it('每个模板都具备完整色板与装饰开关', () => {
+    for (const template of EXPORT_TEMPLATES) {
+      // 主色板 10 个字段全部非空
+      for (const value of Object.values(template.ink)) {
+        expect(value).toBeTruthy()
+      }
+      // 未获得色板 3 个字段
+      for (const value of Object.values(template.dim)) {
+        expect(value).toBeTruthy()
+      }
+      // 词条三行色各 3 个
+      expect(template.pip.colors).toHaveLength(3)
+      for (const value of template.pip.colors) {
+        expect(value).toBeTruthy()
+      }
+      // 装饰开关都是布尔，水墨字字符非空
+      const { brushGlyphChar, ...flags } = template.decorations
+      for (const flag of Object.values(flags)) {
+        expect(typeof flag).toBe('boolean')
+      }
+      expect(brushGlyphChar).toBeTruthy()
+      // 切角不能是负数
+      expect(template.cardChamfer).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('模板之间不是同一套配色，避免选择器形同虚设', () => {
+    const backgrounds = new Set(EXPORT_TEMPLATES.map((template) => template.ink.bg))
+    expect(backgrounds.size).toBe(EXPORT_TEMPLATES.length)
   })
 })
