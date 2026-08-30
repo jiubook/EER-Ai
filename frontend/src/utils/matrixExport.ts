@@ -1928,8 +1928,28 @@ function drawHeroCard(
 }
 
 /**
- * 基质主位：基质图放大居中当主视觉、名称/星级居中在上、三行带词条名
- * 标签的方格全宽竖排在基质下方，词条名左对齐到固定列、计数右对齐。
+ * 拼基质主位标题行的词条名：去「提升」后缀后用 \ 连接。
+ *
+ * \ 两侧不留空格，比标准铭牌的「 · 」窄，24px 的标题行才放得下三词条。
+ * 「终结技充能效率」缩短成「充能效率」——七字词条在标题行里太占宽度。
+ */
+function buildMatrixTitle(traits: readonly ExportTrait[]): string {
+  return traits
+    .map((trait) => {
+      const name = shortenTraitName(trait.name)
+      return name === '终结技充能效率' ? '充能效率' : name
+    })
+    .join('\\')
+}
+
+/**
+ * 基质主位：基质图铺满卡片右侧当背景（cover 垂直居中），信息列与星级
+ * 压在图面上方一层。
+ *
+ * 结构与全幅武器同源、主次互换：词条名放大成整卡宽的标题行（带描边），
+ * 武器名降为标题下的一行小字。左侧由上到下是「词条名 → 武器名 → 武器图 →
+ * 方格」，星级在右下角以白色半透明叠加在基质图上。背景是基质图、信息列
+ * 里的图是武器图——与全幅武器正好互换。
  */
 function drawMatrixCard(
   ctx: CanvasRenderingContext2D,
@@ -1945,101 +1965,175 @@ function drawMatrixCard(
   const chamfer = scheme.cardChamfer
   const cardW = layout.cardWidth
   const cardH = layout.cardHeight
-  const matrixSize = 84
+
+  // 左侧信息列几何：与卡面同用 CARD_PAD 留边
+  const panelPad = CARD_PAD
+  // 词条名标题：占满整卡宽、放大到 24px 并加描边（与全幅武器的名称同一待遇）
+  const titleMaxWidth = cardW - panelPad * 2
+  const titleFontSize = 24
+  const titleLineH = 30
+  // 武器名：标题下的一行小字，样式沿用标准铭牌底部词条行（muted 色、常规字重）
+  const nameFontSize = 10
+  const nameLineH = 12
+  const lineGap = 3
+  // 紧凑方格与缩小武器图；方格压成 6×6 正方形
+  const iconSize = 40
+  const pipW = 6
+  const pipH = 6
+  const pipGap = 2
+  const pipRowGap = 12
+  // 基质图：铺满右侧 4/5 当背景，cover 铺满整高（图像内容垂直居中）
+  const panelW = 64
+  const artX = x + panelW
+  const artW = cardW - panelW
 
   ctx.save()
 
-  // 卡面
+  // 整卡形状裁剪：基质图要贴合右上切角
   chamferPath(ctx, x, y, cardW, cardH, chamfer)
+  ctx.clip()
+
   ctx.fillStyle = ink.surface
-  ctx.fill()
+  ctx.fillRect(x, y, cardW, cardH)
+
+  const iconImage = card.iconUrl ? (images.get(card.iconUrl) ?? null) : null
+  const bgImage = card.essenceBgUrl ? (images.get(card.essenceBgUrl) ?? null) : null
+  const skillImage = card.skillIconUrl ? (images.get(card.skillIconUrl) ?? null) : null
+
+  // 基质图：底板 + 技能图标叠层，与 drawEssenceIcon 同一套图源，铺满右侧当背景
+  if (bgImage || skillImage) {
+    ctx.globalAlpha = ink.imageAlpha
+    if (dimmed) ctx.filter = 'grayscale(1)'
+    if (bgImage) drawImageCover(ctx, bgImage, artX, y, artW, cardH)
+    if (skillImage) {
+      // 沿用 drawEssenceIcon 的 translate(5%, -5%) 偏移
+      drawImageCover(ctx, skillImage, artX + artW * 0.05, y - cardH * 0.05, artW, cardH)
+    }
+    ctx.filter = 'none'
+    ctx.globalAlpha = 1
+  } else {
+    drawImagePlaceholder(ctx, scheme, artX + (artW - ICON) / 2, y + (cardH - ICON) / 2, ICON)
+  }
+
+  // 未获得：盖一层表面色罩保留剪影、明确退到后景
+  if (dimmed) {
+    ctx.fillStyle = withAlpha(scheme.ink.surface, 0.55)
+    ctx.fillRect(x, y, cardW, cardH)
+  }
+
+  ctx.restore()
+
+  // 卡面边框
+  chamferPath(ctx, x, y, cardW, cardH, chamfer)
   ctx.strokeStyle = ink.border
   ctx.lineWidth = 1
   ctx.stroke()
 
-  if (ink.borderInner !== 'transparent') {
-    chamferPath(ctx, x + 3, y + 3, cardW - 6, cardH - 6, chamfer - 3)
-    ctx.strokeStyle = ink.borderInner
-    ctx.lineWidth = 1
-    ctx.stroke()
-  }
+  // 左侧稀有度竖条：武器色是全图唯一的稀有度线索
+  const tierColor = safeColor(card.tierColor)
+  ctx.fillStyle = dimmed ? withAlpha(tierColor, 0.35) : tierColor
+  ctx.fillRect(x, y, 3, cardH)
 
-  const nameMaxWidth = cardW - CARD_PAD * 2
-
-  // 名称 + 星级：居中在上，作为整卡的标题
-  if (card.nameRuby) {
-    const rubyText = fitText(ctx, card.nameRuby, nameMaxWidth, RUBY_FONTSIZE, 7)
-    ctx.fillStyle = ink.ruby
-    ctx.textAlign = 'center'
+  // 词条名标题：整卡宽、加描边保证压到基质图上仍可读；未获得只置灰不描边。
+  // 没有词条的条目（自定义基质全空）跳过该行，武器名上移到标题位置
+  const hasTraitTitle = card.traits.length > 0
+  const titleBandH = hasTraitTitle ? titleLineH + lineGap : 0
+  if (hasTraitTitle) {
+    const titleText = fitText(
+      ctx,
+      buildMatrixTitle(card.traits),
+      titleMaxWidth,
+      titleFontSize,
+      10,
+      800,
+    )
+    const titleY = y + panelPad + titleLineH / 2
+    ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
-    ctx.fillText(rubyText, x + cardW / 2, y + CARD_PAD + RUBY_H / 2)
+    if (!dimmed) {
+      // 描边取与文字相反的明度：亮字用暗描边、暗字用亮描边，任何背景上都留得下轮廓
+      const titleOutline = Color(ink.name).isLight()
+        ? withAlpha('#000000', 0.6)
+        : withAlpha('#ffffff', 0.72)
+      ctx.lineJoin = 'round'
+      ctx.strokeStyle = titleOutline
+      ctx.lineWidth = 4
+      ctx.strokeText(titleText, x + panelPad, titleY)
+      ctx.lineJoin = 'miter'
+    }
+    ctx.fillStyle = ink.name
+    ctx.fillText(titleText, x + panelPad, titleY)
   }
 
-  const nameText = fitText(ctx, card.name, nameMaxWidth, 15, 10, 800)
-  ctx.fillStyle = ink.name
-  ctx.textAlign = 'center'
+  // 武器名：标题下方的一行小字，左对齐
+  const nameText = fitText(ctx, card.name, titleMaxWidth, nameFontSize, 9, 400)
+  const nameY = y + panelPad + titleBandH + nameLineH / 2
+  ctx.fillStyle = ink.trait
+  ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
-  ctx.fillText(nameText, x + cardW / 2, y + CARD_PAD + RUBY_H + NAME_H / 2)
+  ctx.fillText(nameText, x + panelPad, nameY)
 
-  // 基质：水平居中、放大，作为整卡唯一的主视觉
-  const bgImage = card.essenceBgUrl ? (images.get(card.essenceBgUrl) ?? null) : null
-  const skillImage = card.skillIconUrl ? (images.get(card.skillIconUrl) ?? null) : null
-  const essenceAccent = card.kind === 'weapon' ? scheme.ink.accent : safeColor(card.tierColor)
-  const matrixX = x + (cardW - matrixSize) / 2
-  const matrixY = y + CARD_PAD + RUBY_H + NAME_H + 8
-  drawEssenceIcon(
-    ctx,
-    scheme,
-    bgImage,
-    skillImage,
-    ink,
-    essenceAccent,
-    dimmed,
-    matrixX,
-    matrixY,
-    matrixSize,
-  )
-
-  // 方格：全宽铺在基质下方，词条名左对齐到固定列，方格从固定 x 起、计数右对齐
-  const rowsTop = matrixY + matrixSize + 12
-  const labelWidth = 76
-  const pipX = x + CARD_PAD + labelWidth + 8
-  const countRight = x + cardW - CARD_PAD
-  for (const [index, trait] of card.traits.entries()) {
-    const rowY = rowsTop + index * PIP_ROW_GAP
-
-    // 行标签：词条名左对齐到固定宽度列，长名截断
-    const label = shortenTraitName(trait.name)
-    if (label) {
-      ctx.fillStyle = ink.trait
-      ctx.textAlign = 'left'
-      ctx.textBaseline = 'middle'
-      const labelText = fitText(ctx, label, labelWidth, 10, 7, 500)
-      ctx.fillText(labelText, x + CARD_PAD, rowY + PIP_H / 2)
-    }
-
-    drawPipRow(
+  // 信息列里的图：武器图；自定义基质没有武器图，退化为基质图
+  const iconY = y + panelPad + titleBandH + nameLineH + lineGap
+  if (card.kind === 'weapon') {
+    drawWeaponIcon(ctx, scheme, iconImage, card, ink, x + panelPad, iconY, iconSize)
+  } else {
+    drawEssenceIcon(
       ctx,
       scheme,
-      trait.level,
-      trait.pipCount,
-      scheme.pip.colors[trait.slot] ?? scheme.pip.colors[0]!,
+      bgImage,
+      skillImage,
       ink,
+      safeColor(card.tierColor),
       dimmed,
-      pipX,
-      rowY,
-      countRight,
+      x + panelPad,
+      iconY,
+      iconSize,
     )
   }
 
-  // 角标：基质图右上角
-  if (card.badgeCount && card.badgeCount > 0) {
-    drawBadge(ctx, scheme, card.badgeCount, matrixX + matrixSize, matrixY)
+  // 方格：紧凑、无计数、左对齐
+  const pipsTop = iconY + iconSize + 8
+  for (const [index, trait] of card.traits.entries()) {
+    drawPipCells(
+      ctx,
+      trait.level,
+      trait.pipCount,
+      dimmed
+        ? withAlpha(scheme.pip.colors[trait.slot] ?? scheme.pip.colors[0]!, 0.32)
+        : (scheme.pip.colors[trait.slot] ?? scheme.pip.colors[0]!),
+      ink.pipIdle,
+      x + panelPad,
+      pipsTop + index * pipRowGap,
+      pipW,
+      pipH,
+      pipGap,
+    )
   }
 
-  if (card.maxed && !dimmed) drawMaxedMark(ctx, scheme, x, y, cardW, cardH)
+  // 角标：叠在武器图右上角
+  if (card.badgeCount && card.badgeCount > 0) {
+    drawBadge(ctx, scheme, card.badgeCount, x + panelPad + iconSize, iconY)
+  }
 
-  ctx.restore()
+  // 星级：右下角，暖白半透明水印式叠加在基质图上，细描边保证任何底上可读
+  if (card.nameRuby) {
+    ctx.font = `700 22px ${FONT_STACK}`
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'alphabetic'
+    const starX = x + cardW - CARD_PAD - 6
+    const starY = y + cardH - CARD_PAD - 6
+    ctx.lineJoin = 'round'
+    ctx.strokeStyle = withAlpha('#2f2c27', 0.25)
+    ctx.lineWidth = 2
+    ctx.strokeText(card.nameRuby, starX, starY)
+    ctx.lineJoin = 'miter'
+    ctx.fillStyle = dimmed ? withAlpha('#f7f4ec', 0.4) : withAlpha('#f7f4ec', 0.55)
+    ctx.fillText(card.nameRuby, starX, starY)
+  }
+
+  // 满级框不画左边，避免压住左侧的稀有度竖条
+  if (card.maxed && !dimmed) drawMaxedMark(ctx, scheme, x, y, cardW, cardH, true)
 }
 
 /** 标准铭牌版式：武器 + 基质并排，方格在右，名称居中 */
@@ -2062,13 +2156,13 @@ export const HERO_LAYOUT: MatrixCardLayout = {
   drawCard: drawHeroCard,
 }
 
-/** 基质主位版式：基质放大居中当主视觉，词条名当方格行标签 */
+/** 基质主位版式：基质图铺满整卡当背景，词条名当整卡宽的标题 */
 export const MATRIX_LAYOUT: MatrixCardLayout = {
   id: 'matrix',
   name: '基质主位',
-  description: '基质放大居中当主视觉，三行带词条名标签的方格全宽竖排在下方',
+  description: '基质铺满整卡当背景，词条名标题/武器名/武器图/方格压在图面上',
   cardWidth: 260,
-  cardHeight: 216,
+  cardHeight: 150,
   drawCard: drawMatrixCard,
 }
 
