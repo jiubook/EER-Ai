@@ -37,6 +37,8 @@ export interface ExportCard {
   nameRuby?: string
   /** 武器 icon 地址；自定义基质没有武器图，传 null */
   iconUrl: string | null
+  /** 武器分类 id（wiki 组 ID，如 'wiki_group_weapon_pistol'）；自定义基质缺省 */
+  weaponTypeId?: string
   /** 基质底板地址 */
   essenceBgUrl: string
   /** 技能属性图标地址 */
@@ -789,7 +791,13 @@ function chamferPath(
   ctx.closePath()
 }
 
-/** 按 object-fit: cover 的规则把图片画进目标矩形 */
+/**
+ * 按 object-fit: cover 的规则把图片画进目标矩形。
+ *
+ * @param topPad 把图像整体下移的像素数（正数下移、负数上移）：素材内容重心
+ *   偏上的武器图（手铳/施术单元），下移后视觉上才垂直居中。下移后图像可能
+ *   越过目标矩形，溢出部分由调用方的裁剪（clip）截掉。
+ */
 function drawImageCover(
   ctx: CanvasRenderingContext2D,
   image: HTMLImageElement,
@@ -797,11 +805,12 @@ function drawImageCover(
   y: number,
   width: number,
   height: number,
+  topPad = 0,
 ): void {
   const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight)
   const drawW = image.naturalWidth * scale
   const drawH = image.naturalHeight * scale
-  ctx.drawImage(image, x + (width - drawW) / 2, y + (height - drawH) / 2, drawW, drawH)
+  ctx.drawImage(image, x + (width - drawW) / 2, y + (height - drawH) / 2 + topPad, drawW, drawH)
 }
 
 /** 图片缺失时的占位块 */
@@ -1720,12 +1729,27 @@ function drawStandardCard(
 }
 
 /**
+ * 素材内容重心偏上、全幅背景需要下移校正的武器分类（wiki 组 ID）。
+ *
+ * 手铳与施术单元武器图的透明像素重心在画布上半部（下方留白多），
+ * cover 居中裁剪后会显得偏高，需整体下移才能视觉垂直居中。
+ */
+const HERO_ART_TOP_PAD_GROUP_IDS: ReadonlySet<string> = new Set([
+  'wiki_group_weapon_pistol',
+  'wiki_group_weapon_wand',
+])
+/** 上述分类的全幅背景整体下移量（CSS 像素） */
+const HERO_ART_TOP_PAD = 10
+
+/**
  * 全幅武器：武器图铺满卡片右侧当背景（cover 垂直居中），信息列与星级
  * 压在图面上方一层。
  *
- * 左侧由上到下是「武器名 → 基质 → 方格」：星级不在左侧占行，改到右下角
- * 以白色半透明叠加在武器图上；名称放大到最多半卡宽，加描边保证压到武器
- * 图上时仍可读，未获得则只置灰不描边。
+ * 左侧由上到下是「武器名 → 词条名 → 基质 → 方格」：星级不在左侧占行，
+ * 改到右下角以白色半透明叠加在武器图上；名称放大到最多半卡宽，加描边保证
+ * 压到武器图上时仍可读，未获得则只置灰不描边。方格压成正方形，省出的纵向
+ * 空间让给名称与词条名行。手铳/施术单元武器图整体下移 HERO_ART_TOP_PAD 像素
+ * 校正重心。
  */
 function drawHeroCard(
   ctx: CanvasRenderingContext2D,
@@ -1744,16 +1768,20 @@ function drawHeroCard(
 
   // 左侧信息列几何：与卡面同用 CARD_PAD 留边
   const panelPad = CARD_PAD
-  // 名称最多占半卡宽、放大到 20px，并吃掉原本星级让出的行高
+  // 名称最多占半卡宽、放大到 24px：方格压缩成正方形省出的纵向空间让给名称
   const nameMaxWidth = cardW / 2
-  const nameFontSize = 20
+  const nameFontSize = 24
   const nameLineH = 30
-  // 紧凑方格与缩小基质
+  // 词条名行：样式沿用标准铭牌底部词条行（muted 色、常规字重），字号略小
+  const traitFontSize = 10
+  const traitLineH = 12
+  const traitGap = 3
+  // 紧凑方格与缩小基质；方格压成 6×6 正方形
   const essenceSize = 40
   const pipW = 6
-  const pipH = 9
+  const pipH = 6
   const pipGap = 2
-  const pipRowGap = 15
+  const pipRowGap = 12
   // 武器图：铺满右侧 4/5 当背景，cover 铺满整高（图像内容垂直居中）
   const panelW = 64
   const artX = x + panelW
@@ -1775,9 +1803,11 @@ function drawHeroCard(
   // 武器图：自定义基质退化为基质底板图，铺满右侧当背景（cover 垂直居中）
   const backdrop = iconImage ?? bgImage
   if (backdrop) {
+    // 手铳/施术单元素材重心偏上，下移校正；下移后仍覆盖整块背景区（由整卡 clip 裁剪溢出）
+    const artTopPad = HERO_ART_TOP_PAD_GROUP_IDS.has(card.weaponTypeId ?? '') ? HERO_ART_TOP_PAD : 0
     ctx.globalAlpha = ink.imageAlpha
     if (dimmed) ctx.filter = 'grayscale(1)'
-    drawImageCover(ctx, backdrop, artX, y, artW, cardH)
+    drawImageCover(ctx, backdrop, artX, y, artW, cardH, artTopPad)
     ctx.filter = 'none'
     ctx.globalAlpha = 1
   } else {
@@ -1822,10 +1852,23 @@ function drawHeroCard(
   ctx.fillStyle = ink.name
   ctx.fillText(nameText, x + panelPad, nameY)
 
-  // 基质图标：名称下方、左对齐
+  // 词条名：名称与基质之间的一行，左对齐。三词条按属性→附加→技能顺序
+  // 用 · 连接；最长放到整卡宽（减两侧留边），与标准铭牌的底部词条行同一套取舍
+  if (card.traits.length > 0) {
+    const traitText = card.traits.map((trait) => shortenTraitName(trait.name)).join(' · ')
+    const traitMaxWidth = cardW - panelPad - CARD_PAD
+    const traitY = y + panelPad + nameLineH + traitGap + traitLineH / 2
+    ctx.fillStyle = ink.trait
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    const fittedTraits = fitText(ctx, traitText, traitMaxWidth, traitFontSize, 9, 400)
+    ctx.fillText(fittedTraits, x + panelPad, traitY)
+  }
+
+  // 基质图标：词条名下方、左对齐
   const essenceAccent = card.kind === 'weapon' ? scheme.ink.accent : safeColor(card.tierColor)
   const essenceX = x + panelPad
-  const essenceY = y + panelPad + nameLineH + 8
+  const essenceY = y + panelPad + nameLineH + traitGap + traitLineH + traitGap
   drawEssenceIcon(
     ctx,
     scheme,
@@ -2013,7 +2056,7 @@ export const STANDARD_LAYOUT: MatrixCardLayout = {
 export const HERO_LAYOUT: MatrixCardLayout = {
   id: 'hero',
   name: '全幅武器',
-  description: '武器立绘铺满整卡当背景，名称/基质/方格压在图面上',
+  description: '武器立绘铺满整卡当背景，名称/词条名/基质/方格压在图面上',
   cardWidth: 260,
   cardHeight: 150,
   drawCard: drawHeroCard,

@@ -80,8 +80,8 @@ describe('computeCanvasSize', () => {
   })
 
   it('画布高度跟随版式卡片高度，不同尺寸的版式产出不同高度', () => {
-    // 有同尺寸不同排布的版式（标准铭牌与武器主位都是 144），
-    // 所以按「去重后的卡片高度数」断言，而不是按版式个数
+    // 画布高度只由版式的 cardHeight 推导：按「去重后的卡片高度数」断言，
+    // 不依赖各版式高度互不相同，将来有版式共用同一高度时该断言依然成立
     const distinctCardHeights = new Set(CARD_LAYOUTS.map((layout) => layout.cardHeight)).size
     const heights = CARD_LAYOUTS.map((layout) => computeCanvasSize(6, 0, 3, layout).height)
     expect(new Set(heights).size).toBe(distinctCardHeights)

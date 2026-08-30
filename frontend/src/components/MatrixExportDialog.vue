@@ -341,6 +341,17 @@ const weaponTypeOrder = computed(() => {
   return order
 })
 
+/** weapon_id → 武器分类 id（wiki 组 ID），供导出图按分类校正素材重心 */
+const weaponTypeIdByWeapon = computed(() => {
+  const map = new Map<string, string>()
+  for (const weaponType of weaponTypes.value) {
+    for (const weaponId of weaponType.weaponIds) {
+      map.set(weaponId, weaponType.id)
+    }
+  }
+  return map
+})
+
 /**
  * 内置武器区的卡片。
  *
@@ -373,6 +384,7 @@ const weaponCards = computed<ExportCard[]>(() => {
       name: weapon.name,
       nameRuby: '★'.repeat(weapon.rarity),
       iconUrl: getItemIconUrl(weapon.id) ?? null,
+      weaponTypeId: weaponTypeIdByWeapon.value.get(weapon.id),
       essenceBgUrl: matrixIcons.value.essenceBg,
       skillIconUrl: resolveSkillIconUrl(weapon.id),
       tierColor: getItemTierColor(weapon.id).hex(),
