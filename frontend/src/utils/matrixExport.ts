@@ -5,12 +5,28 @@
  * 调用方把 profile、静态数据整理成普通对象传进来。
  * 这样布局计算能在 node 环境的单测里直接跑，无需 DOM。
  *
- * 视觉基调是「工业档案」：灰白混凝土底、黑灰文字、工程黄只做锚点、
- * 蓝青只做数据。配色是写死的常量，不跟随 Vuetify 主题——导出图是给别人
- * 看的成品，同一份数据在任何机器、任何主题下都应该产出同一张图。
+ * 视觉由两条正交的轴驱动，两者互不干扰：
+ * - 配色方案（MatrixColorScheme）：色板、装饰层、卡片切角——「怎么看」。
+ * - 卡片版式（MatrixCardLayout）：卡片尺寸与内部元素（武器、基质、方格、
+ *   名称、词条）的排布——「怎么排」。
+ * 同一份数据套任意配色 × 版式组合都能产出对应风格的图。两者都是写死的
+ * 常量，不跟随 Vuetify 主题——导出图是给别人看的成品，同一份数据在任何
+ * 机器、任何主题下都应该产出同一张图。
  */
 
 import Color from 'color'
+
+/** 单个词条：等级、满级方格数、语义槽位（决定取色）三者绑定，天然对齐 */
+export interface ExportTrait {
+  /** 词条中文名（如 "攻击力提升"），绘制时由调用方做短名处理 */
+  name: string
+  /** 当前等级 */
+  level: number
+  /** 满级（方格数） */
+  pipCount: number
+  /** 语义槽位：0=属性、1=附加、2=技能，决定方格取色 */
+  slot: number
+}
 
 /** 导出图里的一张卡片 */
 export interface ExportCard {
@@ -21,20 +37,319 @@ export interface ExportCard {
   nameRuby?: string
   /** 武器 icon 地址；自定义基质没有武器图，传 null */
   iconUrl: string | null
+  /** 武器分类 id（wiki 组 ID，如 'wiki_group_weapon_pistol'）；自定义基质缺省 */
+  weaponTypeId?: string
   /** 基质底板地址 */
   essenceBgUrl: string
   /** 技能属性图标地址 */
   skillIconUrl: string | null
   /** 物品识别色：内置武器用稀有度色，自定义基质用橙色。全图仅此一处保留高饱和 */
   tierColor: string
-  levels: readonly [number, number, number]
+  /** 逐词条的等级与方格数；3★ 武器只有两条（属性 + 技能，无附加） */
+  traits: readonly ExportTrait[]
   maxed: boolean
   /** 扫描到的基质枚数；缺省或非正数时不画角标 */
   badgeCount?: number
-  /** 三词条中文名，如 ["攻击", "终结技充能效率", "巧技"] */
-  traitNames?: string[]
   /** 未获得的条目：整张卡片降级到背景层 */
   dimmed?: boolean
+}
+
+/**
+ * 一套导出图配色方案的全部视觉参数。
+ *
+ * 只管「怎么看」：色板、装饰层、卡片切角。卡片内部怎么排由 MatrixCardLayout
+ * 决定，与这里无关。
+ */
+export interface MatrixColorScheme {
+  /** 方案 id，用于选择器和 getColorScheme 查询 */
+  id: string
+  /** 方案中文名，展示在选择器里 */
+  name: string
+  /** 一句话说明，展示在选择器 tooltip 里 */
+  description: string
+  /** 主色板 */
+  ink: {
+    /** 页面底 */
+    bg: string
+    /** 卡面 */
+    surface: string
+    /** 未获得卡片的卡面 */
+    surfaceDim: string
+    /** 基质底板的衬底 */
+    plate: string
+    /** 主文字 */
+    text: string
+    /** 次文字 */
+    muted: string
+    /** 结构线 */
+    line: string
+    /** 薄金属框的内衬线 */
+    lineSoft: string
+    /** 强调色：锚点/警示/重点（工业档案是工程黄） */
+    accent: string
+    /** 强调色底上的文字色 */
+    accentInk: string
+  }
+  /** 未获得卡片专用的浅色文字 */
+  dim: {
+    text: string
+    muted: string
+    line: string
+  }
+  /** 三行词条方格的数据色 */
+  pip: {
+    /** 三行各自的激活色 */
+    colors: readonly [string, string, string]
+    /** 未激活方格 */
+    idle: string
+    /** 未获得卡片的未激活方格 */
+    idleDim: string
+  }
+  /** 装饰层开关。所有装饰都是背景级元素，关掉只会让页面更素，不会影响数据可读性 */
+  decorations: {
+    /** 表面颗粒噪点（混凝土 / 旧纸质感） */
+    noise: boolean
+    /** 背景工业网格 */
+    grid: boolean
+    /** 页头衬底水墨字 */
+    brushGlyph: boolean
+    /** 水墨字字符（如 "基" / "墨"） */
+    brushGlyphChar: string
+    /** 页脚警示斜纹带 */
+    hazardStripes: boolean
+    /** 右上角一图流二维码标签 */
+    qrTag: boolean
+  }
+  /** 卡片右上角的切角边长。工业面板用斜切，极简方案可调小接近直角 */
+  cardChamfer: number
+}
+
+/** 工业档案：灰白混凝土底、工程黄锚点、蓝青数据。默认方案，全装饰开启 */
+const INDUSTRIAL_SCHEME: MatrixColorScheme = {
+  id: 'industrial',
+  name: '工业档案',
+  description: '灰白混凝土、工程黄锚点、蓝青数据，冷静克制的档案质感',
+  ink: {
+    bg: '#e8e6e1',
+    surface: 'rgba(244, 242, 238, 0.9)',
+    surfaceDim: 'rgba(226, 224, 218, 0.72)',
+    plate: '#faf8f4',
+    text: '#1c1c1a',
+    muted: '#6b6862',
+    line: '#c4c0b8',
+    lineSoft: '#dcd8d0',
+    accent: '#e5b833',
+    accentInk: '#3a2c00',
+  },
+  dim: { text: '#95918a', muted: '#adaaa3', line: '#d8d4cc' },
+  pip: {
+    colors: ['#2d5f8a', '#3d8b8b', '#5a6b7a'],
+    idle: '#d3cfc7',
+    idleDim: '#dfdcd5',
+  },
+  decorations: {
+    noise: true,
+    grid: true,
+    brushGlyph: true,
+    brushGlyphChar: '基',
+    hazardStripes: true,
+    qrTag: true,
+  },
+  cardChamfer: 9,
+}
+
+/** 暗夜终端：深色底、霓虹数据色、青绿强调，护眼且贴近终端机观感 */
+const DARK_SCHEME: MatrixColorScheme = {
+  id: 'dark',
+  name: '暗夜终端',
+  description: '深色底、霓虹数据色与青绿强调，护眼的终端机质感',
+  ink: {
+    bg: '#0f1419',
+    surface: 'rgba(20, 26, 32, 0.92)',
+    surfaceDim: 'rgba(15, 20, 25, 0.8)',
+    plate: '#1a2129',
+    text: '#d8e0e8',
+    muted: '#7c8894',
+    line: '#2b3540',
+    lineSoft: '#232c35',
+    accent: '#3ddc97',
+    accentInk: '#052e1f',
+  },
+  dim: { text: '#57626d', muted: '#46505a', line: '#262f38' },
+  pip: {
+    colors: ['#22d3ee', '#4ade80', '#a78bfa'],
+    idle: '#2a333d',
+    idleDim: '#212932',
+  },
+  decorations: {
+    noise: true,
+    grid: true,
+    brushGlyph: false,
+    brushGlyphChar: '基',
+    hazardStripes: true,
+    qrTag: true,
+  },
+  cardChamfer: 9,
+}
+
+/** 水墨卷轴：米白纸底、墨色文字、朱砂印章红，楷书水墨字衬底 */
+const INK_SCHEME: MatrixColorScheme = {
+  id: 'ink',
+  name: '水墨卷轴',
+  description: '米白纸底、墨色文字与朱砂印章红，东方卷轴质感',
+  ink: {
+    bg: '#f2ecdf',
+    surface: 'rgba(250, 247, 241, 0.92)',
+    surfaceDim: 'rgba(240, 235, 226, 0.8)',
+    plate: '#faf7f0',
+    text: '#33291d',
+    muted: '#85775f',
+    line: '#c8bda6',
+    lineSoft: '#ddd4c1',
+    accent: '#a63d2f',
+    accentInk: '#f6efe2',
+  },
+  dim: { text: '#a89b84', muted: '#b7ab94', line: '#d5ccb8' },
+  pip: {
+    colors: ['#3f6f8f', '#8a6a3b', '#5f5a6e'],
+    idle: '#d9d0bc',
+    idleDim: '#e2dac9',
+  },
+  decorations: {
+    noise: true,
+    grid: false,
+    brushGlyph: true,
+    brushGlyphChar: '墨',
+    hazardStripes: false,
+    qrTag: true,
+  },
+  cardChamfer: 4,
+}
+
+/** 极简白：纯白底、细线、单一蓝点缀，去掉全部装饰，适合打印与分享 */
+const MINIMAL_SCHEME: MatrixColorScheme = {
+  id: 'minimal',
+  name: '极简白',
+  description: '纯白底、细线与单一蓝点缀，无装饰噪点，清爽干净',
+  ink: {
+    bg: '#ffffff',
+    surface: 'rgba(255, 255, 255, 0.96)',
+    surfaceDim: 'rgba(246, 246, 246, 0.92)',
+    plate: '#fafafa',
+    text: '#1a1a1a',
+    muted: '#8a8a8a',
+    line: '#e0e0e0',
+    lineSoft: '#ececec',
+    accent: '#2563eb',
+    accentInk: '#ffffff',
+  },
+  dim: { text: '#b8b8b8', muted: '#c8c8c8', line: '#e6e6e6' },
+  pip: {
+    colors: ['#2563eb', '#0ea5e9', '#64748b'],
+    idle: '#e5e7eb',
+    idleDim: '#f0f0f0',
+  },
+  decorations: {
+    noise: false,
+    grid: false,
+    brushGlyph: false,
+    brushGlyphChar: '基',
+    hazardStripes: false,
+    qrTag: true,
+  },
+  cardChamfer: 6,
+}
+
+/** 深蓝风格：深空蓝底、金色锚点、高饱和数据色，贴近深空的观感 */
+const DARKBLUE_SCHEME: MatrixColorScheme = {
+  id: 'game',
+  name: '深蓝风格',
+  description: '深空蓝底、金色锚点、高饱和数据色，贴近深空的观感',
+  ink: {
+    bg: '#0d1b2a',
+    surface: 'rgba(19, 33, 49, 0.94)',
+    surfaceDim: 'rgba(14, 24, 36, 0.82)',
+    plate: '#12202f',
+    text: '#e8eef5',
+    muted: '#8fa3b8',
+    line: '#2a3f55',
+    lineSoft: '#223349',
+    accent: '#e8b54a',
+    accentInk: '#2b2107',
+  },
+  dim: { text: '#5c7188', muted: '#4a5d72', line: '#233247' },
+  pip: {
+    colors: ['#4fc3f7', '#5eead4', '#a78bfa'],
+    idle: '#243a50',
+    idleDim: '#1c2c3e',
+  },
+  decorations: {
+    noise: true,
+    grid: true,
+    brushGlyph: false,
+    brushGlyphChar: '基',
+    hazardStripes: true,
+    qrTag: true,
+  },
+  cardChamfer: 9,
+}
+
+/** 全部配色方案，按选择器展示顺序排列。第一个是默认方案 */
+export const COLOR_SCHEMES: readonly MatrixColorScheme[] = [
+  INDUSTRIAL_SCHEME,
+  INK_SCHEME,
+  MINIMAL_SCHEME,
+  DARK_SCHEME,
+  DARKBLUE_SCHEME,
+]
+
+/**
+ * 按 id 查配色方案；未知 id 回退到默认的工业档案。
+ *
+ * @param id 方案 id。
+ * @returns 匹配的方案；找不到时返回工业档案。
+ */
+export function getColorScheme(id: string): MatrixColorScheme {
+  return COLOR_SCHEMES.find((scheme) => scheme.id === id) ?? INDUSTRIAL_SCHEME
+}
+
+/** 把 input.colorScheme（可能是 id 或方案对象）归一化成方案对象 */
+function resolveColorScheme(scheme?: MatrixColorScheme | string): MatrixColorScheme {
+  if (!scheme) return INDUSTRIAL_SCHEME
+  return typeof scheme === 'string' ? getColorScheme(scheme) : scheme
+}
+
+/** 画一张卡片的函数签名：x/y 是卡片左上角 */
+export type DrawCardFn = (
+  ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
+  layout: MatrixCardLayout,
+  card: ExportCard,
+  images: Map<string, HTMLImageElement | null>,
+  x: number,
+  y: number,
+) => void
+
+/**
+ * 一套卡片版式：卡片尺寸 + 内部元素排布。
+ *
+ * 只管「怎么排」：卡片多大、武器/基质/方格/名称/词条放在哪。配色由
+ * MatrixColorScheme 决定，与这里无关。同一网格内所有卡片共用同一个版式，
+ * 网格列数和画布高度由版式的卡片尺寸推导。
+ */
+export interface MatrixCardLayout {
+  /** 版式 id，用于选择器和 getCardLayout 查询 */
+  id: string
+  /** 版式中文名，展示在选择器里 */
+  name: string
+  /** 一句话说明，展示在选择器 tooltip 里 */
+  description: string
+  /** 卡片宽度（CSS 像素） */
+  cardWidth: number
+  /** 卡片高度（CSS 像素） */
+  cardHeight: number
+  /** 画一张卡片的具体实现 */
+  drawCard: DrawCardFn
 }
 
 export interface MatrixExportInput {
@@ -46,6 +361,10 @@ export interface MatrixExportInput {
   title: string
   /** 归档时间等辅助信息，画在右上角档案抬头的末行 */
   subtitle: string
+  /** 配色方案：传方案 id 或方案对象，缺省用工业档案 */
+  colorScheme?: MatrixColorScheme | string
+  /** 卡片版式：传版式 id 或版式对象，缺省用标准铭牌 */
+  layout?: MatrixCardLayout | string
   /** 像素倍率，默认 2；超出画布上限时内部自动降级 */
   scale?: number
   /** 网格列数，不传则按卡片总数自适应 */
@@ -66,52 +385,6 @@ export interface MatrixExportResult {
   missingImages: number
 }
 
-// --- 工业档案色板 ---
-
-/**
- * 全图配色。
- *
- * 彩色被严格限制在三组：工程黄（锚点/警示/重点）、蓝青（数据）、
- * 物品自身的稀有度色（识别）。其余一律走这张灰阶表。
- */
-const INK = {
-  /** 页面底：混凝土灰白 */
-  bg: '#e8e6e1',
-  /** 卡面。略带透明度，让背景的噪点与网格隐约透上来，形成面板质感 */
-  surface: 'rgba(244, 242, 238, 0.9)',
-  /** 未获得卡片的卡面：压向背景色，整张卡退到后景 */
-  surfaceDim: 'rgba(226, 224, 218, 0.72)',
-  /** 基质底板的衬底，比卡面略暖 */
-  plate: '#faf8f4',
-  /** 主文字 */
-  text: '#1c1c1a',
-  /** 次文字 */
-  muted: '#6b6862',
-  /** 结构线 */
-  line: '#c4c0b8',
-  /** 薄金属框的内衬线 */
-  lineSoft: '#dcd8d0',
-  /** 工程黄 */
-  yellow: '#e5b833',
-  /** 黄底上的文字色 */
-  yellowInk: '#3a2c00',
-} as const
-
-/** 未获得卡片专用的浅色文字，比 muted 再淡一档 */
-const DIM_TEXT = '#95918a'
-const DIM_MUTED = '#adaaa3'
-const DIM_LINE = '#d8d4cc'
-
-/** 三行词条的数据色：深蓝 → 青蓝 → 灰蓝 */
-const PIP_COLORS = ['#2d5f8a', '#3d8b8b', '#5a6b7a'] as const
-/** 未激活方格 */
-const PIP_IDLE = '#d3cfc7'
-/** 未获得卡片的方格：连未激活色都再压一档，扫一眼就知道整行是空的 */
-const PIP_IDLE_DIM = '#dfdcd5'
-
-/** 各词条的方格数，与 useWeaponStats 的 AFFIX_MAX_LEVEL 保持一致 */
-const AFFIX_PIP_COUNT = [6, 6, 3] as const
-
 // --- 字体 ---
 
 const FONT_STACK = '"HarmonyOS Sans SC", sans-serif'
@@ -126,8 +399,6 @@ const BRAND_TITLE = '基质图鉴'
 const BRAND_TITLE_EN = 'MATRIX CATALOG'
 const ARCHIVE_ORG = '终末地基质档案'
 const ARCHIVE_ORG_EN = 'ENDFIELD ESSENCE ARCHIVES'
-/** 页头衬底的水墨字，与「基质」呼应 */
-const BRUSH_GLYPH = '基'
 
 // --- 署名与外链 ---
 
@@ -188,10 +459,6 @@ const SECTION_GAP = 26
 const HEADER_H = 148
 const FOOTER_H = 66
 const SECTION_HEAD_H = 34
-const CARD_W = 260
-const CARD_H = 144
-/** 卡片右上角的切角边长。工业面板不用圆角，只用极小的斜切 */
-const CARD_CHAMFER = 9
 const CARD_PAD = 12
 const NAME_H = 22
 /** 名称上方的注音行高度；不管有没有星级都占位，两类卡片的名称才对得齐 */
@@ -215,6 +482,16 @@ const QR_QUIET = 3
 const QR_BOX = (YITULIU_QR.length + QR_QUIET * 2) * QR_MODULE
 /** 背景工业网格的间距 */
 const GRID_STEP = 44
+
+/**
+ * 二维码底板与模块的固定色。
+ *
+ * 不用方案色：二维码要能被机器扫出来，必须保持「深模块 + 浅底板」的
+ * 高对比。深色方案（暗夜终端、游戏原风）的 plate/text 是反过来的，
+ * 跟方案走会让码失效，所以这里写死。
+ */
+const QR_PLATE = '#faf8f4'
+const QR_MODULE_COLOR = '#1c1c1a'
 
 /** 画布单边的设备像素上限，取远低于 Chromium 16384 的保守值 */
 const MAX_DEVICE_PX = 8192
@@ -265,26 +542,28 @@ export function buildArchiveNo(count: number): string {
 /**
  * 计算画布尺寸与两个区各自的行数。
  *
- * 任一区为空时，该区连同区标题都不占高度。
+ * 任一区为空时，该区连同区标题都不占高度。卡片尺寸取版式的
+ * cardWidth/cardHeight，同一版式下所有卡片同尺寸，网格才对得齐。
  */
 export function computeCanvasSize(
   weaponCount: number,
   customCount: number,
   columns: number,
+  layout: MatrixCardLayout,
 ): { width: number; height: number; weaponRows: number; customRows: number } {
   const cols = Math.max(1, columns)
   const weaponRows = Math.ceil(weaponCount / cols)
   const customRows = Math.ceil(customCount / cols)
 
-  const width = PAGE_PAD * 2 + cols * CARD_W + (cols - 1) * GAP
+  const width = PAGE_PAD * 2 + cols * layout.cardWidth + (cols - 1) * GAP
 
   let height = PAGE_PAD + HEADER_H
   if (weaponRows > 0) {
-    height += SECTION_HEAD_H + weaponRows * (CARD_H + GAP) - GAP
+    height += SECTION_HEAD_H + weaponRows * (layout.cardHeight + GAP) - GAP
   }
   if (customRows > 0) {
     if (weaponRows > 0) height += SECTION_GAP
-    height += SECTION_HEAD_H + customRows * (CARD_H + GAP) - GAP
+    height += SECTION_HEAD_H + customRows * (layout.cardHeight + GAP) - GAP
   }
   height += SECTION_GAP + FOOTER_H + PAGE_PAD
 
@@ -399,7 +678,7 @@ function safeColor(color: string): string {
   try {
     return Color(color).string()
   } catch {
-    return INK.muted
+    return '#6b6862'
   }
 }
 
@@ -512,7 +791,13 @@ function chamferPath(
   ctx.closePath()
 }
 
-/** 按 object-fit: cover 的规则把图片画进目标矩形 */
+/**
+ * 按 object-fit: cover 的规则把图片画进目标矩形。
+ *
+ * @param topPad 把图像整体下移的像素数（正数下移、负数上移）：素材内容重心
+ *   偏上的武器图（手铳/施术单元），下移后视觉上才垂直居中。下移后图像可能
+ *   越过目标矩形，溢出部分由调用方的裁剪（clip）截掉。
+ */
 function drawImageCover(
   ctx: CanvasRenderingContext2D,
   image: HTMLImageElement,
@@ -520,28 +805,30 @@ function drawImageCover(
   y: number,
   width: number,
   height: number,
+  topPad = 0,
 ): void {
   const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight)
   const drawW = image.naturalWidth * scale
   const drawH = image.naturalHeight * scale
-  ctx.drawImage(image, x + (width - drawW) / 2, y + (height - drawH) / 2, drawW, drawH)
+  ctx.drawImage(image, x + (width - drawW) / 2, y + (height - drawH) / 2 + topPad, drawW, drawH)
 }
 
 /** 图片缺失时的占位块 */
 function drawImagePlaceholder(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   x: number,
   y: number,
   size: number,
 ): void {
-  ctx.fillStyle = withAlpha(INK.text, 0.06)
+  ctx.fillStyle = withAlpha(scheme.ink.text, 0.06)
   ctx.fillRect(x, y, size, size)
 
-  ctx.strokeStyle = withAlpha(INK.text, 0.16)
+  ctx.strokeStyle = withAlpha(scheme.ink.text, 0.16)
   ctx.lineWidth = 1
   ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1)
 
-  ctx.fillStyle = withAlpha(INK.text, 0.3)
+  ctx.fillStyle = withAlpha(scheme.ink.text, 0.3)
   ctx.font = `700 ${Math.round(size * 0.3)}px ${MONO_STACK}`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -593,31 +880,40 @@ function makeNoiseTile(size: number): HTMLCanvasElement {
  * 铺满整页的纸面：底色 + 工业网格 + 表面颗粒。
  *
  * 三层全部压到几乎看不见的程度——它们只负责让大面积留白不显得空，
- * 一旦影响到数据识别就是过头了。
+ * 一旦影响到数据识别就是过头了。网格和颗粒按方案开关。
  */
-function drawPaper(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-  ctx.fillStyle = INK.bg
+function drawPaper(
+  ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
+  width: number,
+  height: number,
+): void {
+  ctx.fillStyle = scheme.ink.bg
   ctx.fillRect(0, 0, width, height)
 
   // 工业网格
-  ctx.strokeStyle = withAlpha(INK.text, 0.026)
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  for (let x = GRID_STEP; x < width; x += GRID_STEP) {
-    ctx.moveTo(x + 0.5, 0)
-    ctx.lineTo(x + 0.5, height)
+  if (scheme.decorations.grid) {
+    ctx.strokeStyle = withAlpha(scheme.ink.text, 0.026)
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    for (let x = GRID_STEP; x < width; x += GRID_STEP) {
+      ctx.moveTo(x + 0.5, 0)
+      ctx.lineTo(x + 0.5, height)
+    }
+    for (let y = GRID_STEP; y < height; y += GRID_STEP) {
+      ctx.moveTo(0, y + 0.5)
+      ctx.lineTo(width, y + 0.5)
+    }
+    ctx.stroke()
   }
-  for (let y = GRID_STEP; y < height; y += GRID_STEP) {
-    ctx.moveTo(0, y + 0.5)
-    ctx.lineTo(width, y + 0.5)
-  }
-  ctx.stroke()
 
   // 表面颗粒
-  const pattern = ctx.createPattern(makeNoiseTile(96), 'repeat')
-  if (pattern) {
-    ctx.fillStyle = pattern
-    ctx.fillRect(0, 0, width, height)
+  if (scheme.decorations.noise) {
+    const pattern = ctx.createPattern(makeNoiseTile(96), 'repeat')
+    if (pattern) {
+      ctx.fillStyle = pattern
+      ctx.fillRect(0, 0, width, height)
+    }
   }
 }
 
@@ -625,10 +921,12 @@ function drawPaper(ctx: CanvasRenderingContext2D, width: number, height: number)
  * 页头衬底的水墨字。
  *
  * 东方元素退到背景层：只留一个笔画结构，透明度压到几乎与底色同色，
- * 靠 clip 让它被页头区裁掉一截，像盖印时压到了纸边。
+ * 靠 clip 让它被页头区裁掉一截，像盖印时压到了纸边。字符取自方案，
+ * 水墨卷轴用「墨」、工业档案用「基」。
  */
 function drawBrushGlyph(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   x: number,
   y: number,
   width: number,
@@ -639,11 +937,11 @@ function drawBrushGlyph(
   ctx.rect(x, y, width, height)
   ctx.clip()
 
-  ctx.fillStyle = withAlpha(INK.text, 0.035)
+  ctx.fillStyle = withAlpha(scheme.ink.text, 0.035)
   ctx.font = `400 ${Math.round(height * 1.35)}px ${BRUSH_STACK}`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
-  ctx.fillText(BRUSH_GLYPH, x + width * 0.26, y + height * 0.42)
+  ctx.fillText(scheme.decorations.brushGlyphChar, x + width * 0.26, y + height * 0.42)
 
   ctx.restore()
 }
@@ -651,6 +949,7 @@ function drawBrushGlyph(
 /** 工业警示斜纹带，用作页脚的分隔元素 */
 function drawHazardStripes(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   x: number,
   y: number,
   width: number,
@@ -663,7 +962,7 @@ function drawHazardStripes(
   ctx.rect(x, y, width, height)
   ctx.clip()
 
-  ctx.strokeStyle = withAlpha(INK.yellow, 0.5)
+  ctx.strokeStyle = withAlpha(scheme.ink.accent, 0.5)
   ctx.lineWidth = 3
   ctx.beginPath()
   // 45° 斜线，起点往左多退一个 height 才能让左边缘也被斜线覆盖满
@@ -685,6 +984,7 @@ function drawHazardStripes(
  */
 function drawDatabaseBar(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   title: string,
   count: number,
   x: number,
@@ -692,14 +992,14 @@ function drawDatabaseBar(
   width: number,
 ): void {
   chamferPath(ctx, x, y, width, DB_BAR_H, 8, [false, true, false, true])
-  ctx.fillStyle = withAlpha(INK.text, 0.05)
+  ctx.fillStyle = withAlpha(scheme.ink.text, 0.05)
   ctx.fill()
-  ctx.strokeStyle = INK.line
+  ctx.strokeStyle = scheme.ink.line
   ctx.lineWidth = 1
   ctx.stroke()
 
-  // 两端的黄色端块：整条栏的视觉夹持点
-  ctx.fillStyle = INK.yellow
+  // 两端的强调色端块：整条栏的视觉夹持点
+  ctx.fillStyle = scheme.ink.accent
   ctx.fillRect(x, y + 6, 4, DB_BAR_H - 12)
   ctx.fillRect(x + width - 4, y + 6, 4, DB_BAR_H - 12)
 
@@ -708,13 +1008,13 @@ function drawDatabaseBar(
   // 右端：条目数。先画右侧才能算出左侧标题的可用宽度
   ctx.textBaseline = 'middle'
   ctx.textAlign = 'right'
-  ctx.fillStyle = INK.text
+  ctx.fillStyle = scheme.ink.text
   ctx.font = `800 15px ${MONO_STACK}`
   const countText = String(count)
   const countWidth = ctx.measureText(countText).width
   ctx.fillText(countText, x + width - 14, midY)
 
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.font = `500 9px ${MONO_STACK}`
   const itemsRight = x + width - 14 - countWidth - 8
   const itemsWidth = measureTracked(ctx, 'ITEMS', 1.5)
@@ -722,13 +1022,13 @@ function drawDatabaseBar(
   drawTracked(ctx, 'ITEMS', itemsRight - itemsWidth, midY, 1.5)
 
   // 左端：DATABASE 标签 + 竖分隔 + 库名
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.font = `500 9px ${MONO_STACK}`
   const labelX = x + 16
   const labelWidth = drawTracked(ctx, 'DATABASE', labelX, midY, 2)
 
   const dividerX = labelX + labelWidth + 12
-  ctx.strokeStyle = INK.line
+  ctx.strokeStyle = scheme.ink.line
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(dividerX + 0.5, y + 8)
@@ -737,27 +1037,33 @@ function drawDatabaseBar(
 
   const titleX = dividerX + 12
   const titleMaxWidth = itemsRight - 16 - titleX
-  ctx.fillStyle = INK.text
+  ctx.fillStyle = scheme.ink.text
   const titleText = fitText(ctx, title, Math.max(40, titleMaxWidth), 13, 9)
   ctx.fillText(titleText, titleX, midY)
 }
 
 /**
- * 右上角的一图流二维码，做成工业档案里贴的资料标。
+ * 右上角的一图流二维码，做成档案里贴的资料标。
  *
- * 底板铺近白的 plate 色而不是直接落在页面底色上：浅灰会压低黑白模块的
- * 对比度，影响识别。四角黄色角标与卡片上的基质图标同一套语言。
+ * 底板固定用浅色、模块固定用深色，保证任何方案下都能被扫码识别
+ * （深色方案的 plate/text 是反色的，不能直接跟方案走）。四角强调色
+ * 角标与卡片上的基质图标同一套语言。
  */
-function drawQrTag(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+function drawQrTag(
+  ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
+  x: number,
+  y: number,
+): void {
   chamferPath(ctx, x, y, QR_BOX, QR_BOX, 6, [false, true, false, true])
-  ctx.fillStyle = INK.plate
+  ctx.fillStyle = QR_PLATE
   ctx.fill()
-  ctx.strokeStyle = INK.line
+  ctx.strokeStyle = scheme.ink.line
   ctx.lineWidth = 1
   ctx.stroke()
 
   // 模块点阵，从静区之后开始铺
-  ctx.fillStyle = INK.text
+  ctx.fillStyle = QR_MODULE_COLOR
   const originX = x + QR_QUIET * QR_MODULE
   const originY = y + QR_QUIET * QR_MODULE
   for (const [row, bits] of YITULIU_QR.entries()) {
@@ -769,7 +1075,7 @@ function drawQrTag(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   }
 
   const tick = 7
-  ctx.strokeStyle = INK.yellow
+  ctx.strokeStyle = scheme.ink.accent
   ctx.lineWidth = 2
   ctx.beginPath()
   for (const [cornerX, cornerY, dirX, dirY] of [
@@ -787,10 +1093,10 @@ function drawQrTag(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   // 站点名与地址：二维码扫不了时还能手打
   ctx.textAlign = 'right'
   ctx.textBaseline = 'top'
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.font = `500 9px ${FONT_STACK}`
   ctx.fillText(YITULIU_NAME, x + QR_BOX, y + QR_BOX + 4)
-  ctx.fillStyle = withAlpha(INK.muted, 0.75)
+  ctx.fillStyle = withAlpha(scheme.ink.muted, 0.75)
   ctx.font = `400 8px ${MONO_STACK}`
   ctx.fillText(YITULIU_URL, x + QR_BOX, y + QR_BOX + 15)
 }
@@ -803,6 +1109,7 @@ function drawQrTag(ctx: CanvasRenderingContext2D, x: number, y: number): void {
  */
 function drawArchiveStamp(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   timestamp: string,
   right: number,
   y: number,
@@ -813,23 +1120,23 @@ function drawArchiveStamp(
   ctx.textAlign = 'right'
   ctx.textBaseline = 'middle'
 
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.font = `700 12px ${FONT_STACK}`
   ctx.fillText(ARCHIVE_ORG, right, y + 8)
 
-  ctx.fillStyle = withAlpha(INK.muted, 0.75)
+  ctx.fillStyle = withAlpha(scheme.ink.muted, 0.75)
   ctx.font = `500 9px ${MONO_STACK}`
   const enWidth = Math.min(measureTracked(ctx, ARCHIVE_ORG_EN, 1.6), maxWidth)
   ctx.textAlign = 'left'
   drawTracked(ctx, ARCHIVE_ORG_EN, right - enWidth, y + 25, 1.6)
 
   const lineLeft = right - Math.min(Math.max(enWidth, 150), maxWidth)
-  drawHairline(ctx, INK.line, lineLeft, y + 35, right, y + 35)
-  // 线左端的黄色起点，与左侧品牌区的黄竖线呼应
-  ctx.fillStyle = INK.yellow
+  drawHairline(ctx, scheme.ink.line, lineLeft, y + 35, right, y + 35)
+  // 线左端的强调色起点，与左侧品牌区的竖线呼应
+  ctx.fillStyle = scheme.ink.accent
   ctx.fillRect(lineLeft, y + 33, 14, 2)
 
-  ctx.fillStyle = withAlpha(INK.muted, 0.8)
+  ctx.fillStyle = withAlpha(scheme.ink.muted, 0.8)
   ctx.font = `400 9px ${MONO_STACK}`
   ctx.textAlign = 'right'
   ctx.fillText(timestamp, right, y + 47)
@@ -838,40 +1145,45 @@ function drawArchiveStamp(
 /** 画整个页头区：品牌块 + 档案抬头 + 二维码 + 数据库栏 */
 function drawHeader(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   input: MatrixExportInput,
   count: number,
   x: number,
   y: number,
   width: number,
 ): void {
-  drawBrushGlyph(ctx, x, y, width, HEADER_H - DB_BAR_H - 24)
+  if (scheme.decorations.brushGlyph) {
+    drawBrushGlyph(ctx, scheme, x, y, width, HEADER_H - DB_BAR_H - 24)
+  }
 
-  // 大标题左侧的黄竖线：全图第一个视觉锚点
-  ctx.fillStyle = INK.yellow
+  // 大标题左侧的强调色竖线：全图第一个视觉锚点
+  ctx.fillStyle = scheme.ink.accent
   ctx.fillRect(x, y + 2, 4, 30)
 
   ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = INK.text
+  ctx.fillStyle = scheme.ink.text
   ctx.font = `800 27px ${FONT_STACK}`
   ctx.fillText(BRAND_TITLE, x + 15, y + 17)
 
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.font = `500 10px ${MONO_STACK}`
   drawTracked(ctx, BRAND_TITLE_EN, x + 16, y + 41, 3.4)
 
-  // 标题下的黄色短横线，收住整个品牌块
-  ctx.fillStyle = INK.yellow
+  // 标题下的强调色短横线，收住整个品牌块
+  ctx.fillStyle = scheme.ink.accent
   ctx.fillRect(x + 16, y + 51, 38, 3)
 
   const qrX = x + width - QR_BOX
-  drawQrTag(ctx, qrX, y)
+  if (scheme.decorations.qrTag) {
+    drawQrTag(ctx, scheme, qrX, y)
+  }
 
   // 品牌块右边界固定按大标题宽度估，抬头从这里往右排
   const stampRight = qrX - 18
-  drawArchiveStamp(ctx, input.subtitle, stampRight, y, stampRight - (x + 145))
+  drawArchiveStamp(ctx, scheme, input.subtitle, stampRight, y, stampRight - (x + 145))
 
-  drawDatabaseBar(ctx, input.title, count, x, y + HEADER_H - DB_BAR_H - 22, width)
+  drawDatabaseBar(ctx, scheme, input.title, count, x, y + HEADER_H - DB_BAR_H - 22, width)
 }
 
 /**
@@ -881,24 +1193,25 @@ function drawHeader(
  */
 function drawFooter(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   count: number,
   x: number,
   y: number,
   width: number,
 ): void {
-  drawHairline(ctx, INK.line, x, y, x + width, y)
-  ctx.fillStyle = INK.yellow
+  drawHairline(ctx, scheme.ink.line, x, y, x + width, y)
+  ctx.fillStyle = scheme.ink.accent
   ctx.fillRect(x, y, 38, 2)
 
   const mainY = y + 22
   ctx.textBaseline = 'middle'
   ctx.textAlign = 'left'
 
-  ctx.fillStyle = INK.text
+  ctx.fillStyle = scheme.ink.text
   ctx.font = `800 12px ${MONO_STACK}`
   const brandWidth = drawTracked(ctx, 'EER', x, mainY, 1.5)
 
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.font = `500 10px ${FONT_STACK}`
   const nameX = x + brandWidth + 10
   const nameWidth = ctx.measureText(`· ${PROJECT_NAME}`).width
@@ -906,36 +1219,38 @@ function drawFooter(
 
   // 右侧档案编号
   ctx.textAlign = 'right'
-  ctx.fillStyle = INK.text
+  ctx.fillStyle = scheme.ink.text
   ctx.font = `700 11px ${MONO_STACK}`
   const archiveNo = buildArchiveNo(count)
   const archiveWidth = ctx.measureText(archiveNo).width
   ctx.fillText(archiveNo, x + width, mainY)
 
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.font = `400 9px ${FONT_STACK}`
   const labelRight = x + width - archiveWidth - 8
   ctx.fillText('档案编号', labelRight, mainY)
   const labelWidth = ctx.measureText('档案编号').width
 
-  const stripeLeft = nameX + nameWidth + 22
-  const stripeRight = labelRight - labelWidth - 22
-  drawHazardStripes(ctx, stripeLeft, mainY - 5, stripeRight - stripeLeft, 10)
+  if (scheme.decorations.hazardStripes) {
+    const stripeLeft = nameX + nameWidth + 22
+    const stripeRight = labelRight - labelWidth - 22
+    drawHazardStripes(ctx, scheme, stripeLeft, mainY - 5, stripeRight - stripeLeft, 10)
+  }
 
   // 下行：左仓库、右署名，各占一半宽度
   const creditY = y + 47
   const half = (width - 16) / 2
 
   ctx.textAlign = 'left'
-  ctx.fillStyle = withAlpha(INK.muted, 0.8)
+  ctx.fillStyle = withAlpha(scheme.ink.muted, 0.8)
   ctx.fillText(fitText(ctx, PROJECT_REPO, half, 9, 7, 400, MONO_STACK), x, creditY)
 
   ctx.textAlign = 'right'
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.fillText(fitText(ctx, CREDIT_LINE, half, 9, 7, 500), x + width, creditY)
 }
 
-// --- 卡片 ---
+// --- 卡片公共件 ---
 
 /**
  * 一张卡片实际使用的色值。
@@ -956,27 +1271,27 @@ interface CardInk {
   imageAlpha: number
 }
 
-function cardInk(dimmed: boolean): CardInk {
+function cardInk(scheme: MatrixColorScheme, dimmed: boolean): CardInk {
   if (dimmed) {
     return {
-      surface: INK.surfaceDim,
-      border: DIM_LINE,
+      surface: scheme.ink.surfaceDim,
+      border: scheme.dim.line,
       borderInner: 'transparent',
-      name: DIM_TEXT,
-      ruby: DIM_MUTED,
-      trait: DIM_MUTED,
-      pipIdle: PIP_IDLE_DIM,
+      name: scheme.dim.text,
+      ruby: scheme.dim.muted,
+      trait: scheme.dim.muted,
+      pipIdle: scheme.pip.idleDim,
       imageAlpha: 0.4,
     }
   }
   return {
-    surface: INK.surface,
-    border: INK.line,
-    borderInner: INK.lineSoft,
-    name: INK.text,
-    ruby: withAlpha(INK.text, 0.32),
-    trait: INK.muted,
-    pipIdle: PIP_IDLE,
+    surface: scheme.ink.surface,
+    border: scheme.ink.line,
+    borderInner: scheme.ink.lineSoft,
+    name: scheme.ink.text,
+    ruby: withAlpha(scheme.ink.text, 0.32),
+    trait: scheme.ink.muted,
+    pipIdle: scheme.pip.idle,
     imageAlpha: 1,
   }
 }
@@ -984,11 +1299,12 @@ function cardInk(dimmed: boolean): CardInk {
 /**
  * 画武器 icon：图片 + 底部稀有度色条 + 细边框。
  *
- * 对应 ItemIcon.vue 的层叠结构，但去掉了发光渐变——工业面板上的
+ * 对应 ItemIcon.vue 的层叠结构，但去掉了发光渐变——面板上的
  * 缩略图就该是块平的铭牌图，稀有度只靠底部那条色带表达。
  */
 function drawWeaponIcon(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   image: HTMLImageElement | null,
   card: ExportCard,
   ink: CardInk,
@@ -997,7 +1313,7 @@ function drawWeaponIcon(
   size: number,
 ): void {
   if (!image) {
-    drawImagePlaceholder(ctx, x, y, size)
+    drawImagePlaceholder(ctx, scheme, x, y, size)
     return
   }
 
@@ -1008,7 +1324,7 @@ function drawWeaponIcon(
   ctx.rect(x, y, size, size)
   ctx.clip()
 
-  ctx.fillStyle = withAlpha(INK.text, 0.04)
+  ctx.fillStyle = withAlpha(scheme.ink.text, 0.04)
   ctx.fillRect(x, y, size, size)
 
   ctx.globalAlpha = ink.imageAlpha
@@ -1030,15 +1346,16 @@ function drawWeaponIcon(
 }
 
 /**
- * 画基质图：底板 + 技能图标 + 黄色框体 + 四角角标。
+ * 画基质图：底板 + 技能图标 + 强调色框体 + 四角角标。
  *
  * 对应 CustomStatIcon.vue 的层叠结构，技能图标沿用 translate(5%, -5%) 的偏移。
- * 黄框和角标是卡片内的第二视觉锚点——先看到名称，再被引到这枚核心基质上。
+ * 框体和角标是卡片内的第二视觉锚点——先看到名称，再被引到这枚核心基质上。
  *
- * @param accent 底部识别条的颜色：内置武器用工程黄，自定义基质用它自己的橙。
+ * @param accent 底部识别条的颜色：内置武器用强调色，自定义基质用它自己的橙。
  */
 function drawEssenceIcon(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   bgImage: HTMLImageElement | null,
   skillImage: HTMLImageElement | null,
   ink: CardInk,
@@ -1049,7 +1366,7 @@ function drawEssenceIcon(
   size: number,
 ): void {
   if (!bgImage && !skillImage) {
-    drawImagePlaceholder(ctx, x, y, size)
+    drawImagePlaceholder(ctx, scheme, x, y, size)
     return
   }
 
@@ -1058,7 +1375,7 @@ function drawEssenceIcon(
   ctx.rect(x, y, size, size)
   ctx.clip()
 
-  ctx.fillStyle = INK.plate
+  ctx.fillStyle = scheme.ink.plate
   ctx.fillRect(x, y, size, size)
 
   ctx.globalAlpha = ink.imageAlpha
@@ -1076,8 +1393,8 @@ function drawEssenceIcon(
 
   ctx.restore()
 
-  // 黄色框体
-  const frameColor = dimmed ? withAlpha(INK.yellow, 0.3) : INK.yellow
+  // 强调色框体
+  const frameColor = dimmed ? withAlpha(scheme.ink.accent, 0.3) : scheme.ink.accent
   ctx.strokeStyle = frameColor
   ctx.lineWidth = 1.5
   ctx.strokeRect(x + 0.75, y + 0.75, size - 1.5, size - 1.5)
@@ -1101,13 +1418,46 @@ function drawEssenceIcon(
 }
 
 /**
- * 画一行方格能量条。
+ * 画一行方格能量条（不画行尾计数）。
  *
  * 直角实心块、无发光：色块长度本身就是可读的量，扫一眼就知道高低，
  * 不必真去读 6/6 那个数字。未激活块只降对比度、不消失，槽位总数才留得住。
+ * 行尾的 `n/m` 计数由调用方按版式需要决定是否追加。
+ *
+ * @param cellW 方格宽，默认 PIP_W。
+ * @param cellH 方格高，默认 PIP_H。
+ * @param gap 方格间距，默认 PIP_GAP。
+ */
+function drawPipCells(
+  ctx: CanvasRenderingContext2D,
+  level: number,
+  pipCount: number,
+  activeColor: string,
+  idleColor: string,
+  x: number,
+  y: number,
+  cellW = PIP_W,
+  cellH = PIP_H,
+  gap = PIP_GAP,
+): void {
+  for (let index = 0; index < pipCount; index++) {
+    const pipX = x + index * (cellW + gap)
+    const active = index < level
+
+    ctx.fillStyle = active ? activeColor : idleColor
+    ctx.fillRect(pipX, y, cellW, cellH)
+  }
+}
+
+/**
+ * 画一行方格能量条，行尾追加 n/m 计数。
+ *
+ * @param countRight 计数的右对齐 x 坐标；传了则所有行尾计数对齐到这一列，
+ *   三行 6/6/3 格时右缘整齐。不传则紧跟在本行格子之后（默认行为）。
  */
 function drawPipRow(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   level: number,
   pipCount: number,
   activeColor: string,
@@ -1115,69 +1465,108 @@ function drawPipRow(
   dimmed: boolean,
   x: number,
   y: number,
+  countRight?: number,
 ): void {
-  for (let index = 0; index < pipCount; index++) {
-    const pipX = x + index * (PIP_W + PIP_GAP)
-    const active = index < level
+  drawPipCells(
+    ctx,
+    level,
+    pipCount,
+    dimmed ? withAlpha(activeColor, 0.32) : activeColor,
+    ink.pipIdle,
+    x,
+    y,
+  )
 
-    ctx.fillStyle = active ? (dimmed ? withAlpha(activeColor, 0.32) : activeColor) : ink.pipIdle
-    ctx.fillRect(pipX, y, PIP_W, PIP_H)
-  }
-
-  ctx.fillStyle = dimmed ? ink.trait : withAlpha(INK.text, 0.62)
+  ctx.fillStyle = dimmed ? ink.trait : withAlpha(scheme.ink.text, 0.62)
   ctx.font = `700 10px ${MONO_STACK}`
-  ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
-  ctx.fillText(`${level}/${pipCount}`, x + pipCount * (PIP_W + PIP_GAP) + 5, y + PIP_H / 2)
+  const countText = `${level}/${pipCount}`
+  if (countRight !== undefined) {
+    ctx.textAlign = 'right'
+    ctx.fillText(countText, countRight, y + PIP_H / 2)
+  } else {
+    ctx.textAlign = 'left'
+    ctx.fillText(countText, x + pipCount * (PIP_W + PIP_GAP) + 5, y + PIP_H / 2)
+  }
 }
 
 /**
- * 满级标记：黄色双线框 + 右上切角实心三角。
+ * 满级标记：强调色双线框 + 右上切角实心三角。
  *
  * 页面上用的是彩虹环，但彩虹渐变落在灰白工业底上会盖过所有数据。
- * 这里改用「已认证」式的黄色标识，纳入全图统一的黄色锚点体系。
+ * 这里改用「已认证」式的强调色标识，纳入全图统一的强调色锚点体系。
+ *
+ * @param skipLeft 不画左边框：全幅武器版式左侧有稀有度竖条，满级框再压上去会挡住它。
  */
 function drawMaxedMark(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   x: number,
   y: number,
   width: number,
   height: number,
+  skipLeft = false,
 ): void {
-  chamferPath(ctx, x + 1, y + 1, width - 2, height - 2, CARD_CHAMFER - 1)
-  ctx.strokeStyle = INK.yellow
-  ctx.lineWidth = 1.5
-  ctx.stroke()
+  const chamfer = scheme.cardChamfer
 
-  chamferPath(ctx, x + 3.5, y + 3.5, width - 7, height - 7, CARD_CHAMFER - 3)
-  ctx.strokeStyle = withAlpha(INK.yellow, 0.32)
-  ctx.lineWidth = 1
-  ctx.stroke()
+  if (skipLeft) {
+    // 上、右、下三边 + 右上切角，左竖边留空给稀有度竖条
+    const frames = [
+      [1, chamfer - 1, 1.5, scheme.ink.accent],
+      [3.5, chamfer - 3, 1, withAlpha(scheme.ink.accent, 0.32)],
+    ] as const
+    for (const [inset, cut, lineWidth, style] of frames) {
+      const left = x + inset
+      const top = y + inset
+      const right = x + width - inset
+      const bottom = y + height - inset
+      ctx.beginPath()
+      ctx.moveTo(left, top)
+      ctx.lineTo(right - cut, top)
+      ctx.lineTo(right, top + cut)
+      ctx.lineTo(right, bottom)
+      ctx.lineTo(left, bottom)
+      ctx.strokeStyle = style
+      ctx.lineWidth = lineWidth
+      ctx.stroke()
+    }
+  } else {
+    chamferPath(ctx, x + 1, y + 1, width - 2, height - 2, chamfer - 1)
+    ctx.strokeStyle = scheme.ink.accent
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+
+    chamferPath(ctx, x + 3.5, y + 3.5, width - 7, height - 7, chamfer - 3)
+    ctx.strokeStyle = withAlpha(scheme.ink.accent, 0.32)
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
 
   // 右上切角处的实心三角，等同档案上的「已归档」戳
-  ctx.fillStyle = INK.yellow
+  ctx.fillStyle = scheme.ink.accent
   ctx.beginPath()
-  ctx.moveTo(x + width - CARD_CHAMFER - 8, y + 1)
-  ctx.lineTo(x + width - 1, y + CARD_CHAMFER + 8)
-  ctx.lineTo(x + width - 1, y + CARD_CHAMFER)
-  ctx.lineTo(x + width - CARD_CHAMFER, y + 1)
+  ctx.moveTo(x + width - chamfer - 8, y + 1)
+  ctx.lineTo(x + width - 1, y + chamfer + 8)
+  ctx.lineTo(x + width - 1, y + chamfer)
+  ctx.lineTo(x + width - chamfer, y + 1)
   ctx.closePath()
   ctx.fill()
 }
 
-/** 扫描数量角标：黄色切角方块 + 深色数字 */
+/** 扫描数量角标：强调色切角方块 + 深色数字 */
 function drawBadge(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   count: number,
   centerX: number,
   centerY: number,
 ): void {
   const size = BADGE_R * 2
   chamferPath(ctx, centerX - BADGE_R, centerY - BADGE_R, size, size, 5, [true, false, true, false])
-  ctx.fillStyle = INK.yellow
+  ctx.fillStyle = scheme.ink.accent
   ctx.fill()
 
-  ctx.fillStyle = INK.yellowInk
+  ctx.fillStyle = scheme.ink.accentInk
   ctx.font = `700 10px ${MONO_STACK}`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -1198,28 +1587,35 @@ function shortenTraitName(name: string): string {
   return name
 }
 
+// --- 卡片版式实现 ---
+
 /**
- * 画一整张卡片。
+ * 标准铭牌：武器缩略图 + 基质小图并排，三行方格子右侧，名称居中。
  *
  * 内部视觉顺序刻意做成 名称 → 武器 → 核心基质 → 数据：
  * 星级虽然靠上但压得最淡，第一眼落到的应该是名字。
  */
-function drawCard(
+function drawStandardCard(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
+  layout: MatrixCardLayout,
   card: ExportCard,
   images: Map<string, HTMLImageElement | null>,
   x: number,
   y: number,
 ): void {
-  const ink = cardInk(card.dimmed === true)
+  const ink = cardInk(scheme, card.dimmed === true)
   const dimmed = card.dimmed === true
+  const chamfer = scheme.cardChamfer
+  const cardW = layout.cardWidth
+  const cardH = layout.cardHeight
 
   // 无条件成对 save/restore：filter/globalAlpha 是全局状态，
   // 漏掉 restore 会让后面所有卡片跟着变样。
   ctx.save()
 
   // 卡面：薄金属铭牌——直角为主，只切右上角
-  chamferPath(ctx, x, y, CARD_W, CARD_H, CARD_CHAMFER)
+  chamferPath(ctx, x, y, cardW, cardH, chamfer)
   ctx.fillStyle = ink.surface
   ctx.fill()
   ctx.strokeStyle = ink.border
@@ -1228,13 +1624,13 @@ function drawCard(
 
   // 内衬线：一圈退进 3px 的更淡描边，做出金属框的厚度
   if (ink.borderInner !== 'transparent') {
-    chamferPath(ctx, x + 3, y + 3, CARD_W - 6, CARD_H - 6, CARD_CHAMFER - 3)
+    chamferPath(ctx, x + 3, y + 3, cardW - 6, cardH - 6, chamfer - 3)
     ctx.strokeStyle = ink.borderInner
     ctx.lineWidth = 1
     ctx.stroke()
   }
 
-  const nameMaxWidth = CARD_W - CARD_PAD * 2
+  const nameMaxWidth = cardW - CARD_PAD * 2
 
   // 注音行：星级压到名称上方，透明度低到不与名称抢视线
   if (card.nameRuby) {
@@ -1242,7 +1638,7 @@ function drawCard(
     ctx.fillStyle = ink.ruby
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(rubyText, x + CARD_W / 2, y + CARD_PAD + RUBY_H / 2)
+    ctx.fillText(rubyText, x + cardW / 2, y + CARD_PAD + RUBY_H / 2)
   }
 
   // 名称：卡片内最重的文字
@@ -1250,7 +1646,7 @@ function drawCard(
   ctx.fillStyle = ink.name
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(nameText, x + CARD_W / 2, y + CARD_PAD + RUBY_H + NAME_H / 2)
+  ctx.fillText(nameText, x + cardW / 2, y + CARD_PAD + RUBY_H + NAME_H / 2)
 
   const bodyY = y + CARD_PAD + RUBY_H + NAME_H + 4
   const iconImage = card.iconUrl ? (images.get(card.iconUrl) ?? null) : null
@@ -1260,16 +1656,17 @@ function drawCard(
   let pipX: number
   if (card.kind === 'weapon') {
     const iconX = x + CARD_PAD
-    drawWeaponIcon(ctx, iconImage, card, ink, iconX, bodyY, ICON)
+    drawWeaponIcon(ctx, scheme, iconImage, card, ink, iconX, bodyY, ICON)
 
     const essenceX = iconX + ICON + 10
     const essenceY = bodyY + (ICON - MATRIX_ICON) / 2
     drawEssenceIcon(
       ctx,
+      scheme,
       bgImage,
       skillImage,
       ink,
-      INK.yellow,
+      scheme.ink.accent,
       dimmed,
       essenceX,
       essenceY,
@@ -1278,7 +1675,7 @@ function drawCard(
     pipX = essenceX + MATRIX_ICON + 12
 
     if (card.badgeCount && card.badgeCount > 0) {
-      drawBadge(ctx, card.badgeCount, iconX + ICON, bodyY)
+      drawBadge(ctx, scheme, card.badgeCount, iconX + ICON, bodyY)
     }
   } else {
     // 自定义基质没有武器图，基质图放大占据 icon 的位置；
@@ -1286,6 +1683,7 @@ function drawCard(
     const essenceX = x + CARD_PAD
     drawEssenceIcon(
       ctx,
+      scheme,
       bgImage,
       skillImage,
       ink,
@@ -1298,44 +1696,507 @@ function drawCard(
     pipX = essenceX + ICON + 12
   }
 
-  // 三行方格能量条
-  for (let slot = 0; slot < 3; slot++) {
+  // 方格能量条：按实际词条数绘制，3★ 只有两条时也只画两行
+  for (const [index, trait] of card.traits.entries()) {
     drawPipRow(
       ctx,
-      card.levels[slot] ?? 0,
-      AFFIX_PIP_COUNT[slot]!,
-      PIP_COLORS[slot]!,
+      scheme,
+      trait.level,
+      trait.pipCount,
+      scheme.pip.colors[trait.slot] ?? scheme.pip.colors[0]!,
       ink,
       dimmed,
       pipX,
-      bodyY + slot * PIP_ROW_GAP,
+      bodyY + index * PIP_ROW_GAP,
     )
   }
 
   // 底部词条名
-  if (card.traitNames && card.traitNames.length > 0) {
-    const traitText = card.traitNames.map((name) => shortenTraitName(name)).join(' · ')
-    const traitMaxWidth = CARD_W - CARD_PAD * 2
-    const traitY = y + CARD_H - CARD_PAD - 4
+  if (card.traits.length > 0) {
+    const traitText = card.traits.map((trait) => shortenTraitName(trait.name)).join(' · ')
+    const traitMaxWidth = cardW - CARD_PAD * 2
+    const traitY = y + cardH - CARD_PAD - 4
     ctx.fillStyle = ink.trait
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'
     const fittedText = fitText(ctx, traitText, traitMaxWidth, TRAIT_FONTSIZE, 10, 400)
-    ctx.fillText(fittedText, x + CARD_W / 2, traitY)
+    ctx.fillText(fittedText, x + cardW / 2, traitY)
   }
 
-  if (card.maxed && !dimmed) drawMaxedMark(ctx, x, y, CARD_W, CARD_H)
+  if (card.maxed && !dimmed) drawMaxedMark(ctx, scheme, x, y, cardW, cardH)
 
   ctx.restore()
 }
 
 /**
+ * 素材内容重心偏上、全幅背景需要下移校正的武器分类（wiki 组 ID）。
+ *
+ * 手铳与施术单元武器图的透明像素重心在画布上半部（下方留白多），
+ * cover 居中裁剪后会显得偏高，需整体下移才能视觉垂直居中。
+ */
+const HERO_ART_TOP_PAD_GROUP_IDS: ReadonlySet<string> = new Set([
+  'wiki_group_weapon_pistol',
+  'wiki_group_weapon_wand',
+])
+/** 上述分类的全幅背景整体下移量（CSS 像素） */
+const HERO_ART_TOP_PAD = 10
+
+/**
+ * 全幅武器：武器图铺满卡片右侧当背景（cover 垂直居中），信息列与星级
+ * 压在图面上方一层。
+ *
+ * 左侧由上到下是「武器名 → 词条名 → 基质 → 方格」：星级不在左侧占行，
+ * 改到右下角以白色半透明叠加在武器图上；名称放大到最多半卡宽，加描边保证
+ * 压到武器图上时仍可读，未获得则只置灰不描边。方格压成正方形，省出的纵向
+ * 空间让给名称与词条名行。手铳/施术单元武器图整体下移 HERO_ART_TOP_PAD 像素
+ * 校正重心。
+ */
+function drawHeroCard(
+  ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
+  layout: MatrixCardLayout,
+  card: ExportCard,
+  images: Map<string, HTMLImageElement | null>,
+  x: number,
+  y: number,
+): void {
+  const ink = cardInk(scheme, card.dimmed === true)
+  const dimmed = card.dimmed === true
+  const chamfer = scheme.cardChamfer
+  const cardW = layout.cardWidth
+  const cardH = layout.cardHeight
+
+  // 左侧信息列几何：与卡面同用 CARD_PAD 留边
+  const panelPad = CARD_PAD
+  // 名称最多占半卡宽、放大到 24px：方格压缩成正方形省出的纵向空间让给名称
+  const nameMaxWidth = cardW / 2
+  const nameFontSize = 24
+  const nameLineH = 30
+  // 词条名行：样式沿用标准铭牌底部词条行（muted 色、常规字重），字号略小
+  const traitFontSize = 10
+  const traitLineH = 12
+  const traitGap = 3
+  // 紧凑方格与缩小基质；方格压成 6×6 正方形
+  const essenceSize = 40
+  const pipW = 6
+  const pipH = 6
+  const pipGap = 2
+  const pipRowGap = 12
+  // 武器图：铺满右侧 4/5 当背景，cover 铺满整高（图像内容垂直居中）
+  const panelW = 64
+  const artX = x + panelW
+  const artW = cardW - panelW
+
+  ctx.save()
+
+  // 整卡形状裁剪：武器图要贴合右上切角
+  chamferPath(ctx, x, y, cardW, cardH, chamfer)
+  ctx.clip()
+
+  ctx.fillStyle = ink.surface
+  ctx.fillRect(x, y, cardW, cardH)
+
+  const iconImage = card.iconUrl ? (images.get(card.iconUrl) ?? null) : null
+  const bgImage = card.essenceBgUrl ? (images.get(card.essenceBgUrl) ?? null) : null
+  const skillImage = card.skillIconUrl ? (images.get(card.skillIconUrl) ?? null) : null
+
+  // 武器图：自定义基质退化为基质底板图，铺满右侧当背景（cover 垂直居中）
+  const backdrop = iconImage ?? bgImage
+  if (backdrop) {
+    // 手铳/施术单元素材重心偏上，下移校正；下移后仍覆盖整块背景区（由整卡 clip 裁剪溢出）
+    const artTopPad = HERO_ART_TOP_PAD_GROUP_IDS.has(card.weaponTypeId ?? '') ? HERO_ART_TOP_PAD : 0
+    ctx.globalAlpha = ink.imageAlpha
+    if (dimmed) ctx.filter = 'grayscale(1)'
+    drawImageCover(ctx, backdrop, artX, y, artW, cardH, artTopPad)
+    ctx.filter = 'none'
+    ctx.globalAlpha = 1
+  } else {
+    drawImagePlaceholder(ctx, scheme, artX + (artW - ICON) / 2, y + (cardH - ICON) / 2, ICON)
+  }
+
+  // 未获得：盖一层表面色罩保留剪影、明确退到后景
+  if (dimmed) {
+    ctx.fillStyle = withAlpha(scheme.ink.surface, 0.55)
+    ctx.fillRect(x, y, cardW, cardH)
+  }
+
+  ctx.restore()
+
+  // 卡面边框
+  chamferPath(ctx, x, y, cardW, cardH, chamfer)
+  ctx.strokeStyle = ink.border
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  // 左侧稀有度竖条：武器色是全图唯一的稀有度线索
+  const tierColor = safeColor(card.tierColor)
+  ctx.fillStyle = dimmed ? withAlpha(tierColor, 0.35) : tierColor
+  ctx.fillRect(x, y, 3, cardH)
+
+  // 武器名：左上、放大到半卡宽，加描边保证压到武器图上仍可读；未获得只置灰不描边
+  const nameText = fitText(ctx, card.name, nameMaxWidth, nameFontSize, 10, 800)
+  const nameY = y + panelPad + nameLineH / 2
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  if (!dimmed) {
+    // 描边取与文字相反的明度：亮字用暗描边、暗字用亮描边，任何背景上都留得下轮廓
+    const nameOutline = Color(ink.name).isLight()
+      ? withAlpha('#000000', 0.6)
+      : withAlpha('#ffffff', 0.72)
+    ctx.lineJoin = 'round'
+    ctx.strokeStyle = nameOutline
+    ctx.lineWidth = 4
+    ctx.strokeText(nameText, x + panelPad, nameY)
+    ctx.lineJoin = 'miter'
+  }
+  ctx.fillStyle = ink.name
+  ctx.fillText(nameText, x + panelPad, nameY)
+
+  // 词条名：名称与基质之间的一行，左对齐。三词条按属性→附加→技能顺序
+  // 用 · 连接；最长放到整卡宽（减两侧留边），与标准铭牌的底部词条行同一套取舍
+  if (card.traits.length > 0) {
+    const traitText = card.traits.map((trait) => shortenTraitName(trait.name)).join(' · ')
+    const traitMaxWidth = cardW - panelPad - CARD_PAD
+    const traitY = y + panelPad + nameLineH + traitGap + traitLineH / 2
+    ctx.fillStyle = ink.trait
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    const fittedTraits = fitText(ctx, traitText, traitMaxWidth, traitFontSize, 9, 400)
+    ctx.fillText(fittedTraits, x + panelPad, traitY)
+  }
+
+  // 基质图标：词条名下方、左对齐
+  const essenceAccent = card.kind === 'weapon' ? scheme.ink.accent : safeColor(card.tierColor)
+  const essenceX = x + panelPad
+  const essenceY = y + panelPad + nameLineH + traitGap + traitLineH + traitGap
+  drawEssenceIcon(
+    ctx,
+    scheme,
+    bgImage,
+    skillImage,
+    ink,
+    essenceAccent,
+    dimmed,
+    essenceX,
+    essenceY,
+    essenceSize,
+  )
+
+  // 方格：紧凑、无计数、左对齐
+  const pipsTop = essenceY + essenceSize + 8
+  for (const [index, trait] of card.traits.entries()) {
+    drawPipCells(
+      ctx,
+      trait.level,
+      trait.pipCount,
+      dimmed
+        ? withAlpha(scheme.pip.colors[trait.slot] ?? scheme.pip.colors[0]!, 0.32)
+        : (scheme.pip.colors[trait.slot] ?? scheme.pip.colors[0]!),
+      ink.pipIdle,
+      x + panelPad,
+      pipsTop + index * pipRowGap,
+      pipW,
+      pipH,
+      pipGap,
+    )
+  }
+
+  // 角标：叠在基质图右上角
+  if (card.badgeCount && card.badgeCount > 0) {
+    drawBadge(ctx, scheme, card.badgeCount, essenceX + essenceSize, essenceY)
+  }
+
+  // 星级：右下角，暖白半透明水印式叠加在武器图上，细描边保证任何底上可读
+  if (card.nameRuby) {
+    ctx.font = `700 22px ${FONT_STACK}`
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'alphabetic'
+    const starX = x + cardW - CARD_PAD - 6
+    const starY = y + cardH - CARD_PAD - 6
+    // 描边用 75% 透明度的暖灰黑替代纯黑，避免突兀；置灰时也保留，淡色底上仍可见
+    ctx.lineJoin = 'round'
+    ctx.strokeStyle = withAlpha('#2f2c27', 0.25)
+    ctx.lineWidth = 2
+    ctx.strokeText(card.nameRuby, starX, starY)
+    ctx.lineJoin = 'miter'
+    ctx.fillStyle = dimmed ? withAlpha('#f7f4ec', 0.4) : withAlpha('#f7f4ec', 0.55)
+    ctx.fillText(card.nameRuby, starX, starY)
+  }
+
+  // 满级框不画左边，避免压住左侧的稀有度竖条
+  if (card.maxed && !dimmed) drawMaxedMark(ctx, scheme, x, y, cardW, cardH, true)
+}
+
+/**
+ * 拼基质主位标题行的词条名：去「提升」后缀后用 \ 连接。
+ *
+ * \ 两侧不留空格，比标准铭牌的「 · 」窄，24px 的标题行才放得下三词条。
+ * 「终结技充能效率」缩短成「充能效率」——七字词条在标题行里太占宽度。
+ */
+function buildMatrixTitle(traits: readonly ExportTrait[]): string {
+  return traits
+    .map((trait) => {
+      const name = shortenTraitName(trait.name)
+      return name === '终结技充能效率' ? '充能效率' : name
+    })
+    .join('\\')
+}
+
+/**
+ * 基质主位：基质图铺满卡片右侧当背景（cover 垂直居中），信息列与星级
+ * 压在图面上方一层。
+ *
+ * 结构与全幅武器同源、主次互换：词条名放大成整卡宽的标题行（带描边），
+ * 武器名降为标题下的一行小字。左侧由上到下是「词条名 → 武器名 → 武器图 →
+ * 方格」，星级在右下角以白色半透明叠加在基质图上。背景是基质图、信息列
+ * 里的图是武器图——与全幅武器正好互换。
+ */
+function drawMatrixCard(
+  ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
+  layout: MatrixCardLayout,
+  card: ExportCard,
+  images: Map<string, HTMLImageElement | null>,
+  x: number,
+  y: number,
+): void {
+  const ink = cardInk(scheme, card.dimmed === true)
+  const dimmed = card.dimmed === true
+  const chamfer = scheme.cardChamfer
+  const cardW = layout.cardWidth
+  const cardH = layout.cardHeight
+
+  // 左侧信息列几何：与卡面同用 CARD_PAD 留边
+  const panelPad = CARD_PAD
+  // 词条名标题：占满整卡宽、放大到 24px 并加描边（与全幅武器的名称同一待遇）
+  const titleMaxWidth = cardW - panelPad * 2
+  const titleFontSize = 24
+  const titleLineH = 30
+  // 武器名：标题下的一行小字，样式沿用标准铭牌底部词条行（muted 色、常规字重）
+  const nameFontSize = 10
+  const nameLineH = 12
+  const lineGap = 3
+  // 紧凑方格与缩小武器图；方格压成 6×6 正方形
+  const iconSize = 40
+  const pipW = 6
+  const pipH = 6
+  const pipGap = 2
+  const pipRowGap = 12
+  // 基质图：铺满右侧 4/5 当背景，cover 铺满整高（图像内容垂直居中）
+  const panelW = 64
+  const artX = x + panelW
+  const artW = cardW - panelW
+
+  ctx.save()
+
+  // 整卡形状裁剪：基质图要贴合右上切角
+  chamferPath(ctx, x, y, cardW, cardH, chamfer)
+  ctx.clip()
+
+  ctx.fillStyle = ink.surface
+  ctx.fillRect(x, y, cardW, cardH)
+
+  const iconImage = card.iconUrl ? (images.get(card.iconUrl) ?? null) : null
+  const bgImage = card.essenceBgUrl ? (images.get(card.essenceBgUrl) ?? null) : null
+  const skillImage = card.skillIconUrl ? (images.get(card.skillIconUrl) ?? null) : null
+
+  // 基质图：底板 + 技能图标叠层，与 drawEssenceIcon 同一套图源，铺满右侧当背景
+  if (bgImage || skillImage) {
+    ctx.globalAlpha = ink.imageAlpha
+    if (dimmed) ctx.filter = 'grayscale(1)'
+    if (bgImage) drawImageCover(ctx, bgImage, artX, y, artW, cardH)
+    if (skillImage) {
+      // 沿用 drawEssenceIcon 的 translate(5%, -5%) 偏移
+      drawImageCover(ctx, skillImage, artX + artW * 0.05, y - cardH * 0.05, artW, cardH)
+    }
+    ctx.filter = 'none'
+    ctx.globalAlpha = 1
+  } else {
+    drawImagePlaceholder(ctx, scheme, artX + (artW - ICON) / 2, y + (cardH - ICON) / 2, ICON)
+  }
+
+  // 未获得：盖一层表面色罩保留剪影、明确退到后景
+  if (dimmed) {
+    ctx.fillStyle = withAlpha(scheme.ink.surface, 0.55)
+    ctx.fillRect(x, y, cardW, cardH)
+  }
+
+  ctx.restore()
+
+  // 卡面边框
+  chamferPath(ctx, x, y, cardW, cardH, chamfer)
+  ctx.strokeStyle = ink.border
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  // 左侧稀有度竖条：武器色是全图唯一的稀有度线索
+  const tierColor = safeColor(card.tierColor)
+  ctx.fillStyle = dimmed ? withAlpha(tierColor, 0.35) : tierColor
+  ctx.fillRect(x, y, 3, cardH)
+
+  // 词条名标题：整卡宽、加描边保证压到基质图上仍可读；未获得只置灰不描边。
+  // 没有词条的条目（自定义基质全空）跳过该行，武器名上移到标题位置
+  const hasTraitTitle = card.traits.length > 0
+  const titleBandH = hasTraitTitle ? titleLineH + lineGap : 0
+  if (hasTraitTitle) {
+    const titleText = fitText(
+      ctx,
+      buildMatrixTitle(card.traits),
+      titleMaxWidth,
+      titleFontSize,
+      10,
+      800,
+    )
+    const titleY = y + panelPad + titleLineH / 2
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    if (!dimmed) {
+      // 描边取与文字相反的明度：亮字用暗描边、暗字用亮描边，任何背景上都留得下轮廓
+      const titleOutline = Color(ink.name).isLight()
+        ? withAlpha('#000000', 0.6)
+        : withAlpha('#ffffff', 0.72)
+      ctx.lineJoin = 'round'
+      ctx.strokeStyle = titleOutline
+      ctx.lineWidth = 4
+      ctx.strokeText(titleText, x + panelPad, titleY)
+      ctx.lineJoin = 'miter'
+    }
+    ctx.fillStyle = ink.name
+    ctx.fillText(titleText, x + panelPad, titleY)
+  }
+
+  // 武器名：标题下方的一行小字，左对齐
+  const nameText = fitText(ctx, card.name, titleMaxWidth, nameFontSize, 9, 400)
+  const nameY = y + panelPad + titleBandH + nameLineH / 2
+  ctx.fillStyle = ink.trait
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(nameText, x + panelPad, nameY)
+
+  // 信息列里的图：武器图；自定义基质没有武器图，退化为基质图
+  const iconY = y + panelPad + titleBandH + nameLineH + lineGap
+  if (card.kind === 'weapon') {
+    drawWeaponIcon(ctx, scheme, iconImage, card, ink, x + panelPad, iconY, iconSize)
+  } else {
+    drawEssenceIcon(
+      ctx,
+      scheme,
+      bgImage,
+      skillImage,
+      ink,
+      safeColor(card.tierColor),
+      dimmed,
+      x + panelPad,
+      iconY,
+      iconSize,
+    )
+  }
+
+  // 方格：紧凑、无计数、左对齐
+  const pipsTop = iconY + iconSize + 8
+  for (const [index, trait] of card.traits.entries()) {
+    drawPipCells(
+      ctx,
+      trait.level,
+      trait.pipCount,
+      dimmed
+        ? withAlpha(scheme.pip.colors[trait.slot] ?? scheme.pip.colors[0]!, 0.32)
+        : (scheme.pip.colors[trait.slot] ?? scheme.pip.colors[0]!),
+      ink.pipIdle,
+      x + panelPad,
+      pipsTop + index * pipRowGap,
+      pipW,
+      pipH,
+      pipGap,
+    )
+  }
+
+  // 角标：叠在武器图右上角
+  if (card.badgeCount && card.badgeCount > 0) {
+    drawBadge(ctx, scheme, card.badgeCount, x + panelPad + iconSize, iconY)
+  }
+
+  // 星级：右下角，暖白半透明水印式叠加在基质图上，细描边保证任何底上可读
+  if (card.nameRuby) {
+    ctx.font = `700 22px ${FONT_STACK}`
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'alphabetic'
+    const starX = x + cardW - CARD_PAD - 6
+    const starY = y + cardH - CARD_PAD - 6
+    ctx.lineJoin = 'round'
+    ctx.strokeStyle = withAlpha('#2f2c27', 0.25)
+    ctx.lineWidth = 2
+    ctx.strokeText(card.nameRuby, starX, starY)
+    ctx.lineJoin = 'miter'
+    ctx.fillStyle = dimmed ? withAlpha('#f7f4ec', 0.4) : withAlpha('#f7f4ec', 0.55)
+    ctx.fillText(card.nameRuby, starX, starY)
+  }
+
+  // 满级框不画左边，避免压住左侧的稀有度竖条
+  if (card.maxed && !dimmed) drawMaxedMark(ctx, scheme, x, y, cardW, cardH, true)
+}
+
+/** 标准铭牌版式：武器 + 基质并排，方格在右，名称居中 */
+export const STANDARD_LAYOUT: MatrixCardLayout = {
+  id: 'standard',
+  name: '标准铭牌',
+  description: '武器与基质并排、方格在右、名称居中，信息密度最高',
+  cardWidth: 260,
+  cardHeight: 144,
+  drawCard: drawStandardCard,
+}
+
+/** 全幅武器版式：武器立绘铺满整卡当背景，适合晒图 */
+export const HERO_LAYOUT: MatrixCardLayout = {
+  id: 'hero',
+  name: '全幅武器',
+  description: '武器立绘铺满整卡当背景，名称/词条名/基质/方格压在图面上',
+  cardWidth: 260,
+  cardHeight: 150,
+  drawCard: drawHeroCard,
+}
+
+/** 基质主位版式：基质图铺满整卡当背景，词条名当整卡宽的标题 */
+export const MATRIX_LAYOUT: MatrixCardLayout = {
+  id: 'matrix',
+  name: '基质主位',
+  description: '基质铺满整卡当背景，词条名标题/武器名/武器图/方格压在图面上',
+  cardWidth: 260,
+  cardHeight: 150,
+  drawCard: drawMatrixCard,
+}
+
+/** 全部卡片版式，按选择器展示顺序排列。第一个是默认版式 */
+export const CARD_LAYOUTS: readonly MatrixCardLayout[] = [
+  STANDARD_LAYOUT,
+  HERO_LAYOUT,
+  MATRIX_LAYOUT,
+]
+
+/**
+ * 按 id 查卡片版式；未知 id 回退到标准铭牌。
+ *
+ * @param id 版式 id。
+ * @returns 匹配的版式；找不到时返回标准铭牌。
+ */
+export function getCardLayout(id: string): MatrixCardLayout {
+  return CARD_LAYOUTS.find((layout) => layout.id === id) ?? STANDARD_LAYOUT
+}
+
+/** 把 input.layout（可能是 id 或版式对象）归一化成版式对象 */
+function resolveLayout(layout?: MatrixCardLayout | string): MatrixCardLayout {
+  if (!layout) return STANDARD_LAYOUT
+  return typeof layout === 'string' ? getCardLayout(layout) : layout
+}
+
+/**
  * 画区标题，返回下一个可用的 y 坐标。
  *
- * 结构与页头同源：黄块起头、中英双行、延伸线收尾、右端计数。
+ * 结构与页头同源：强调色块起头、中英双行、延伸线收尾、右端计数。
  */
 function drawSectionHeader(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
   text: string,
   textEn: string,
   count: number,
@@ -1345,30 +2206,37 @@ function drawSectionHeader(
 ): number {
   const midY = y + SECTION_HEAD_H / 2 + 2
 
-  ctx.fillStyle = INK.yellow
+  ctx.fillStyle = scheme.ink.accent
   ctx.fillRect(x, midY - 7, 4, 14)
 
   ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = INK.text
+  ctx.fillStyle = scheme.ink.text
   ctx.font = `700 14px ${FONT_STACK}`
   const titleWidth = ctx.measureText(text).width
   ctx.fillText(text, x + 12, midY)
 
-  ctx.fillStyle = withAlpha(INK.muted, 0.75)
+  ctx.fillStyle = withAlpha(scheme.ink.muted, 0.75)
   ctx.font = `500 9px ${MONO_STACK}`
   const enX = x + 12 + titleWidth + 10
   const enWidth = drawTracked(ctx, textEn, enX, midY + 1, 1.8)
 
   // 右端计数，先测宽度才能定延伸线的终点
   ctx.textAlign = 'right'
-  ctx.fillStyle = INK.muted
+  ctx.fillStyle = scheme.ink.muted
   ctx.font = `700 10px ${MONO_STACK}`
   const countText = `${count} ITEMS`
   const countWidth = ctx.measureText(countText).width
   ctx.fillText(countText, x + width, midY)
 
-  drawHairline(ctx, INK.line, enX + enWidth + 12, midY - 1, x + width - countWidth - 12, midY - 1)
+  drawHairline(
+    ctx,
+    scheme.ink.line,
+    enX + enWidth + 12,
+    midY - 1,
+    x + width - countWidth - 12,
+    midY - 1,
+  )
 
   return y + SECTION_HEAD_H
 }
@@ -1376,6 +2244,8 @@ function drawSectionHeader(
 /** 画一个网格区，返回下一个可用的 y 坐标 */
 function drawGrid(
   ctx: CanvasRenderingContext2D,
+  scheme: MatrixColorScheme,
+  layout: MatrixCardLayout,
   cards: readonly ExportCard[],
   images: Map<string, HTMLImageElement | null>,
   columns: number,
@@ -1384,17 +2254,25 @@ function drawGrid(
   for (const [index, card] of cards.entries()) {
     const row = Math.floor(index / columns)
     const column = index % columns
-    drawCard(ctx, card, images, PAGE_PAD + column * (CARD_W + GAP), y + row * (CARD_H + GAP))
+    layout.drawCard(
+      ctx,
+      scheme,
+      layout,
+      card,
+      images,
+      PAGE_PAD + column * (layout.cardWidth + GAP),
+      y + row * (layout.cardHeight + GAP),
+    )
   }
 
   const rows = Math.ceil(cards.length / columns)
-  return y + rows * (CARD_H + GAP) - GAP
+  return y + rows * (layout.cardHeight + GAP) - GAP
 }
 
 /**
  * 把宝藏基质卡片渲染成一张导出图。
  *
- * @param input 卡片数据与页头文案。
+ * @param input 卡片数据、页头文案、配色方案与卡片版式。
  * @returns 导出图 Blob（WebP，不支持时回退 PNG）、预览用 object URL 及实际尺寸。
  * @throws 卡片为空、或画布导出失败时抛出。
  */
@@ -1405,8 +2283,10 @@ export async function renderMatrixExport(input: MatrixExportInput): Promise<Matr
     throw new Error('没有可导出的条目')
   }
 
+  const scheme = resolveColorScheme(input.colorScheme)
+  const layout = resolveLayout(input.layout)
   const columns = input.columns ?? pickColumns(allCards.length)
-  const { width, height } = computeCanvasSize(weapons.length, customs.length, columns)
+  const { width, height } = computeCanvasSize(weapons.length, customs.length, columns, layout)
 
   const images = await preloadImages(allCards)
   let missingImages = 0
@@ -1427,16 +2307,17 @@ export async function renderMatrixExport(input: MatrixExportInput): Promise<Matr
   // 缩放一次之后，下面所有布局数学都按 CSS 像素来写
   ctx.scale(scale, scale)
 
-  drawPaper(ctx, width, height)
+  drawPaper(ctx, scheme, width, height)
 
   const gridWidth = width - PAGE_PAD * 2
-  drawHeader(ctx, input, allCards.length, PAGE_PAD, PAGE_PAD, gridWidth)
+  drawHeader(ctx, scheme, input, allCards.length, PAGE_PAD, PAGE_PAD, gridWidth)
 
   let cursorY = PAGE_PAD + HEADER_H
 
   if (weapons.length > 0) {
     cursorY = drawSectionHeader(
       ctx,
+      scheme,
       '内置武器',
       'BUILT-IN WEAPONS',
       weapons.length,
@@ -1444,13 +2325,14 @@ export async function renderMatrixExport(input: MatrixExportInput): Promise<Matr
       cursorY,
       gridWidth,
     )
-    cursorY = drawGrid(ctx, weapons, images, columns, cursorY)
+    cursorY = drawGrid(ctx, scheme, layout, weapons, images, columns, cursorY)
   }
 
   if (customs.length > 0) {
     if (weapons.length > 0) cursorY += SECTION_GAP
     cursorY = drawSectionHeader(
       ctx,
+      scheme,
       '自定义基质',
       'CUSTOM MATRICES',
       customs.length,
@@ -1458,10 +2340,10 @@ export async function renderMatrixExport(input: MatrixExportInput): Promise<Matr
       cursorY,
       gridWidth,
     )
-    cursorY = drawGrid(ctx, customs, images, columns, cursorY)
+    cursorY = drawGrid(ctx, scheme, layout, customs, images, columns, cursorY)
   }
 
-  drawFooter(ctx, allCards.length, PAGE_PAD, cursorY + SECTION_GAP, gridWidth)
+  drawFooter(ctx, scheme, allCards.length, PAGE_PAD, cursorY + SECTION_GAP, gridWidth)
 
   const blob = await canvasToBlob(canvas, EXPORT_MIME, EXPORT_QUALITY)
   return {

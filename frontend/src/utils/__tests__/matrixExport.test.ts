@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { buildArchiveNo, computeCanvasSize, pickColumns, YITULIU_QR } from '@/utils/matrixExport'
+import {
+  buildArchiveNo,
+  CARD_LAYOUTS,
+  COLOR_SCHEMES,
+  computeCanvasSize,
+  getCardLayout,
+  getColorScheme,
+  pickColumns,
+  STANDARD_LAYOUT,
+  YITULIU_QR,
+} from '@/utils/matrixExport'
 
 describe('pickColumns', () => {
   it('条目很少时每张卡各占一列，不留空位', () => {
@@ -26,33 +36,36 @@ describe('pickColumns', () => {
 
 describe('computeCanvasSize', () => {
   it('宽度只由列数决定，与条目数无关', () => {
-    const few = computeCanvasSize(3, 0, 3)
-    const many = computeCanvasSize(30, 0, 3)
+    const few = computeCanvasSize(3, 0, 3, STANDARD_LAYOUT)
+    const many = computeCanvasSize(30, 0, 3, STANDARD_LAYOUT)
     expect(few.width).toBe(many.width)
   })
 
   it('行数按列数向上取整', () => {
-    expect(computeCanvasSize(7, 5, 3)).toMatchObject({ weaponRows: 3, customRows: 2 })
+    expect(computeCanvasSize(7, 5, 3, STANDARD_LAYOUT)).toMatchObject({
+      weaponRows: 3,
+      customRows: 2,
+    })
   })
 
   it('没有自定义基质时不为该区留高度', () => {
-    const withCustom = computeCanvasSize(6, 3, 3)
-    const withoutCustom = computeCanvasSize(6, 0, 3)
+    const withCustom = computeCanvasSize(6, 3, 3, STANDARD_LAYOUT)
+    const withoutCustom = computeCanvasSize(6, 0, 3, STANDARD_LAYOUT)
     expect(withoutCustom.customRows).toBe(0)
     expect(withoutCustom.height).toBeLessThan(withCustom.height)
   })
 
   it('只有自定义基质时不为内置武器区留高度', () => {
-    const onlyCustom = computeCanvasSize(0, 3, 3)
-    const onlyWeapon = computeCanvasSize(3, 0, 3)
+    const onlyCustom = computeCanvasSize(0, 3, 3, STANDARD_LAYOUT)
+    const onlyWeapon = computeCanvasSize(3, 0, 3, STANDARD_LAYOUT)
     expect(onlyCustom.weaponRows).toBe(0)
     // 两区各一行、区标题各一个，缺少区间距的情况下高度应当相等
     expect(onlyCustom.height).toBe(onlyWeapon.height)
   })
 
   it('两区都有时高度比单区多出一个区间距', () => {
-    const both = computeCanvasSize(3, 3, 3)
-    const onlyWeapon = computeCanvasSize(3, 0, 3)
+    const both = computeCanvasSize(3, 3, 3, STANDARD_LAYOUT)
+    const onlyWeapon = computeCanvasSize(3, 0, 3, STANDARD_LAYOUT)
     const oneSectionExtra = both.height - onlyWeapon.height
     // 多出的部分 = 区间距 + 区标题 + 一行卡片
     expect(oneSectionExtra).toBeGreaterThan(0)
@@ -61,9 +74,17 @@ describe('computeCanvasSize', () => {
   })
 
   it('列数为 0 时兜底成 1 列，不产生 Infinity', () => {
-    const size = computeCanvasSize(3, 0, 0)
+    const size = computeCanvasSize(3, 0, 0, STANDARD_LAYOUT)
     expect(Number.isFinite(size.width)).toBe(true)
     expect(size.weaponRows).toBe(3)
+  })
+
+  it('画布高度跟随版式卡片高度，不同尺寸的版式产出不同高度', () => {
+    // 画布高度只由版式的 cardHeight 推导：按「去重后的卡片高度数」断言，
+    // 不依赖各版式高度互不相同，将来有版式共用同一高度时该断言依然成立
+    const distinctCardHeights = new Set(CARD_LAYOUTS.map((layout) => layout.cardHeight)).size
+    const heights = CARD_LAYOUTS.map((layout) => computeCanvasSize(6, 0, 3, layout).height)
+    expect(new Set(heights).size).toBe(distinctCardHeights)
   })
 })
 
@@ -113,5 +134,80 @@ describe('YITULIU_QR', () => {
       .join('')
     expect(timingRow).toBe('101010101')
     expect(timingColumn).toBe('101010101')
+  })
+})
+
+describe('COLOR_SCHEMES', () => {
+  it('方案 id 唯一，且第一个是默认方案', () => {
+    const ids = COLOR_SCHEMES.map((scheme) => scheme.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids[0]).toBe('industrial')
+  })
+
+  it('getColorScheme 按 id 命中，未知 id 回退工业档案', () => {
+    for (const scheme of COLOR_SCHEMES) {
+      expect(getColorScheme(scheme.id).id).toBe(scheme.id)
+    }
+    expect(getColorScheme('no-such-scheme').id).toBe('industrial')
+  })
+
+  it('每个方案都具备完整色板与装饰开关', () => {
+    for (const scheme of COLOR_SCHEMES) {
+      // 主色板 10 个字段全部非空
+      for (const value of Object.values(scheme.ink)) {
+        expect(value).toBeTruthy()
+      }
+      // 未获得色板 3 个字段
+      for (const value of Object.values(scheme.dim)) {
+        expect(value).toBeTruthy()
+      }
+      // 词条三行色各 3 个
+      expect(scheme.pip.colors).toHaveLength(3)
+      for (const value of scheme.pip.colors) {
+        expect(value).toBeTruthy()
+      }
+      // 装饰开关都是布尔，水墨字字符非空
+      const { brushGlyphChar, ...flags } = scheme.decorations
+      for (const flag of Object.values(flags)) {
+        expect(typeof flag).toBe('boolean')
+      }
+      expect(brushGlyphChar).toBeTruthy()
+      // 切角不能是负数
+      expect(scheme.cardChamfer).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('方案之间不是同一套配色，避免选择器形同虚设', () => {
+    const backgrounds = new Set(COLOR_SCHEMES.map((scheme) => scheme.ink.bg))
+    expect(backgrounds.size).toBe(COLOR_SCHEMES.length)
+  })
+})
+
+describe('CARD_LAYOUTS', () => {
+  it('版式 id 唯一，且第一个是默认版式', () => {
+    const ids = CARD_LAYOUTS.map((layout) => layout.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids[0]).toBe('standard')
+  })
+
+  it('getCardLayout 按 id 命中，未知 id 回退标准铭牌', () => {
+    for (const layout of CARD_LAYOUTS) {
+      expect(getCardLayout(layout.id).id).toBe(layout.id)
+    }
+    expect(getCardLayout('no-such-layout').id).toBe('standard')
+  })
+
+  it('每个版式都有正尺寸、说明与可调用的绘制函数', () => {
+    for (const layout of CARD_LAYOUTS) {
+      expect(layout.cardWidth).toBeGreaterThan(0)
+      expect(layout.cardHeight).toBeGreaterThan(0)
+      expect(layout.description).toBeTruthy()
+      expect(typeof layout.drawCard).toBe('function')
+    }
+  })
+
+  it('版式之间卡片尺寸不全相同，避免选择器形同虚设', () => {
+    const heights = new Set(CARD_LAYOUTS.map((layout) => layout.cardHeight))
+    expect(heights.size).toBeGreaterThan(1)
   })
 })

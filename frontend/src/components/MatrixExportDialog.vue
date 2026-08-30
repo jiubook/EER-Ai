@@ -7,6 +7,48 @@
       </v-card-title>
 
       <v-card-text>
+        <!-- 配色方案：单选，切换后整张图的配色与装饰层跟着变 -->
+        <div class="d-flex align-center gap-2 mb-2">
+          <span class="text-body-2 text-medium-emphasis">配色方案：</span>
+          <v-chip-group v-model="selectedColorScheme" column>
+            <v-chip
+              v-for="scheme in COLOR_SCHEMES"
+              :key="scheme.id"
+              color="primary"
+              filter
+              size="small"
+              :title="scheme.description"
+              :value="scheme.id"
+              variant="outlined"
+            >
+              <span
+                class="template-swatch"
+                :style="{ background: scheme.ink.bg, borderColor: scheme.ink.line }"
+              />
+              {{ scheme.name }}
+            </v-chip>
+          </v-chip-group>
+        </div>
+
+        <!-- 卡片版式：单选，切换后卡片内部元素的排布与尺寸跟着变 -->
+        <div class="d-flex align-center gap-2 mb-2">
+          <span class="text-body-2 text-medium-emphasis">卡片版式：</span>
+          <v-chip-group v-model="selectedCardLayout" column>
+            <v-chip
+              v-for="cardLayout in CARD_LAYOUTS"
+              :key="cardLayout.id"
+              color="primary"
+              filter
+              size="small"
+              :title="cardLayout.description"
+              :value="cardLayout.id"
+              variant="outlined"
+            >
+              {{ cardLayout.name }}
+            </v-chip>
+          </v-chip-group>
+        </div>
+
         <!-- 导出范围：与页面顶部的筛选相互独立，避免互相污染 -->
         <div class="d-flex align-center gap-2 mb-2">
           <span class="text-body-2 text-medium-emphasis">导出星级：</span>
@@ -129,7 +171,7 @@
 
 <script lang="ts" setup>
 import type { TreasureMatrixEntry } from '@/composables/useProfiles'
-import type { ExportCard } from '@/utils/matrixExport'
+import type { ExportCard, ExportTrait } from '@/utils/matrixExport'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useCustomStats } from '@/composables/useCustomStats'
 import { useProfiles } from '@/composables/useProfiles'
@@ -144,7 +186,7 @@ import {
   getStatsForWeapon,
   toCustomStatId,
 } from '@/utils/gameData/weapon'
-import { renderMatrixExport, toPngBlob } from '@/utils/matrixExport'
+import { CARD_LAYOUTS, COLOR_SCHEMES, renderMatrixExport, toPngBlob } from '@/utils/matrixExport'
 
 const open = defineModel<boolean>({ default: false })
 
@@ -158,12 +200,14 @@ const { weaponsMap, weaponTypes, matrixIcons } = useStaticData()
 const CUSTOM_RARITY_KEY = 'custom'
 /** 自定义基质卡片的底部色条 */
 const CUSTOM_TIER_COLOR = '#ff7100'
-/** 未获得条目的词条等级：三条全为 0 */
-const UNOWNED_LEVELS = [0, 0, 0] as const
 
 // 自定义基质默认不勾选：批量添加之后配置里可能有几百枚，
 // 默认全画出来会让弹窗一打开就卡住。
 const selectedRarities = ref<string[]>(['3', '4', '5', '6'])
+/** 当前选中的配色方案 id，默认工业档案 */
+const selectedColorScheme = ref<string>(COLOR_SCHEMES[0]!.id)
+/** 当前选中的卡片版式 id，默认标准铭牌 */
+const selectedCardLayout = ref<string>(CARD_LAYOUTS[0]!.id)
 const includeMaxed = ref(true)
 const includeUnowned = ref(true)
 const onlyIncludedInCalculation = ref(false)
@@ -212,31 +256,42 @@ function resolveCustomName(entry: TreasureMatrixEntry): string {
 }
 
 /**
- * 获取武器的三词条中文名。
+ * 取武器的三个词条 statId（属性/附加/技能，语义顺序，缺失为 null）。
  *
  * 自定义基质从配置里读取，内置武器从静态数据读取；
- * 返回 ["攻击", "终结技充能效率", "巧技"] 这样的数组。
+ * 两者都对齐成 [属性, 附加, 技能] 的三元组，缺失词条对应位置为 null。
  */
-function getTraitNames(weaponId: string): string[] {
-  // 自定义基质：从配置中读取
-  if (isCustomEntry(weaponId)) {
-    const found = findCustomStat(weaponId, customStats.value)
-    if (!found) return []
-    const stat = found.stat
-    const parts: string[] = []
-    if (stat.attribute) parts.push(getGemTagName(stat.attribute))
-    if (stat.secondary) parts.push(getGemTagName(stat.secondary))
-    if (stat.skill) parts.push(getGemTagName(stat.skill))
-    return parts
-  }
+function getTraitStatIds(weaponId: string): [string | null, string | null, string | null] {
+  const stat = isCustomEntry(weaponId)
+    ? (findCustomStat(weaponId, customStats.value)?.stat ?? null)
+    : getStatsForWeapon(weaponId)
+  if (!stat) return [null, null, null]
+  return [stat.attribute, stat.secondary, stat.skill]
+}
 
-  // 内置武器：从静态数据读取
-  const stats = getStatsForWeapon(weaponId)
-  const parts: string[] = []
-  if (stats.attribute) parts.push(getGemTagName(stats.attribute))
-  if (stats.secondary) parts.push(getGemTagName(stats.secondary))
-  if (stats.skill) parts.push(getGemTagName(stats.skill))
-  return parts
+/**
+ * 构建导出卡片的词条数组。
+ *
+ * 按语义顺序（属性→附加→技能）只保留真实存在的词条：3★ 武器没有附加词条，
+ * 就只产出属性 + 技能两条。等级与语义槽位对齐——affix1 是属性、affix2 是附加、
+ * affix3 是技能，满级方格数取 AFFIX_MAX_LEVEL 对应位，天然不漏位不错位。
+ */
+function buildTraits(weaponId: string, entry: TreasureMatrixEntry | undefined): ExportTrait[] {
+  const statIds = getTraitStatIds(weaponId)
+  const rawLevels = entry ? [entry.affix1_level, entry.affix2_level, entry.affix3_level] : [0, 0, 0]
+
+  const traits: ExportTrait[] = []
+  for (let slot = 0; slot < 3; slot++) {
+    const statId = statIds[slot]
+    if (!statId) continue
+    traits.push({
+      name: getGemTagName(statId),
+      level: Math.min(rawLevels[slot]!, AFFIX_MAX_LEVEL[slot]!),
+      pipCount: AFFIX_MAX_LEVEL[slot]!,
+      slot,
+    })
+  }
+  return traits
 }
 
 /**
@@ -270,14 +325,6 @@ function passesToggles(entry: TreasureMatrixEntry): boolean {
 /** 是否绘制未获得的条目：「仅导出参与计算」开启时它们本就不参与计算，一律排除 */
 const showUnowned = computed(() => includeUnowned.value && !onlyIncludedInCalculation.value)
 
-function toLevels(entry: TreasureMatrixEntry): [number, number, number] {
-  return [
-    Math.min(entry.affix1_level, AFFIX_MAX_LEVEL[0]),
-    Math.min(entry.affix2_level, AFFIX_MAX_LEVEL[1]),
-    Math.min(entry.affix3_level, AFFIX_MAX_LEVEL[2]),
-  ]
-}
-
 /**
  * weapon_id → 所属武器类型的 sortOrder。
  *
@@ -292,6 +339,17 @@ const weaponTypeOrder = computed(() => {
     }
   }
   return order
+})
+
+/** weapon_id → 武器分类 id（wiki 组 ID），供导出图按分类校正素材重心 */
+const weaponTypeIdByWeapon = computed(() => {
+  const map = new Map<string, string>()
+  for (const weaponType of weaponTypes.value) {
+    for (const weaponId of weaponType.weaponIds) {
+      map.set(weaponId, weaponType.id)
+    }
+  }
+  return map
 })
 
 /**
@@ -326,14 +384,14 @@ const weaponCards = computed<ExportCard[]>(() => {
       name: weapon.name,
       nameRuby: '★'.repeat(weapon.rarity),
       iconUrl: getItemIconUrl(weapon.id) ?? null,
+      weaponTypeId: weaponTypeIdByWeapon.value.get(weapon.id),
       essenceBgUrl: matrixIcons.value.essenceBg,
       skillIconUrl: resolveSkillIconUrl(weapon.id),
       tierColor: getItemTierColor(weapon.id).hex(),
-      levels: entry ? toLevels(entry) : UNOWNED_LEVELS,
+      traits: buildTraits(weapon.id, entry),
       maxed: isWeaponMaxed(weapon.id),
       // 未获得的武器不画角标：扫到的基质还没有落到具体武器上
       badgeCount: entry && showBadges.value ? essenceCounts.value[weapon.id] : undefined,
-      traitNames: getTraitNames(weapon.id),
       dimmed: entry === undefined,
     })
   }
@@ -351,9 +409,8 @@ const ownedCustomCards = computed<ExportCard[]>(() => {
       essenceBgUrl: matrixIcons.value.essenceBg,
       skillIconUrl: resolveSkillIconUrl(entry.weapon_id),
       tierColor: CUSTOM_TIER_COLOR,
-      levels: toLevels(entry),
+      traits: buildTraits(entry.weapon_id, entry),
       maxed: isWeaponMaxed(entry.weapon_id),
-      traitNames: getTraitNames(entry.weapon_id),
     }))
 })
 
@@ -374,9 +431,8 @@ const unownedCustomCards = computed<ExportCard[]>(() => {
       essenceBgUrl: matrixIcons.value.essenceBg,
       skillIconUrl: resolveSkillIconUrl(item.weaponId),
       tierColor: CUSTOM_TIER_COLOR,
-      levels: UNOWNED_LEVELS,
+      traits: buildTraits(item.weaponId, undefined),
       maxed: false,
-      traitNames: getTraitNames(item.weaponId),
       dimmed: true,
     }))
 })
@@ -425,6 +481,8 @@ async function regenerate() {
       title: `${activeProfileName.value} · 宝藏基质`,
       // 条目数由绘制模块自己从卡片数量算，这里只给归档时间
       subtitle: new Date().toLocaleString('zh-CN'),
+      colorScheme: selectedColorScheme.value,
+      layout: selectedCardLayout.value,
     })
 
     // 期间又触发了新一轮渲染，丢弃这次的结果
@@ -530,6 +588,8 @@ watch(open, (opened) => {
 watch(
   [
     selectedRarities,
+    selectedColorScheme,
+    selectedCardLayout,
     includeMaxed,
     includeUnowned,
     onlyIncludedInCalculation,
@@ -549,6 +609,16 @@ onUnmounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.template-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  vertical-align: -2px;
+}
+
 .export-preview {
   display: block;
   width: 100%;
