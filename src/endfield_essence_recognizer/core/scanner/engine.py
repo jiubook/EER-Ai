@@ -325,6 +325,9 @@ class ScannerEngine:
         self._cleanup_records: list[_CleanupRecord] = []
         self._cleanup_designated: dict[str, list[_CleanupRecord]] = {}
         self._cleanup_page_index = 1
+        self._cleanup_flipped_pages = False
+        self._cleanup_corrected_pages: set[int] = set()
+        self._cleanup_max_page = 1
 
         from endfield_essence_recognizer.utils.log import str_properties_and_attrs
 
@@ -388,6 +391,9 @@ class ScannerEngine:
         self._cleanup_records = []
         self._cleanup_designated = {}
         self._cleanup_page_index = 1
+        self._cleanup_flipped_pages = False
+        self._cleanup_corrected_pages = set()
+        self._cleanup_max_page = 1
         self._cleanup_active = (
             user_setting.redundant_cleanup_enabled
             and user_setting.same_type_treasure_limit_enabled
@@ -475,6 +481,19 @@ class ScannerEngine:
                 return records.pop(index)
         return None
 
+    def _cleanup_records_snapshot(self) -> int:
+        """返回当前账本记录数，供翻页过冲检测首行 pass 的回滚使用。"""
+        return len(self._cleanup_records)
+
+    def _cleanup_records_rollback(self, snapshot: int) -> None:
+        """回滚自快照以来新增的账本记录。
+
+        翻页过冲检测时，首行扫到的是上一页的重复基质，其位置记录会随
+        3/4 行校正失效；回滚后这些基质仍由上一页的正确位置记录覆盖。
+        designated 中残留的引用无副作用：判定只遍历 _cleanup_records。
+        """
+        del self._cleanup_records[snapshot:]
+
     def _maybe_run_cleanup(
         self,
         scan_completed_naturally: bool,
@@ -515,8 +534,11 @@ class ScannerEngine:
             return
 
         logger.info(f"冗余清理：发现 {len(redundant)} 枚冗余基质，开始清理。")
+        self._cleanup_max_page = max((record.page for record in redundant), default=1)
         if not self._reset_to_first_page(stop_event):
-            logger.info("冗余清理被中断。")
+            # 放弃原因已由 _reset_to_first_page 记录；停止事件则补一条中断日志
+            if stop_event.is_set():
+                logger.info("冗余清理被中断。")
             return
         current_page = 1
 
@@ -1134,6 +1156,8 @@ class DraggableScannerEngine(ScannerEngine):
             page_count += 1
             logger.info(f"开始扫描第 {page_count} 页基质...")
             self._cleanup_page_index = page_count
+            if page_count > 1:
+                self._cleanup_flipped_pages = True
 
             if is_last_page and page_count > 1:
                 # 最后一页：根据渐进滚动距离计算需要跳过的行数
@@ -1155,11 +1179,17 @@ class DraggableScannerEngine(ScannerEngine):
                     start_row_index=start_row,
                 )
             elif page_count > 1:
-                # 非首页：先扫描第一行（含操作），检测是否全部重复
+                # 非首页：先扫描第一行（含操作），检测是否全部重复。
+                # 冗余清理：过冲检测首行先不入账——若确认过冲并执行 3/4 行
+                # 校正，该 pass 的位置记录作废，回滚账本；该页校正后的网格
+                # 偏移记入 _cleanup_corrected_pages，清理导航时重放校正。
+                cleanup_snapshot = self._cleanup_records_snapshot()
                 all_dup = self._scan_single_row(
                     0, stop_event, user_setting, icon_x_list, icon_y_list
                 )
                 if all_dup and user_setting.fix_page_flip_overscroll:
+                    self._cleanup_records_rollback(cleanup_snapshot)
+                    self._cleanup_corrected_pages.add(page_count)
                     row_height = (
                         icon_y_list[1] - icon_y_list[0] if len(icon_y_list) > 1 else 0
                     )
@@ -1491,9 +1521,14 @@ class DraggableScannerEngine(ScannerEngine):
         """冗余清理：滚动条顶端 16px 上拖，配合顶部亮点检测回到第一页。
 
         拖动距离恒定 16px（不随分辨率缩放，过小可能无法被游戏识别）；
-        起点随分辨率缩放。检测不到亮点时按已在第一页继续（重试耗尽后由
-        回访指纹校验兜底，单页背包可能无滚动条滑块）。
+        起点随分辨率缩放。本轮从未翻页时无需确认（物理上就在第一页）；
+        翻过页但 3 次尝试仍未确认回到顶部时放弃清理——不能按假定页码
+        继续，指纹校验无法区分相同内容的基质。
         """
+        if not self._cleanup_flipped_pages:
+            logger.debug("冗余清理：本轮未翻页，直接按第一页处理。")
+            return True
+
         top = self._profile.SCROLLBAR_TOP_CHECK_POS
         start = Point(top.x, top.y + _SCROLL_TOP_DRAG_PX)
 
@@ -1517,8 +1552,8 @@ class DraggableScannerEngine(ScannerEngine):
                 logger.info(f"冗余清理：已回到第一页（第 {attempt} 次尝试）。")
                 return True
 
-        logger.warning("冗余清理：未检测到滚动条顶部亮点，按已在第一页继续。")
-        return True
+        logger.warning("冗余清理：3 次尝试未确认回到第一页，放弃本次清理。")
+        return False
 
     def _advance_to_page(
         self,
@@ -1530,8 +1565,10 @@ class DraggableScannerEngine(ScannerEngine):
         """冗余清理：从当前页向前翻页到目标页，完全复用扫描时的翻页机件。
 
         与扫描翻页保持同一路径（渐进拖动 + 行末检测 + 暗带对齐），保证
-        回访页的网格行偏移与扫描时一致；提前检测到列表底部时停止翻页
-        （该位置即最后扫描页，目标页记录必然在其上）。
+        回访页的网格行偏移与扫描时一致；到达扫描期执行过过冲校正的页时
+        重放同参数的 3/4 行校正。提前检测到列表底部时，仅当目标页就是
+        最后扫描页（_cleanup_max_page）才视为到达，否则翻页序列已发散，
+        放弃本次清理。
         """
         drag_start = self._profile.DRAG_START_POS
         drag_end = self._profile.DRAG_END_POS
@@ -1561,13 +1598,31 @@ class DraggableScannerEngine(ScannerEngine):
                 row_height=row_height,
             )
             if is_last_page:
-                # 已到底部（最后扫描页）：与扫描时的翻页状态一致，停止翻页
+                # 提前到底：物理位置即最后扫描页，仅当目标页就是它时视为到达
+                if target_page != self._cleanup_max_page:
+                    logger.warning(
+                        f"冗余清理：翻页提前到达列表底部，但目标为第 {target_page} 页"
+                        f"（最后扫描页为第 {self._cleanup_max_page} 页），放弃本次清理。"
+                    )
+                    return False
                 break
             if user_setting.fix_grid_row_offset_after_page_flip:
                 self._align_grid_rows_after_drag(drag_start, icon_x_list, icon_y_list)
             if self._check_scrollbar_at_bottom(scrollbar_pos):
-                logger.debug("冗余清理：翻页后检测到滚动条到底。")
+                # 同提前到底处理：翻页后检测到底部
+                if target_page != self._cleanup_max_page:
+                    logger.warning(
+                        f"冗余清理：翻页后到达列表底部，但目标为第 {target_page} 页"
+                        f"（最后扫描页为第 {self._cleanup_max_page} 页），放弃本次清理。"
+                    )
+                    return False
                 break
+
+        # 重放扫描期对该页执行的过冲校正（3/4 行），保证与记录时的网格布局一致
+        if target_page in self._cleanup_corrected_pages:
+            if row_height > 0:
+                self._correct_overscroll(drag_start, round(row_height * 3 / 4))
+                logger.debug(f"冗余清理：回放第 {target_page} 页的过冲校正。")
         return True
 
     def _progressive_drag(

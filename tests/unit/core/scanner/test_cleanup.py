@@ -102,7 +102,10 @@ class MockWindowActions:
 @pytest.fixture
 def mock_scanner_context():
     ui_scene_recognizer = MagicMock(spec=TemplateRecognizer)
-    ui_scene_recognizer.recognize_roi_fallback.return_value = (UISceneLabel.ESSENCE_UI, 1.0)
+    ui_scene_recognizer.recognize_roi_fallback.return_value = (
+        UISceneLabel.ESSENCE_UI,
+        1.0,
+    )
 
     attr_recognizer = MagicMock(spec=TemplateRecognizer)
     attr_recognizer.recognize_roi.return_value = ("atk", 0.9)
@@ -208,7 +211,9 @@ class TestRecordCleanupClaim:
     def test_new_slot_appends_designated(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         data = make_data([4, 4, 2])
         engine._record_cleanup_claim(
             ClaimResult(claim_kind=ClaimKind.NEW_SLOT, owner_key="wpn_A"),
@@ -229,7 +234,9 @@ class TestRecordCleanupClaim:
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
         """识别位置顺序不等于语义顺序时，记录等级必须归一化为（属性, 副属性, 技能）。"""
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         data = EssenceData(
             stats=["C", "A", "B"],
             stat_types=[StatType.SKILL, StatType.ATTRIBUTE, StatType.SECONDARY],
@@ -250,7 +257,9 @@ class TestRecordCleanupClaim:
     def test_upgrade_releases_previous_holder(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         engine._record_cleanup_claim(
             ClaimResult(claim_kind=ClaimKind.NEW_SLOT, owner_key="wpn_A"),
             make_data([4, 4, 2]),
@@ -280,7 +289,9 @@ class TestRecordCleanupClaim:
     def test_cascade_transfers_released_record(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         engine._record_cleanup_claim(
             ClaimResult(claim_kind=ClaimKind.NEW_SLOT, owner_key="wpn_A"),
             make_data([4, 4, 2]),
@@ -312,7 +323,9 @@ class TestRecordCleanupClaim:
     def test_skip_existing_and_count_only_stay_designated(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         engine._record_cleanup_claim(
             ClaimResult(claim_kind=ClaimKind.SKIP_EXISTING, owner_key="wpn_A"),
             make_data([6, 6, 3]),
@@ -332,7 +345,9 @@ class TestRecordCleanupClaim:
     def test_none_kind_is_ignored(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         engine._record_cleanup_claim(
             ClaimResult(claim_kind=ClaimKind.NONE),
             make_data([4, 4, 2]),
@@ -343,6 +358,57 @@ class TestRecordCleanupClaim:
         assert engine._cleanup_records == []
         assert engine._cleanup_designated == {}
 
+    def test_records_rollback_truncates_since_snapshot(
+        self, mock_scanner_context, mock_user_setting_manager, mock_profile
+    ):
+        """过冲检测首行 pass 的记录可整体回滚，不再参与冗余判定。"""
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
+        engine._record_cleanup_claim(
+            ClaimResult(claim_kind=ClaimKind.NEW_SLOT, owner_key="wpn_A"),
+            make_data([4, 4, 2]),
+            page=1,
+            row=0,
+            col=0,
+        )
+        snapshot = engine._cleanup_records_snapshot()
+        engine._record_cleanup_claim(
+            ClaimResult(claim_kind=ClaimKind.NEW_SLOT, owner_key="wpn_B"),
+            make_data([6, 6, 3]),
+            page=1,
+            row=1,
+            col=0,
+        )
+        assert len(engine._cleanup_records) == 2
+
+        engine._cleanup_records_rollback(snapshot)
+
+        assert len(engine._cleanup_records) == 1
+        assert engine._cleanup_records[0].owner == "wpn_A"
+        # 被回滚的记录不再参与判定（判定只遍历 _cleanup_records）
+        kept_ids = {id(r) for rs in engine._cleanup_designated.values() for r in rs}
+        redundant = [r for r in engine._cleanup_records if id(r) not in kept_ids]
+        assert redundant == []
+
+    def test_init_cleanup_state_resets_navigation_state(
+        self, mock_scanner_context, mock_user_setting_manager, mock_profile
+    ):
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
+        engine._cleanup_flipped_pages = True
+        engine._cleanup_corrected_pages = {2}
+        engine._cleanup_max_page = 5
+
+        setting = UserSetting()
+        setting.redundant_cleanup_enabled = True
+        engine._init_cleanup_state(setting)
+
+        assert engine._cleanup_flipped_pages is False
+        assert engine._cleanup_corrected_pages == set()
+        assert engine._cleanup_max_page == 1
+
 
 # ── 触发模式 ──
 
@@ -351,7 +417,9 @@ class TestMaybeRunCleanup:
     def test_scan_complete_trigger_skips_manual_stop(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         engine._run_cleanup = MagicMock()
         stop_event = threading.Event()
         stop_event.set()
@@ -366,7 +434,9 @@ class TestMaybeRunCleanup:
     def test_always_trigger_clears_stop_event_and_runs(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         engine._run_cleanup = MagicMock()
         stop_event = threading.Event()
         stop_event.set()
@@ -381,7 +451,9 @@ class TestMaybeRunCleanup:
     def test_natural_completion_runs_with_scan_complete_trigger(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         engine._run_cleanup = MagicMock()
         stop_event = threading.Event()
 
@@ -395,7 +467,9 @@ class TestMaybeRunCleanup:
     def test_inactive_cleanup_never_runs(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         engine._cleanup_active = False
         engine._run_cleanup = MagicMock()
         engine._maybe_run_cleanup(True, threading.Event(), UserSetting())
@@ -409,7 +483,9 @@ class TestRunCleanup:
     def test_judges_redundant_and_visits_by_page(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         kept = make_record(1, 0, 0, (6, 5, 3), "wpn_A")
         redundant_p1 = make_record(1, 1, 0, (4, 4, 2), "wpn_A")
         redundant_p3 = make_record(3, 2, 1, (3, 3, 1), "wpn_A")
@@ -428,7 +504,9 @@ class TestRunCleanup:
     def test_no_redundant_logs_and_skips_navigation(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         kept = make_record(1, 0, 0, (6, 5, 3), "wpn_A")
         engine._cleanup_records = [kept]
         engine._cleanup_designated = {"wpn_A": [kept]}
@@ -441,7 +519,9 @@ class TestRunCleanup:
     def test_page_mismatch_aborts_cleanup(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         redundant_p1 = make_record(1, 0, 0, (4, 4, 2), "wpn_A")
         redundant_p2 = make_record(2, 0, 0, (3, 3, 1), "wpn_A")
         engine._cleanup_records = [redundant_p1, redundant_p2]
@@ -466,7 +546,9 @@ class TestVisitCleanupRecords:
     def test_matching_record_deprecates_by_redundant_action(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         fingerprint = self._recognized_fingerprint(engine)
         record = make_record(1, 0, 0, (4, 4, 2), "wpn_A", fingerprint=fingerprint)
 
@@ -485,7 +567,9 @@ class TestVisitCleanupRecords:
     def test_matching_record_unlocks_when_locked(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         mock_scanner_context.lock_status_recognizer.recognize_roi_fallback.return_value = (
             LockStatusLabel.LOCKED,
             0.9,
@@ -507,7 +591,9 @@ class TestVisitCleanupRecords:
     def test_fingerprint_mismatch_page_returns_page_mismatch(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         record = make_record(1, 0, 0, (4, 4, 2), "wpn_A", fingerprint="不匹配的指纹")
 
         outcome = engine._visit_cleanup_records(
@@ -521,7 +607,9 @@ class TestVisitCleanupRecords:
     def test_stop_event_aborts(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
-        engine = build_engine(mock_scanner_context, mock_user_setting_manager, mock_profile)
+        engine = build_engine(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
         stop_event = threading.Event()
         stop_event.set()
         record = make_record(1, 0, 0, (4, 4, 2), "wpn_A")
@@ -536,7 +624,9 @@ class TestVisitCleanupRecords:
 
 
 class TestDraggableNavigation:
-    def build_draggable(self, mock_scanner_context, mock_user_setting_manager, mock_profile):
+    def build_draggable(
+        self, mock_scanner_context, mock_user_setting_manager, mock_profile
+    ):
         engine = DraggableScannerEngine(
             ctx=mock_scanner_context,
             image_source=MockImageSource(),
@@ -554,29 +644,46 @@ class TestDraggableNavigation:
         engine = self.build_draggable(
             mock_scanner_context, mock_user_setting_manager, mock_profile
         )
-        # 顶部亮点一直检测不到 → 走满 3 次拖动手势后按已回顶继续
+        # 翻过页且顶部亮点一直检测不到 → 走满 3 次拖动手势后放弃清理
+        engine._cleanup_flipped_pages = True
         engine._check_scrollbar_at_top = MagicMock(return_value=False)
 
         result = engine._reset_to_first_page(threading.Event())
 
-        assert result is True
+        assert result is False
         assert len(engine._window_actions.drag_calls) == 3
         # 拖动距离恒定 16px：起点 top+16 → 终点 top
         start_x, start_y, end_x, end_y, *_ = engine._window_actions.drag_calls[0]
         assert (start_x, start_y) == (1453, 146)
         assert (end_x, end_y) == (1453, 130)
 
-    def test_reset_to_first_page_skips_drag_when_already_at_top(
+    def test_reset_to_first_page_succeeds_when_top_confirmed(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
         mock_profile.SCROLLBAR_TOP_CHECK_POS = Point(1453, 130)
         engine = self.build_draggable(
             mock_scanner_context, mock_user_setting_manager, mock_profile
         )
+        engine._cleanup_flipped_pages = True
         engine._check_scrollbar_at_top = MagicMock(return_value=True)
 
         assert engine._reset_to_first_page(threading.Event()) is True
         assert engine._window_actions.drag_calls == []
+
+    def test_reset_to_first_page_skips_check_when_never_flipped(
+        self, mock_scanner_context, mock_user_setting_manager, mock_profile
+    ):
+        """本轮从未翻页时物理上就在第一页，无需顶部检测。"""
+        mock_profile.SCROLLBAR_TOP_CHECK_POS = Point(1453, 130)
+        engine = self.build_draggable(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
+        engine._cleanup_flipped_pages = False
+        engine._check_scrollbar_at_top = MagicMock(return_value=False)
+
+        assert engine._reset_to_first_page(threading.Event()) is True
+        assert engine._window_actions.drag_calls == []
+        engine._check_scrollbar_at_top.assert_not_called()
 
     def test_advance_to_page_flips_difference(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
@@ -601,7 +708,7 @@ class TestDraggableNavigation:
         assert engine._progressive_drag.call_count == 2
         assert engine._align_grid_rows_after_drag.call_count == 2
 
-    def test_advance_to_page_stops_at_bottom(
+    def test_advance_to_page_stops_at_bottom_when_target_is_last_scanned(
         self, mock_scanner_context, mock_user_setting_manager, mock_profile
     ):
         mock_profile.DRAG_START_POS = Point(750, 870)
@@ -610,6 +717,7 @@ class TestDraggableNavigation:
         engine = self.build_draggable(
             mock_scanner_context, mock_user_setting_manager, mock_profile
         )
+        engine._cleanup_max_page = 4
         engine._progressive_drag = MagicMock(return_value=(600, True))
         engine._align_grid_rows_after_drag = MagicMock()
 
@@ -619,6 +727,94 @@ class TestDraggableNavigation:
         # 检测到到底后不再翻页、不再对齐
         assert engine._progressive_drag.call_count == 1
         assert engine._align_grid_rows_after_drag.call_count == 0
+
+    def test_advance_to_page_aborts_when_bottom_reached_before_target(
+        self, mock_scanner_context, mock_user_setting_manager, mock_profile
+    ):
+        """提前到达底部但目标页不是最后扫描页 → 翻页序列发散，放弃清理。"""
+        mock_profile.DRAG_START_POS = Point(750, 870)
+        mock_profile.DRAG_END_POS = Point(750, 50)
+        mock_profile.SCROLLBAR_CHECK_POS = Point(1453, 950)
+        engine = self.build_draggable(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
+        engine._cleanup_max_page = 5
+        engine._progressive_drag = MagicMock(return_value=(600, True))
+        engine._align_grid_rows_after_drag = MagicMock()
+
+        result = engine._advance_to_page(1, 3, threading.Event(), UserSetting())
+
+        assert result is False
+        assert engine._progressive_drag.call_count == 1
+        assert engine._align_grid_rows_after_drag.call_count == 0
+
+    def test_advance_to_page_aborts_on_post_flip_bottom_before_target(
+        self, mock_scanner_context, mock_user_setting_manager, mock_profile
+    ):
+        """翻页后检测到底部但目标页不是最后扫描页 → 放弃清理。"""
+        mock_profile.DRAG_START_POS = Point(750, 870)
+        mock_profile.DRAG_END_POS = Point(750, 50)
+        mock_profile.SCROLLBAR_CHECK_POS = Point(1453, 950)
+        engine = self.build_draggable(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
+        engine._cleanup_max_page = 5
+        engine._progressive_drag = MagicMock(return_value=(820, False))
+        engine._align_grid_rows_after_drag = MagicMock()
+        engine._check_scrollbar_at_bottom = MagicMock(return_value=True)
+
+        result = engine._advance_to_page(1, 3, threading.Event(), UserSetting())
+
+        assert result is False
+        assert engine._progressive_drag.call_count == 1
+
+    def test_advance_to_page_replays_overscroll_correction(
+        self, mock_scanner_context, mock_user_setting_manager, mock_profile
+    ):
+        """扫描期做过过冲校正的页，清理导航到达后重放同参数的 3/4 行校正。"""
+        mock_profile.DRAG_START_POS = Point(750, 870)
+        mock_profile.DRAG_END_POS = Point(750, 50)
+        mock_profile.SCROLLBAR_CHECK_POS = Point(1453, 950)
+        mock_profile.essence_icon_y_list = [196, 351]
+        engine = self.build_draggable(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
+        engine._cleanup_max_page = 3
+        engine._cleanup_corrected_pages = {2}
+        engine._progressive_drag = MagicMock(return_value=(820, False))
+        engine._align_grid_rows_after_drag = MagicMock()
+        engine._check_scrollbar_at_bottom = MagicMock(return_value=False)
+        engine._correct_overscroll = MagicMock()
+
+        result = engine._advance_to_page(1, 2, threading.Event(), UserSetting())
+
+        assert result is True
+        row_height = 351 - 196
+        engine._correct_overscroll.assert_called_once_with(
+            Point(750, 870), round(row_height * 3 / 4)
+        )
+
+    def test_advance_to_page_skips_correction_for_other_pages(
+        self, mock_scanner_context, mock_user_setting_manager, mock_profile
+    ):
+        mock_profile.DRAG_START_POS = Point(750, 870)
+        mock_profile.DRAG_END_POS = Point(750, 50)
+        mock_profile.SCROLLBAR_CHECK_POS = Point(1453, 950)
+        mock_profile.essence_icon_y_list = [196, 351]
+        engine = self.build_draggable(
+            mock_scanner_context, mock_user_setting_manager, mock_profile
+        )
+        engine._cleanup_max_page = 3
+        engine._cleanup_corrected_pages = {2}
+        engine._progressive_drag = MagicMock(return_value=(820, False))
+        engine._align_grid_rows_after_drag = MagicMock()
+        engine._check_scrollbar_at_bottom = MagicMock(return_value=False)
+        engine._correct_overscroll = MagicMock()
+
+        result = engine._advance_to_page(1, 3, threading.Event(), UserSetting())
+
+        assert result is True
+        engine._correct_overscroll.assert_not_called()
 
 
 # ── claimer 路径标注 ──
