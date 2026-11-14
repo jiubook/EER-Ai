@@ -118,7 +118,26 @@ def test_update_treasure_matrix_targets_named_profile(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["name"] == "imported"
+    body = response.json()
+    assert body["name"] == "imported"
+    # 断言条目真的写进去了：只查账号名的话，路由把 entries 丢掉也能过
+    assert body["treasure_matrix"] == [
+        {
+            "weapon_id": "wpn_001",
+            "weapon_name": "W1",
+            "affix1_level": 4,
+            "affix2_level": 2,
+            "affix3_level": 1,
+            "include_in_calculation": True,
+            "priority": 0,
+        }
+    ]
+    stored = client.get("/api/profiles").json()["profiles"]["imported"]
+    assert [
+        (entry["weapon_id"], entry["affix1_level"])
+        for entry in stored["treasure_matrix"]
+    ] == [("wpn_001", 4)]
+    # 激活账号既没被切换，也没被写入
     active = client.get("/api/profiles/active").json()
     assert active["name"] == "default"
     assert active["treasure_matrix"] == []
@@ -147,7 +166,9 @@ def test_create_profile_does_not_switch_active(client):
 
 def test_create_duplicate_profile_returns_400(client):
     """重复新建同名账号返回 400。"""
-    client.post("/api/profiles/create", json={"name": "backup"})
+    first = client.post("/api/profiles/create", json={"name": "backup"})
+    # 先确认第一次真的建成了：否则「接口对所有请求都返回 400」也能让下面通过
+    assert first.status_code == 200
 
     response = client.post("/api/profiles/create", json={"name": "backup"})
 

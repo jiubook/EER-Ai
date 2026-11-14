@@ -410,7 +410,10 @@ describe('useProfiles', () => {
 
     await createProfile('backup')
 
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/profiles/create')
+    // 断言请求体：mock 返回值是固定的，只查 URL 的话名字传错也能过
+    expect(JSON.parse(String(init.body))).toEqual({ name: 'backup' })
     expect(collection.value.profiles.backup?.name).toBe('backup')
     expect(collection.value.active_profile).toBe('default')
   })
