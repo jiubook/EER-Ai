@@ -26,13 +26,21 @@
           {{ parseError }}
         </v-alert>
 
+        <v-alert v-if="emptyNotice" border="start" type="warning" variant="tonal">
+          文件里没有可导入的条目（全部被跳过或本来就为空）。
+          <template v-if="mode === 'replace' && plan && plan.removed.length > 0">
+            当前是替换模式，仍然可以用它清空该账号的 {{ plan.removed.length }} 条配置。
+          </template>
+        </v-alert>
+
         <template v-if="plan">
-          <!-- 目标账号：不替用户决定，显式选 -->
+          <!-- 目标账号：不替用户决定，显式选；导入过程中冻结，避免中途改目标 -->
           <div class="text-body-2 text-medium-emphasis mb-1">导入到哪个账号？</div>
           <v-select
             v-model="target"
             class="mb-2"
             density="compact"
+            :disabled="importing"
             :items="targetOptions"
             variant="outlined"
           />
@@ -41,13 +49,20 @@
             v-model="newProfileName"
             class="mb-2"
             density="compact"
+            :disabled="importing"
             hide-details="auto"
             label="新账号名称（最长 32 字符）"
             variant="outlined"
           />
 
           <div class="text-body-2 text-medium-emphasis mb-1">导入方式</div>
-          <v-radio-group v-model="mode" class="mb-2" density="compact" hide-details>
+          <v-radio-group
+            v-model="mode"
+            class="mb-2"
+            density="compact"
+            :disabled="importing"
+            hide-details
+          >
             <v-radio value="merge">
               <template #label> 合并：按武器覆盖，<strong>文件外的条目保留</strong> </template>
             </v-radio>
@@ -165,7 +180,12 @@ import { useProfiles } from '@/composables/useProfiles'
 import { useToast } from '@/composables/useToast'
 import { useStaticData } from '@/utils/gameData/staticData'
 import { fallbackCustomStatName, toCustomStatId } from '@/utils/gameData/weapon'
-import { buildImportPlan, entriesToBackupJson, parseImportText } from '@/utils/matrixImportTable'
+import {
+  buildImportPlan,
+  canApplyPlan,
+  entriesToBackupJson,
+  parseImportText,
+} from '@/utils/matrixImportTable'
 
 const open = defineModel<boolean>({ default: false })
 
@@ -175,6 +195,7 @@ const {
   profileNames,
   activeProfileName,
   createProfile,
+  deleteProfile,
   switchProfile,
   updateTreasureMatrix,
 } = useProfiles()
@@ -185,6 +206,8 @@ const { weaponsMap } = useStaticData()
 const NEW_PROFILE = '__new__'
 /** 跳过明细最多展示这么多条，避免几百条时把弹窗撑爆 */
 const MAX_VISIBLE_SKIPS = 20
+/** 导入文件体积上限：几百条基质也就几十 KB，超限基本是选错文件 */
+const MAX_IMPORT_BYTES = 8 * 1024 * 1024
 
 const SKIP_LABELS: Record<ImportSkipReason, string> = {
   invalid_row: '缺少武器ID或等级',
@@ -198,6 +221,8 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const fileName = ref('')
 const parsed = ref<ParsedImport | null>(null)
 const parseError = ref('')
+/** 文件能解析但没有可导入的行：不是错误，替换模式下仍然可以提交 */
+const emptyNotice = ref(false)
 const target = ref<string>(activeProfileName.value)
 const newProfileName = ref('')
 const mode = ref<ImportMode>('merge')
@@ -205,6 +230,8 @@ const showConfirm = ref(false)
 const showSwitchPrompt = ref(false)
 const importing = ref(false)
 const importedTarget = ref('')
+/** 每次选文件递增；读取完成后只接受最新一次选择的结果 */
+let fileReadToken = 0
 
 /** 内置武器：weapon_id → 当前静态数据里的显示名 */
 const builtinNames = computed(() => {
@@ -246,6 +273,17 @@ const existingEntries = computed<TreasureMatrixEntry[]>(() => {
   return collection.value.profiles[target.value]?.treasure_matrix ?? []
 })
 
+/**
+ * 目标账号的独立优先级偏好。
+ *
+ * 它覆盖「没配基质但手设过优先级」的武器，是矩阵条目 priority 的权威来源；
+ * 传给规划器后，导入才不会把这类偏好按 0 写回。
+ */
+const targetPriorities = computed<Record<string, number>>(() => {
+  if (target.value === NEW_PROFILE) return {}
+  return collection.value.profiles[target.value]?.weapon_priorities ?? {}
+})
+
 const plan = computed(() => {
   const result = parsed.value
   if (!result) return null
@@ -255,6 +293,7 @@ const plan = computed(() => {
     existing: existingEntries.value,
     builtinNames: builtinNames.value,
     customNames: customNames.value,
+    weaponPriorities: targetPriorities.value,
     mode: mode.value,
   })
 })
@@ -275,9 +314,8 @@ const skipSummary = computed(() => {
 const canImport = computed(() => {
   const currentPlan = plan.value
   if (!currentPlan || importing.value) return false
-  if (currentPlan.added.length + currentPlan.updated.length === 0) return false
   if (targetProfileName.value === '') return false
-  return true
+  return canApplyPlan(currentPlan, mode.value)
 })
 
 function pickFile() {
@@ -291,16 +329,24 @@ async function onFileChange(event: Event) {
   input.value = ''
   if (!file) return
 
+  // 连选两个文件时以最后一次为准：读到一半被后来者顶掉的结果必须丢弃
+  const token = ++fileReadToken
   fileName.value = file.name
   parseError.value = ''
+  emptyNotice.value = false
   try {
+    if (file.size > MAX_IMPORT_BYTES) {
+      throw new Error(
+        `文件超过 ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)} MB，请先裁剪到只保留需要导入的行`,
+      )
+    }
     const text = await file.text()
+    if (token !== fileReadToken) return
     const result = parseImportText(text)
     parsed.value = result
-    if (result.rows.length === 0) {
-      parseError.value = '文件里没有可导入的条目：全部被跳过或本来就为空'
-    }
+    emptyNotice.value = result.rows.length === 0
   } catch (error) {
+    if (token !== fileReadToken) return
     parsed.value = null
     parseError.value = error instanceof Error ? error.message : String(error)
   }
@@ -340,8 +386,14 @@ async function confirmImport() {
 
   showConfirm.value = false
   importing.value = true
+  // 目标与模式在等待备份期间可能被改动（备份请求在途时控件还没禁用），
+  // 整个导入必须用同一份快照，否则会建错账号或漏建账号。
   const name = targetProfileName.value
+  const creatingNewProfile = target.value === NEW_PROFILE
+  const entries = currentPlan.entries
+  const written = currentPlan.added.length + currentPlan.updated.length
   let backupFileName = ''
+  let profileCreated = false
   try {
     if (existingEntries.value.length > 0) {
       try {
@@ -352,13 +404,13 @@ async function confirmImport() {
       }
     }
 
-    if (target.value === NEW_PROFILE) {
+    if (creatingNewProfile) {
       await createProfile(name)
+      profileCreated = true
     }
-    await updateTreasureMatrix(currentPlan.entries, name)
+    await updateTreasureMatrix(entries, name)
 
     importedTarget.value = name
-    const written = currentPlan.added.length + currentPlan.updated.length
     toast.success(
       backupFileName
         ? `已导入 ${written} 条到「${name}」，原配置备份为 ${backupFileName}`
@@ -368,6 +420,15 @@ async function confirmImport() {
     // 目标是当前账号就不用问；导入到别的账号则交给用户决定要不要切过去
     if (name !== activeProfileName.value) showSwitchPrompt.value = true
   } catch (error) {
+    // 账号已经建出来但矩阵没写进去时撤掉它：否则会留下空账号，
+    // 用户重试还会撞上「账号已存在」
+    if (profileCreated) {
+      try {
+        await deleteProfile(name)
+      } catch {
+        // 回滚失败不改变主错误：原始失败信息仍是用户最需要看到的
+      }
+    }
     toast.reportError('导入宝藏基质失败', error)
   } finally {
     importing.value = false
@@ -385,6 +446,7 @@ watch(open, (opened) => {
   fileName.value = ''
   parsed.value = null
   parseError.value = ''
+  emptyNotice.value = false
   target.value = activeProfileName.value
   newProfileName.value = ''
   mode.value = 'merge'

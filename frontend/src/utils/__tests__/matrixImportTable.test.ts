@@ -1,6 +1,11 @@
 import type { TreasureMatrixEntry } from '@/composables/useProfiles'
 import { describe, expect, it } from 'vitest'
-import { buildImportPlan, entriesToBackupJson, parseImportText } from '@/utils/matrixImportTable'
+import {
+  buildImportPlan,
+  canApplyPlan,
+  entriesToBackupJson,
+  parseImportText,
+} from '@/utils/matrixImportTable'
 
 const BUILTIN = new Map([
   ['wpn_sword_0001', '入门剑'],
@@ -111,6 +116,32 @@ describe('parseImportText - CSV', () => {
     expect(skipped[0]!.reason).toBe('invalid_row')
   })
 
+  it('优先级超出 0–9 时按未设置处理，不写进账号', () => {
+    const text = [CSV_HEADER, csvRow({ id: 'wpn_funnel_0009', priority: '42' })].join('\n')
+
+    const { rows } = parseImportText(text)
+
+    expect(rows[0]!.priority).toBeNull()
+  })
+
+  it('跳过行的行号按文件物理行计算', () => {
+    // 第 3 行是空行，第 5~6 行是一个带换行的引号字段：记录下标推不出这些行号
+    const text = [
+      '武器ID,名称,属性等级',
+      'wpn_funnel_0009,领航者,4',
+      '',
+      'wpn_sword_0001,入门剑,7',
+      'wpn_sword_0001,"带',
+      '换行的名字",3',
+      ',没有ID,4',
+    ].join('\n')
+
+    const { skipped } = parseImportText(text)
+
+    expect(skipped.map((item) => item.lineNumber)).toEqual([4, 7])
+    expect(skipped.map((item) => item.reason)).toEqual(['invalid_level', 'invalid_row'])
+  })
+
   it('缺武器ID列时整批拒绝', () => {
     expect(() => parseImportText('名称,属性等级\n领航者,4')).toThrow(/武器ID/)
   })
@@ -205,6 +236,7 @@ describe('buildImportPlan', () => {
     builtinNames: BUILTIN,
     customNames: CUSTOM,
     existing: [] as TreasureMatrixEntry[],
+    weaponPriorities: {} as Record<string, number>,
   }
 
   it('合并模式按 weapon_id 覆盖，文件外的条目保持原样', () => {
@@ -245,7 +277,7 @@ describe('buildImportPlan', () => {
     ])
   })
 
-  it('文件没写优先级时沿用现有值，写 0 时按 0 处理', () => {
+  it('文件没写优先级时沿用现有值', () => {
     const missing = parseImportText(['武器ID,属性等级', 'wpn_sword_0001,4'].join('\n'))
     const planMissing = buildImportPlan({
       ...base,
@@ -254,6 +286,10 @@ describe('buildImportPlan', () => {
       mode: 'merge',
     })
 
+    expect(planMissing.entries[0]!.priority).toBe(8)
+  })
+
+  it('文件里写 0 也不清除优先级：0 在导出里表示未设置', () => {
     const explicit = parseImportText(
       [CSV_HEADER, csvRow({ id: 'wpn_sword_0001', priority: '0' })].join('\n'),
     )
@@ -264,8 +300,73 @@ describe('buildImportPlan', () => {
       mode: 'merge',
     })
 
-    expect(planMissing.entries[0]!.priority).toBe(8)
-    expect(planExplicit.entries[0]!.priority).toBe(0)
+    expect(planExplicit.entries[0]!.priority).toBe(8)
+  })
+
+  it('未拥有基质、只存了优先级的武器导入时保留该优先级', () => {
+    // 回归：此前只在矩阵条目里找优先级，未拥有基质的武器导入后会被按 0 写回，
+    // 连带 weapon_priorities 里的用户偏好一起被后端清掉。
+    const parsed = parseImportText(
+      [CSV_HEADER, csvRow({ id: 'wpn_sword_0001', priority: '0' })].join('\n'),
+    )
+
+    const plan = buildImportPlan({
+      ...base,
+      ...parsed,
+      existing: [],
+      weaponPriorities: { wpn_sword_0001: 7 },
+      mode: 'merge',
+    })
+
+    expect(plan.entries[0]!.priority).toBe(7)
+  })
+
+  it('文件里显式写了优先级时以文件为准', () => {
+    const parsed = parseImportText(
+      [CSV_HEADER, csvRow({ id: 'wpn_sword_0001', priority: '3' })].join('\n'),
+    )
+
+    const plan = buildImportPlan({
+      ...base,
+      ...parsed,
+      existing: [],
+      weaponPriorities: { wpn_sword_0001: 7 },
+      mode: 'merge',
+    })
+
+    expect(plan.entries[0]!.priority).toBe(3)
+  })
+
+  it('文件缺某个等级列时保留原条目的等级，不用 1 覆盖', () => {
+    // 回归：此前缺列一律落成 1，会把已有进度洗掉
+    const parsed = parseImportText(['武器ID,属性等级', 'wpn_funnel_0009,5'].join('\n'))
+
+    const plan = buildImportPlan({
+      ...base,
+      ...parsed,
+      existing: [
+        entry({ weapon_id: 'wpn_funnel_0009', affix1_level: 2, affix2_level: 6, affix3_level: 3 }),
+      ],
+      mode: 'merge',
+    })
+
+    expect(plan.entries[0]).toMatchObject({
+      affix1_level: 5,
+      affix2_level: 6,
+      affix3_level: 3,
+    })
+  })
+
+  it('新武器缺列时仍按默认 1 补齐', () => {
+    const parsed = parseImportText(['武器ID,属性等级', 'wpn_sword_0001,4'].join('\n'))
+
+    const plan = buildImportPlan({ ...base, ...parsed, existing: [], mode: 'merge' })
+
+    expect(plan.entries[0]).toMatchObject({
+      affix1_level: 4,
+      affix2_level: 1,
+      affix3_level: 1,
+    })
   })
 
   it('替换模式以文件为准，并统计将删除的条目', () => {
@@ -322,6 +423,33 @@ describe('buildImportPlan', () => {
 
     expect(plan.entries).toHaveLength(1)
     expect(plan.entries[0]!.affix1_level).toBe(5)
+  })
+})
+
+describe('canApplyPlan', () => {
+  const emptyPlan = {
+    entries: [] as TreasureMatrixEntry[],
+    added: [] as TreasureMatrixEntry[],
+    updated: [] as TreasureMatrixEntry[],
+    removed: [] as TreasureMatrixEntry[],
+    skipped: [],
+  }
+
+  it('合并模式下空计划不可提交', () => {
+    expect(canApplyPlan(emptyPlan, 'merge')).toBe(false)
+  })
+
+  it('替换模式下会删条目时即使文件为空也可提交（用于清空/恢复空白配置）', () => {
+    expect(canApplyPlan({ ...emptyPlan, removed: [entry()] }, 'replace')).toBe(true)
+  })
+
+  it('替换模式下文件与现有配置都为空时不可提交', () => {
+    expect(canApplyPlan(emptyPlan, 'replace')).toBe(false)
+  })
+
+  it('有新增或更新时可提交', () => {
+    expect(canApplyPlan({ ...emptyPlan, added: [entry()] }, 'merge')).toBe(true)
+    expect(canApplyPlan({ ...emptyPlan, updated: [entry()] }, 'replace')).toBe(true)
   })
 })
 

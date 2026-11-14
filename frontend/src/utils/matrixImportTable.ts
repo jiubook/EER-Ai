@@ -16,6 +16,9 @@ import type { TreasureMatrixEntry } from '@/composables/useProfiles'
 /** 各槽位满级，与后端 schemas/profile.py 的 le 约束一致 */
 const MAX_LEVELS = [6, 6, 3] as const
 
+/** 优先级上限，与 `/api/profiles/weapon_priority` 的 le=9 一致 */
+const MAX_PRIORITY = 9
+
 /** 自定义基质在矩阵里的 weapon_id 前缀，与后端 CUSTOM_ID_PREFIX 一致 */
 const CUSTOM_ID_PREFIX = 'custom:'
 
@@ -79,6 +82,13 @@ export interface ImportPlanInput {
   builtinNames: ReadonlyMap<string, string>
   /** 本机存在的自定义基质：带 custom: 前缀的 weapon_id → 显示名 */
   customNames: ReadonlyMap<string, string>
+  /**
+   * 目标账号的独立优先级偏好（含未拥有基质的武器）。
+   *
+   * `treasure_matrix` 里的 priority 只是这份偏好的投影，覆盖不到「没配基质
+   * 但手设过优先级」的武器；缺了它就可能在导入时把这类偏好清零。
+   */
+  weaponPriorities: Readonly<Record<string, number>>
   mode: ImportMode
 }
 
@@ -100,17 +110,28 @@ function stripBom(text: string): string {
   return text.replace(/^\uFEFF/, '')
 }
 
+/** 一条 CSV 记录：单元格 + 它在文件里的**物理**起始行号（1 起） */
+interface CsvRecord {
+  cells: string[]
+  line: number
+}
+
 /**
- * 切分 CSV 为二维单元格。
+ * 切分 CSV 为记录列表。
  *
  * 只实现导入需要的最小集：双引号包裹、"" 转义、CRLF/LF 行尾、字段内换行。
  * 不引第三方 CSV 依赖——只为读回自己导出的文件，不值得为它增加一个依赖。
+ *
+ * 行号按物理行统计（引号内的换行也计数），跳过问题的报告才能对得上用户
+ * 在编辑器里看到的行号；按记录下标推算会在有空白行或字段内换行时错位。
  */
-function splitCsvRows(text: string): string[][] {
-  const rows: string[][] = []
-  let row: string[] = []
+function splitCsvRecords(text: string): CsvRecord[] {
+  const records: CsvRecord[] = []
+  let cells: string[] = []
   let cell = ''
   let quoted = false
+  let currentLine = 1
+  let recordLine = 1
 
   for (let index = 0; index < text.length; index++) {
     const char = text[index]!
@@ -123,6 +144,7 @@ function splitCsvRows(text: string): string[][] {
           quoted = false
         }
       } else {
+        if (char === '\n') currentLine++
         cell += char
       }
       continue
@@ -132,26 +154,28 @@ function splitCsvRows(text: string): string[][] {
       continue
     }
     if (char === ',') {
-      row.push(cell)
+      cells.push(cell)
       cell = ''
       continue
     }
     if (char === '\r') continue
     if (char === '\n') {
-      row.push(cell)
-      rows.push(row)
-      row = []
+      cells.push(cell)
+      records.push({ cells, line: recordLine })
+      cells = []
       cell = ''
+      currentLine++
+      recordLine = currentLine
       continue
     }
     cell += char
   }
 
-  if (cell !== '' || row.length > 0) {
-    row.push(cell)
-    rows.push(row)
+  if (cell !== '' || cells.length > 0) {
+    cells.push(cell)
+    records.push({ cells, line: recordLine })
   }
-  return rows
+  return records
 }
 
 /** 「是/否」表头的布尔解析；空值表示文件没写 */
@@ -172,11 +196,18 @@ function parseLevel(raw: string | undefined, maxLevel: number): number | null | 
   return value < 1 || value > maxLevel ? 'invalid' : value
 }
 
-/** 优先级解析：非法值按「未设置」处理，不值得因此丢掉整行等级数据 */
+/**
+ * 优先级解析：非法值按「未设置」处理，不值得因此丢掉整行等级数据。
+ *
+ * 上限 9 与 `/api/profiles/weapon_priority` 的 le=9 和界面上的优先级控件
+ * 对齐：超过 9 的值无法在界面上修改，只会在交换判定里造成反直觉的排序，
+ * 因此按「未设置」处理而不是原样写入。
+ */
 function parsePriority(raw: string | undefined): number | null {
   const text = (raw ?? '').trim()
   if (!/^\d+$/.test(text)) return null
-  return Number(text)
+  const value = Number(text)
+  return value > MAX_PRIORITY ? null : value
 }
 
 /** 按表头名定位列，缺列时返回 undefined——列顺序变了也不会错位 */
@@ -190,9 +221,13 @@ function cellAt(cells: readonly string[], index: number | undefined): string | u
 }
 
 function parseCsv(text: string): ParsedImport {
-  const rows = splitCsvRows(text).filter((cells) => cells.some((cell) => cell.trim() !== ''))
-  const header = rows.shift()
-  if (!header) return { rows: [], skipped: [] }
+  // 空白行不参与解析，但仍占物理行：行号必须来自记录本身而不是过滤后的下标
+  const records = splitCsvRecords(text).filter((record) =>
+    record.cells.some((cell) => cell.trim() !== ''),
+  )
+  const headerRecord = records.shift()
+  if (!headerRecord) return { rows: [], skipped: [] }
+  const header = headerRecord.cells
 
   const weaponIdColumn = columnIndex(header, HEADER_WEAPON_ID)
   if (weaponIdColumn === undefined) {
@@ -207,9 +242,7 @@ function parseCsv(text: string): ParsedImport {
 
   const parsed: ParsedImport = { rows: [], skipped: [] }
 
-  for (const [rowIndex, cells] of rows.entries()) {
-    // 表头占第 1 行，数据行从第 2 行起
-    const lineNumber = rowIndex + 2
+  for (const { cells, line: lineNumber } of records) {
     const weaponId = (cellAt(cells, weaponIdColumn) ?? '').trim()
     if (!weaponId) {
       parsed.skipped.push({ lineNumber, weaponId: '', reason: 'invalid_row' })
@@ -376,8 +409,13 @@ export function parseImportText(text: string): ParsedImport {
 /**
  * 合并解析结果与现有配置，算出最终要提交的整表。
  *
- * 文件里没写的字段（参与计算、优先级）沿用现有条目，避免用一份旧文件把
- * 用户手设的优先级洗成 0；文件里写了 0 就按 0 处理——那正是导出时的状态。
+ * 缺省值一律「沿用目标账号现值，再退回默认值」：
+ * - 等级：文件缺该槽位时保留原条目的等级，不能拿 1 覆盖已有进度；
+ * - 参与计算：文件没写时沿用原值；
+ * - 优先级：文件没写**或写 0** 时都沿用目标账号现值。0 在导出里表示
+ *   「未设置」，若把它当成「清零」指令，导入一份旧文件就会把用户手设的
+ *   优先级连同「未拥有但设过优先级」的独立偏好一起抹掉。代价是导入无法
+ *   清除优先级，但优先级可以在界面上单独改，不值得为一个低频操作牺牲安全。
  */
 export function buildImportPlan(input: ImportPlanInput): ImportPlan {
   const existingById = new Map(input.existing.map((entry) => [entry.weapon_id, entry] as const))
@@ -397,14 +435,18 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
     }
 
     const previous = existingById.get(row.weaponId)
+    // 目标账号的独立优先级偏好：矩阵里没有该武器时它只存在于 weapon_priorities
+    const savedPriority = input.weaponPriorities[row.weaponId]
+    const explicitPriority = row.priority !== null && row.priority > 0 ? row.priority : null
+
     incoming.set(row.weaponId, {
       weapon_id: row.weaponId,
       weapon_name: name,
-      affix1_level: row.levels[0] ?? 1,
-      affix2_level: row.levels[1] ?? 1,
-      affix3_level: row.levels[2] ?? 1,
+      affix1_level: row.levels[0] ?? previous?.affix1_level ?? 1,
+      affix2_level: row.levels[1] ?? previous?.affix2_level ?? 1,
+      affix3_level: row.levels[2] ?? previous?.affix3_level ?? 1,
       include_in_calculation: row.includeInCalculation ?? previous?.include_in_calculation ?? true,
-      priority: row.priority ?? previous?.priority ?? 0,
+      priority: explicitPriority ?? previous?.priority ?? savedPriority ?? 0,
     })
   }
 
@@ -426,6 +468,17 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
     removed: input.existing.filter((entry) => !keptIds.has(entry.weapon_id)),
     skipped,
   }
+}
+
+/**
+ * 这份导入计划是否值得提交。
+ *
+ * 合并模式下空文件等于什么都没做，应禁用；替换模式下只要会删掉现有条目
+ * 就仍然有意义——用一份空文件清空账号，正是「恢复空白配置」的正常路径。
+ */
+export function canApplyPlan(plan: ImportPlan, mode: ImportMode): boolean {
+  if (plan.added.length + plan.updated.length > 0) return true
+  return mode === 'replace' && plan.removed.length > 0
 }
 
 /**
