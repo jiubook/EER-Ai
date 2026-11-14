@@ -94,3 +94,61 @@ def test_update_matrix_planner_farming_locations_empty_body(client):
     response = client.post("/api/profiles/matrix_planner_farming_locations", json={})
     assert response.status_code == 200
     assert response.json()["matrix_planner_farming_locations"] == {}
+
+
+def test_update_treasure_matrix_targets_named_profile(client):
+    """导入落盘路径：带 profile_name 时写入目标账号且不切换激活账号。"""
+    client.post("/api/profiles/switch", json={"name": "imported"})
+    client.post("/api/profiles/switch", json={"name": "default"})
+
+    response = client.post(
+        "/api/profiles/treasure_matrix",
+        json={
+            "profile_name": "imported",
+            "entries": [
+                {
+                    "weapon_id": "wpn_001",
+                    "weapon_name": "W1",
+                    "affix1_level": 4,
+                    "affix2_level": 2,
+                    "affix3_level": 1,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "imported"
+    active = client.get("/api/profiles/active").json()
+    assert active["name"] == "default"
+    assert active["treasure_matrix"] == []
+
+
+def test_update_treasure_matrix_unknown_profile_returns_400(client):
+    """目标账号不存在时返回 400，而不是把数据写进当前账号。"""
+    response = client.post(
+        "/api/profiles/treasure_matrix",
+        json={"profile_name": "ghost", "entries": []},
+    )
+
+    assert response.status_code == 400
+    assert client.get("/api/profiles/active").json()["name"] == "default"
+
+
+def test_create_profile_does_not_switch_active(client):
+    """新建账号接口只建不切，激活账号保持不变。"""
+    response = client.post("/api/profiles/create", json={"name": "backup"})
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "backup"
+    assert client.get("/api/profiles/active").json()["name"] == "default"
+    assert "backup" in client.get("/api/profiles").json()["profiles"]
+
+
+def test_create_duplicate_profile_returns_400(client):
+    """重复新建同名账号返回 400。"""
+    client.post("/api/profiles/create", json={"name": "backup"})
+
+    response = client.post("/api/profiles/create", json={"name": "backup"})
+
+    assert response.status_code == 400

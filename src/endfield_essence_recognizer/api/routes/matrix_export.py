@@ -206,7 +206,10 @@ async def export_treasure_matrix_table(
             # 否则中文按系统默认编码打开是乱码。JSON 不加，避免解析器把 BOM 当非法字符。
             content = f"\ufeff{content}"
 
-        file_name = _export_file_name(manager.get_active_profile_name(), request.format)
+        # 文件名主干由调用方指定时同样要走清洗，前端无法把路径带进来
+        file_name = _export_file_name(
+            request.file_stem or manager.get_active_profile_name(), request.format
+        )
         save_path = exports_dir / file_name
         await asyncio.to_thread(exports_dir.mkdir, parents=True, exist_ok=True)
         # newline="" 关闭换行符转换：CSV 已用 CRLF 分行，默认转换会把它写成 CRCRLF

@@ -51,6 +51,11 @@ class TreasureMatrixTableExportRequest(BaseModel):
         max_length=MAX_TABLE_CONTENT_CHARS,
         description="已序列化好的表格文本（UTF-8，不含 BOM）",
     )
+    file_stem: str | None = Field(
+        default=None,
+        max_length=64,
+        description="文件名主干，会做非法字符清洗；省略时用当前激活账号名",
+    )
     open_folder: bool = Field(
         default=True,
         description="保存成功后是否打开文件所在文件夹",

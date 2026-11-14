@@ -50,12 +50,20 @@ def mock_open_directory():
 
 
 def _post_table(
-    client: TestClient, file_format: str, content: str, open_folder: bool = False
+    client: TestClient,
+    file_format: str,
+    content: str,
+    open_folder: bool = False,
+    file_stem: str | None = None,
 ):
-    return client.post(
-        _TABLE_EXPORT_PATH,
-        json={"format": file_format, "content": content, "open_folder": open_folder},
-    )
+    body: dict[str, object] = {
+        "format": file_format,
+        "content": content,
+        "open_folder": open_folder,
+    }
+    if file_stem is not None:
+        body["file_stem"] = file_stem
+    return client.post(_TABLE_EXPORT_PATH, json=body)
 
 
 def test_export_csv_writes_bom_and_keeps_crlf(client, mock_open_directory, tmp_path):
@@ -124,6 +132,23 @@ def test_export_sanitizes_profile_name(
     assert "/" not in data["file_name"]
     assert "\\" not in data["file_name"]
     assert ":" not in data["file_name"]
+    assert (tmp_path / "exports" / data["file_name"]).exists()
+
+
+def test_export_uses_custom_file_stem(
+    client, mock_open_directory, mock_profile_manager, tmp_path
+):
+    """导入前快照要写目标账号名；指定主干时同样要走非法字符清洗。"""
+    data = _post_table(
+        client, "json", JSON_CONTENT, file_stem="账号A/..\\导入前备份"
+    ).json()
+
+    assert data["success"] is True
+    assert data["file_name"].startswith("账号A_.._导入前备份_")
+    assert "/" not in data["file_name"]
+    assert "\\" not in data["file_name"]
+    # 指定主干时就不该再用激活账号名
+    mock_profile_manager.get_active_profile_name.assert_not_called()
     assert (tmp_path / "exports" / data["file_name"]).exists()
 
 
