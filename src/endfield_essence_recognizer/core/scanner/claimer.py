@@ -471,7 +471,11 @@ class ClaimContext:
         keep_best: bool,
         static_game_data: StaticGameData | None,
     ) -> ClaimResult:
-        """数量上限关闭：单武器认领，相同等级命中已由 _claim_identical_level 处理。"""
+        """数量上限关闭：单武器认领。
+
+        相同等级命中通常已由 `_claim_identical_level` 处理；存量跳过名额耗尽且
+        组内无空槽的未决情况会回落到这里，按「每把武器一枚记录」分散分配。
+        """
         group_stat_key = _group_stat_key(matched_weapon_ids, static_game_data)
 
         for i, weapon_id in enumerate(weapon_ids):
@@ -553,7 +557,11 @@ class ClaimContext:
         exhausted_policy: Literal["trash", "keep"],
         static_game_data: StaticGameData | None,
     ) -> ClaimResult:
-        """数量上限开启：按武器逐个尝试认领（相同等级已由 _claim_identical_level 处理）。"""
+        """数量上限开启：按武器逐个尝试认领。
+
+        相同等级命中通常已由 `_claim_identical_level` 处理；存量跳过名额耗尽、
+        组内无空槽且无剩余配额时会回落到这里，先由留大弃小替换更低记录再判上限。
+        """
         rejected_by_worse_level = False
 
         for i, weapon_id in enumerate(weapon_ids):
@@ -700,7 +708,13 @@ class ClaimContext:
         mode: KeepBestMode,
         stat_types: list[StatType | None] | None,
     ) -> dict[str, LevelTuple]:
-        """级联：将释放的旧等级分配给剩余武器。返回实际级联的武器等级映射。"""
+        """级联：把释放的旧等级分配给剩余武器，并登记为本轮已认领。
+
+        登记后该武器再被替换时，这份等级可以继续级联给下一把武器。
+
+        Returns:
+            实际级联的武器等级映射。
+        """
         result: dict[str, LevelTuple] = {}
         for wid in remaining_ids:
             if self.treasure_counts.get(wid, 0) >= limit:
@@ -713,6 +727,8 @@ class ClaimContext:
                 continue
             self.best_levels[wid] = freed_levels
             self.treasure_counts[wid] = self.treasure_counts.get(wid, 0) + 1
+            # 级联接手的等级同样来自本轮扫到的物理副本，再次被替换时应可继续级联
+            self.claimed_this_scan.add((wid, freed_levels))
             result[wid] = freed_levels
             logger.debug(
                 f"[级联] 武器 {self._display(wid)} 认领释放的等级 {freed_levels}"

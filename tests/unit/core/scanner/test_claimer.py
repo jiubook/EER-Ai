@@ -463,6 +463,7 @@ class TestClaimIdenticalLevel:
             static_game_data=mock_static_game_data,
         )
         assert second.reject_reason is None
+        assert second.claim_kind == ClaimKind.COUNT_ONLY
         assert ctx.best_levels["wpn_b"] == (4, 4, 2)
         assert ctx.best_levels["wpn_a"] == (6, 6, 3)
         # 仅计数（保留不落盘）：wpn_a 计数 1→2
@@ -867,6 +868,84 @@ class TestClaimIdenticalLevel:
         assert upgraded.cascade_updated == {"wpn_b": (5, 5, 3)}
         assert ctx.best_levels["wpn_b"] == (5, 5, 3)
         assert ctx.treasure_counts["wpn_b"] == 1
+
+    def test_cascaded_level_cascades_onward(
+        self, mock_static_game_data, default_settings, default_essence_data
+    ):
+        """级联接手的等级再次被替换时，应继续级联给下一把武器（级联可多跳）。"""
+        from endfield_essence_recognizer.schemas.profile import TreasureMatrixEntry
+
+        default_settings.same_type_treasure_limit_enabled = False
+
+        entries = [
+            TreasureMatrixEntry(
+                weapon_id="wpn_a",
+                weapon_name="a",
+                affix1_level=5,
+                affix2_level=5,
+                affix3_level=3,
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_b",
+                weapon_name="b",
+                affix1_level=3,
+                affix2_level=3,
+                affix3_level=3,
+            ),
+            TreasureMatrixEntry(
+                weapon_id="wpn_c",
+                weapon_name="c",
+                affix1_level=2,
+                affix2_level=2,
+                affix3_level=2,
+            ),
+        ]
+        ctx = self._make_context_with_profile(
+            entries, default_settings, mock_static_game_data
+        )
+        mock_static_game_data.find_weapons_by_stats.return_value = [
+            "wpn_a",
+            "wpn_b",
+            "wpn_c",
+        ]
+
+        # ① 重扫 wpn_a 的存量副本，使其旧等级可参与级联
+        default_essence_data.levels = [5, 5, 3]
+        low_classification = classify_essence(
+            default_essence_data, default_settings, mock_static_game_data
+        )
+        skipped = ctx.claim(
+            low_classification,
+            default_essence_data,
+            default_settings,
+            static_game_data=mock_static_game_data,
+        )
+        assert skipped.claim_kind == ClaimKind.SKIP_EXISTING
+
+        # ② wpn_a 升级，(5,5,3) 级联给 wpn_b
+        default_essence_data.levels = [6, 6, 3]
+        high_classification = classify_essence(
+            default_essence_data, default_settings, mock_static_game_data
+        )
+        first_upgrade = ctx.claim(
+            high_classification,
+            default_essence_data,
+            default_settings,
+            static_game_data=mock_static_game_data,
+        )
+        assert first_upgrade.accepted_weapon_id == "wpn_a"
+        assert first_upgrade.cascade_updated == {"wpn_b": (5, 5, 3)}
+
+        # ③ wpn_b 再被替换，(5,5,3) 应继续级联给 wpn_c
+        second_upgrade = ctx.claim(
+            high_classification,
+            default_essence_data,
+            default_settings,
+            static_game_data=mock_static_game_data,
+        )
+        assert second_upgrade.accepted_weapon_id == "wpn_b"
+        assert second_upgrade.cascade_updated == {"wpn_c": (5, 5, 3)}
+        assert ctx.best_levels["wpn_c"] == (5, 5, 3)
 
     def test_limit_off_count_only_syncs_existing_best(
         self, mock_static_game_data, default_settings
