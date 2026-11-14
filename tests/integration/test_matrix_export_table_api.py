@@ -1,11 +1,13 @@
 """宝藏基质表格导出接口（CSV / JSON）的落盘回归测试。"""
 
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pydantic
 import pytest
 from fastapi.testclient import TestClient
 
+from endfield_essence_recognizer.api.routes import matrix_export
 from endfield_essence_recognizer.api.routes.profiles import get_profile_manager
 from endfield_essence_recognizer.dependencies import get_exports_dir_dep
 from endfield_essence_recognizer.schemas.matrix_export import (
@@ -20,6 +22,14 @@ _TABLE_EXPORT_PATH = "/api/export/treasure_matrix/table"
 CSV_CONTENT = "武器ID,名称\r\nwpn_funnel_0009,领航者\r\n"
 
 JSON_CONTENT = '{\n  "count": 0,\n  "items": []\n}\n'
+
+
+class _FrozenDatetime(datetime):
+    """时间戳固定在同一秒，用来稳定复现「同秒两次导出」。"""
+
+    @classmethod
+    def now(cls, tz=None):  # type: ignore[override]
+        return cls(2026, 2, 6, 12, 0, 0)
 
 
 @pytest.fixture
@@ -150,6 +160,27 @@ def test_export_uses_custom_file_stem(
     # 指定主干时就不该再用激活账号名
     mock_profile_manager.get_active_profile_name.assert_not_called()
     assert (tmp_path / "exports" / data["file_name"]).exists()
+
+
+def test_repeated_export_same_second_does_not_overwrite(
+    client, mock_open_directory, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    """同一秒内连续导出两次必须落成两个文件。
+
+    回归：时间戳只到秒，此前第二次导出会静默覆盖第一次——连点两次保存、
+    或「导入前备份」与正常导出撞在同一秒时，用户会失去回滚依据。
+    """
+    monkeypatch.setattr(matrix_export, "datetime", _FrozenDatetime)
+
+    first = _post_table(client, "json", JSON_CONTENT).json()
+    second = _post_table(client, "json", JSON_CONTENT).json()
+
+    assert first["success"] is True
+    assert second["success"] is True
+    assert first["file_name"] != second["file_name"]
+    assert second["file_name"] == first["file_name"].replace(".json", "-2.json")
+    assert (tmp_path / "exports" / first["file_name"]).exists()
+    assert (tmp_path / "exports" / second["file_name"]).exists()
 
 
 def test_export_skips_open_folder_when_disabled(client, mock_open_directory):

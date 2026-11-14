@@ -39,6 +39,10 @@ _MAX_EXPORT_BYTES = 32 * 1024 * 1024
 # Windows 文件名非法字符与控制字符
 _ILLEGAL_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
+# 同一秒内同名文件的后缀上限。到上限说明导出目录里堆了上百个同秒文件，
+# 此时报错比继续覆盖已有文件更安全。
+_MAX_SAME_SECOND_EXPORTS = 100
+
 
 def _resolve_extension(raw: bytes) -> str:
     """
@@ -96,22 +100,63 @@ async def _open_directory(directory: Path) -> None:
         await asyncio.create_subprocess_exec("xdg-open", str(directory))
 
 
-def _export_file_name(profile_name: str, extension: str) -> str:
+def _export_file_name(stem_source: str, extension: str, suffix: int = 1) -> str:
     """
-    拼导出文件名：账号名清洗后加时间戳。
+    拼导出文件名：账号名清洗后加时间戳，必要时追加序号。
 
-    文件名完全由后端拼接，多次导出天然不覆盖；前端不参与命名，杜绝路径穿越。
+    文件名完全由后端拼接，前端不参与命名，杜绝路径穿越。
     扩展名由调用方从白名单里选定，不接受任意输入。
 
     Args:
-        profile_name: 当前激活的账号名称。
+        stem_source: 文件名主干的来源（账号名或调用方指定的主干），会先清洗。
         extension: 不含点号的文件扩展名。
+        suffix: 同一秒内的第几个文件；1 表示不追加序号。
 
     Returns:
         不含目录的文件名。
     """
-    stem = _safe_file_stem(profile_name)
-    return f"{stem}_{datetime.now():%Y%m%d-%H%M%S}.{extension}"
+    stem = _safe_file_stem(stem_source)
+    timestamp = f"{datetime.now():%Y%m%d-%H%M%S}"
+    if suffix <= 1:
+        return f"{stem}_{timestamp}.{extension}"
+    return f"{stem}_{timestamp}-{suffix}.{extension}"
+
+
+def _write_new_export_file(
+    exports_dir: Path, stem_source: str, extension: str, payload: bytes
+) -> Path:
+    """
+    以独占方式创建导出文件，返回实际路径。
+
+    时间戳只到秒：同一账号同一秒导出两次（连点两次保存，或图片与表格交替
+    导出）会撞出同一个路径。这里用 `open(..., "xb")` 独占创建，撞名就换下
+    一个序号，保证已有文件——尤其是导入前备份——不会被悄悄覆盖。
+
+    直接写字节而不是 `write_text`：CSV 已经带 BOM 且用 CRLF 分行，
+    字节写入不会经过任何换行符转换。
+
+    Args:
+        exports_dir: 导出目录，不存在时会创建。
+        stem_source: 文件名主干来源。
+        extension: 不含点号的文件扩展名。
+        payload: 要写入的字节。
+
+    Returns:
+        实际写入的文件路径。
+
+    Raises:
+        ValueError: 同一秒内的同名文件超过上限。
+    """
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    for suffix in range(1, _MAX_SAME_SECOND_EXPORTS + 1):
+        path = exports_dir / _export_file_name(stem_source, extension, suffix)
+        try:
+            with path.open("xb") as handle:
+                handle.write(payload)
+        except FileExistsError:
+            continue
+        return path
+    raise ValueError("导出目录里同名文件过多，请先清理导出目录")
 
 
 async def _open_export_folder(exports_dir: Path, open_folder: bool) -> str | None:
@@ -159,12 +204,16 @@ async def export_treasure_matrix(
         if len(raw) > _MAX_EXPORT_BYTES:
             raise ValueError(f"图片体积超过上限（{len(raw) / 1024 / 1024:.1f} MB）")
 
-        # 文件名完全由后端拼接：账号名清洗后加时间戳，多次导出天然不覆盖，
-        # 前端不参与命名，杜绝路径穿越。
-        file_name = _export_file_name(manager.get_active_profile_name(), extension)
-        save_path = exports_dir / file_name
-        await asyncio.to_thread(exports_dir.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(save_path.write_bytes, raw)
+        # 文件名与独占创建都在 _write_new_export_file 里：账号名清洗后加时间戳，
+        # 同秒撞名自动追加序号，不会覆盖已有导出或导入前备份。
+        save_path = await asyncio.to_thread(
+            _write_new_export_file,
+            exports_dir,
+            manager.get_active_profile_name(),
+            extension,
+            raw,
+        )
+        file_name = save_path.name
         logger.info(f"已保存宝藏基质导出图片：{save_path}")
 
         message = "导出图片已保存。"
@@ -206,16 +255,16 @@ async def export_treasure_matrix_table(
             # 否则中文按系统默认编码打开是乱码。JSON 不加，避免解析器把 BOM 当非法字符。
             content = f"\ufeff{content}"
 
-        # 文件名主干由调用方指定时同样要走清洗，前端无法把路径带进来
-        file_name = _export_file_name(
-            request.file_stem or manager.get_active_profile_name(), request.format
+        # 文件名主干由调用方指定时同样要走清洗，前端无法把路径带进来。
+        # 写字节而不是 write_text：CSV 已用 CRLF 分行，不能再经过换行符转换。
+        save_path = await asyncio.to_thread(
+            _write_new_export_file,
+            exports_dir,
+            request.file_stem or manager.get_active_profile_name(),
+            request.format,
+            content.encode("utf-8"),
         )
-        save_path = exports_dir / file_name
-        await asyncio.to_thread(exports_dir.mkdir, parents=True, exist_ok=True)
-        # newline="" 关闭换行符转换：CSV 已用 CRLF 分行，默认转换会把它写成 CRCRLF
-        await asyncio.to_thread(
-            save_path.write_text, content, encoding="utf-8", newline=""
-        )
+        file_name = save_path.name
         logger.info(f"已保存宝藏基质导出表格：{save_path}")
 
         message = "导出表格已保存。"
