@@ -109,21 +109,38 @@ function escapeCsvCell(value: string): string {
   return `"${value.replaceAll('"', '""')}"`
 }
 
+/** 会被表格软件当成公式求值的起始字符 */
+const FORMULA_PREFIX = /^[=+\-@\t\r]/
+
+/**
+ * 中和表格公式注入。
+ *
+ * 自定义基质名是用户可编辑的自由文本，形如 `=cmd|...` 的名字在 Excel/WPS
+ * 里会被当公式执行，而 CSV 的引号只解决「字段怎么切分」，挡不住它。按表格
+ * 软件的约定在最前面加一个单引号，单元格就按纯文本显示。
+ *
+ * 只作用于文本列（武器ID / 名称 / 类型 / 词条名）：数值列由本模块自己生成，
+ * 不可能是公式。导入侧只用武器ID 与等级列，所以加前缀不影响往返。
+ */
+function neutralizeFormula(value: string): string {
+  return FORMULA_PREFIX.test(value) ? `'${value}` : value
+}
+
 /** 把一行展开成与 CSV_HEADERS 等长的单元格数组 */
 function buildCsvCells(row: ExportTableRow): string[] {
   const traitCells = TRAIT_SLOTS.flatMap((slot) => {
     const trait = traitAtSlot(row, slot)
     return [
-      trait?.name ?? '',
+      neutralizeFormula(trait?.name ?? ''),
       trait ? String(trait.level) : '',
       trait ? String(trait.maxLevel) : '',
     ]
   })
 
   return [
-    row.weaponId,
-    row.name,
-    row.weaponTypeName,
+    neutralizeFormula(row.weaponId),
+    neutralizeFormula(row.name),
+    neutralizeFormula(row.weaponTypeName),
     formatOptionalNumber(row.rarity),
     row.source === 'custom' ? '自定义' : '内置',
     formatFlag(row.owned),

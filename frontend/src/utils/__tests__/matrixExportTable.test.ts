@@ -126,6 +126,22 @@ describe('exportRowsToCsv', () => {
 
     expect(csv).toContain('"带,逗号""和引号\n换行"')
   })
+
+  it('以公式前缀开头的名称被中和，不会在表格软件里被求值', () => {
+    const csv = exportRowsToCsv([weaponRow({ name: "=cmd|'/C calc'!A0", weaponTypeName: '-危险' })])
+    const cells = csv.split('\r\n')[1]!.split(',')
+
+    expect(cells[1]).toBe("'=cmd|'/C calc'!A0")
+    expect(cells[2]).toBe("'-危险")
+  })
+
+  it('数值列不受公式中和影响', () => {
+    const cells = exportRowsToCsv([weaponRow({ priority: 3 })])
+      .split('\r\n')[1]!
+      .split(',')
+
+    expect(cells[17]).toBe('3')
+  })
 })
 
 describe('exportRowsToJson', () => {
