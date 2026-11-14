@@ -230,11 +230,11 @@
           <v-btn
             class="mt-2 ml-2"
             color="secondary"
-            prepend-icon="mdi-image-outline"
+            prepend-icon="mdi-export-variant"
             variant="tonal"
             @click="showExportDialog = true"
           >
-            导出为图片
+            导出
           </v-btn>
         </v-expansion-panel-text>
       </v-expansion-panel>

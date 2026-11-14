@@ -55,12 +55,12 @@
         </v-btn>
         <v-btn
           color="secondary"
-          prepend-icon="mdi-image-outline"
+          prepend-icon="mdi-export-variant"
           size="small"
           variant="tonal"
           @click="showExportDialog = true"
         >
-          导出为图片
+          导出
         </v-btn>
       </div>
 

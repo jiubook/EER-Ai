@@ -20,6 +20,7 @@ from endfield_essence_recognizer.dependencies import get_exports_dir_dep
 from endfield_essence_recognizer.schemas.matrix_export import (
     TreasureMatrixExportRequest,
     TreasureMatrixExportResponse,
+    TreasureMatrixTableExportRequest,
 )
 from endfield_essence_recognizer.services.profile_manager import ProfileManager
 from endfield_essence_recognizer.utils.log import logger
@@ -95,6 +96,48 @@ async def _open_directory(directory: Path) -> None:
         await asyncio.create_subprocess_exec("xdg-open", str(directory))
 
 
+def _export_file_name(profile_name: str, extension: str) -> str:
+    """
+    拼导出文件名：账号名清洗后加时间戳。
+
+    文件名完全由后端拼接，多次导出天然不覆盖；前端不参与命名，杜绝路径穿越。
+    扩展名由调用方从白名单里选定，不接受任意输入。
+
+    Args:
+        profile_name: 当前激活的账号名称。
+        extension: 不含点号的文件扩展名。
+
+    Returns:
+        不含目录的文件名。
+    """
+    stem = _safe_file_stem(profile_name)
+    return f"{stem}_{datetime.now():%Y%m%d-%H%M%S}.{extension}"
+
+
+async def _open_export_folder(exports_dir: Path, open_folder: bool) -> str | None:
+    """
+    按需在文件管理器中打开导出目录。
+
+    打开失败不能把「已经落盘成功」报成失败，所以这里只回报错误描述，
+    由调用方决定怎么措辞。
+
+    Args:
+        exports_dir: 导出目录。
+        open_folder: 是否打开。
+
+    Returns:
+        无需打开或打开成功时为 None，失败时为错误描述。
+    """
+    if not open_folder:
+        return None
+    try:
+        await _open_directory(exports_dir)
+    except Exception as e:
+        logger.exception(f"打开导出目录时出错：{e}")
+        return str(e)
+    return None
+
+
 @router.post(
     "/treasure_matrix",
     description="保存宝藏基质导出图片到本地，返回文件路径和文件名",
@@ -118,21 +161,16 @@ async def export_treasure_matrix(
 
         # 文件名完全由后端拼接：账号名清洗后加时间戳，多次导出天然不覆盖，
         # 前端不参与命名，杜绝路径穿越。
-        stem = _safe_file_stem(manager.get_active_profile_name())
-        file_name = f"{stem}_{datetime.now():%Y%m%d-%H%M%S}.{extension}"
+        file_name = _export_file_name(manager.get_active_profile_name(), extension)
         save_path = exports_dir / file_name
         await asyncio.to_thread(exports_dir.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(save_path.write_bytes, raw)
         logger.info(f"已保存宝藏基质导出图片：{save_path}")
 
         message = "导出图片已保存。"
-        if request.open_folder:
-            # 打开文件夹失败不能把"已经落盘成功"报成失败，降级成提示即可
-            try:
-                await _open_directory(exports_dir)
-            except Exception as e:
-                logger.exception(f"打开导出目录时出错：{e}")
-                message = f"导出图片已保存，但打开文件夹失败：{e}"
+        open_failure = await _open_export_folder(exports_dir, request.open_folder)
+        if open_failure is not None:
+            message = f"导出图片已保存，但打开文件夹失败：{open_failure}"
 
         return TreasureMatrixExportResponse(
             success=True,
@@ -142,6 +180,54 @@ async def export_treasure_matrix(
         )
     except Exception as e:
         logger.exception(f"保存宝藏基质导出图片失败：{e}")
+        return TreasureMatrixExportResponse(
+            success=False,
+            message=str(e),
+            file_path=None,
+            file_name=None,
+        )
+
+
+@router.post(
+    "/treasure_matrix/table",
+    description="保存宝藏基质导出表格（CSV/JSON）到本地，返回文件路径和文件名",
+)
+async def export_treasure_matrix_table(
+    request: TreasureMatrixTableExportRequest,
+    exports_dir: Path = Depends(get_exports_dir_dep),
+    manager: ProfileManager = Depends(get_profile_manager),
+) -> TreasureMatrixExportResponse:
+    """接收前端序列化好的表格文本并落盘，可选地打开所在文件夹。"""
+    try:
+        content = request.content
+        # 扩展名只取 format 的字面量白名单，客户端无法影响落盘路径
+        if request.format == "csv":
+            # Excel 只有在文件开头见到 UTF-8 BOM 才按 UTF-8 解析，
+            # 否则中文按系统默认编码打开是乱码。JSON 不加，避免解析器把 BOM 当非法字符。
+            content = f"\ufeff{content}"
+
+        file_name = _export_file_name(manager.get_active_profile_name(), request.format)
+        save_path = exports_dir / file_name
+        await asyncio.to_thread(exports_dir.mkdir, parents=True, exist_ok=True)
+        # newline="" 关闭换行符转换：CSV 已用 CRLF 分行，默认转换会把它写成 CRCRLF
+        await asyncio.to_thread(
+            save_path.write_text, content, encoding="utf-8", newline=""
+        )
+        logger.info(f"已保存宝藏基质导出表格：{save_path}")
+
+        message = "导出表格已保存。"
+        open_failure = await _open_export_folder(exports_dir, request.open_folder)
+        if open_failure is not None:
+            message = f"导出表格已保存，但打开文件夹失败：{open_failure}"
+
+        return TreasureMatrixExportResponse(
+            success=True,
+            message=message,
+            file_path=str(save_path),
+            file_name=file_name,
+        )
+    except Exception as e:
+        logger.exception(f"保存宝藏基质导出表格失败：{e}")
         return TreasureMatrixExportResponse(
             success=False,
             message=str(e),
